@@ -1,0 +1,22 @@
+{
+	"name": "dartsx-vite-plugin",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc -b"
+	},
+	"dependencies": {
+		"dartsx": "workspace:*"
+	},
+	"devDependencies": {
+		"typescript": "^5.8.2",
+		"vite": "^6.2.3"
+	}
+}

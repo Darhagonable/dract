@@ -16,4 +16,4 @@ using signals with state and derived keywords.
 
 effects with only explicit dependencies.
 
-inspired by React, SolidJS, Svelte, Vue.
+inspired by React, SolidJS, Svelte, RippleTS, Vue.

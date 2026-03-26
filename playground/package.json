@@ -1,0 +1,17 @@
+{
+	"name": "dartsx-playground",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build"
+	},
+	"dependencies": {
+		"dartsx": "workspace:*"
+	},
+	"devDependencies": {
+		"dartsx-vite-plugin": "workspace:*",
+		"vite": "^6.2.3"
+	}
+}
