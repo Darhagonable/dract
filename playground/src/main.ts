@@ -1,3 +1,4 @@
-// Playground entry point
-// Once the compiler and runtime are implemented, this will import and mount a DarTsx component.
-console.log('DarTsx playground running');
+import { mount } from 'dartsx/internal/client';
+import Counter from './Counter.tsx';
+
+mount(Counter, document.getElementById('app')!);
