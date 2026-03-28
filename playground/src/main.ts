@@ -1,4 +1,4 @@
-import { mount } from 'dartsx/internal/client';
+import { mount } from 'dartsx';
 import Counter from './Counter.tsx';
 
-mount(Counter, document.getElementById('app')!);
+mount(Counter, document.querySelector('app-root')!);

@@ -1,19 +1,50 @@
 // ── Re-exports from reactivity ─────────────────────────────────────
 
-export { state, set, prop, type Signal, type Subscriber, setSubscriber, getSubscriber, scheduleEffect, getFlushPromise } from './reactivity/state.js';
-export { derived, getDerived, type DerivedSignal } from './reactivity/derived.js';
-export { effect } from './reactivity/effect.js';
+export { state, set, prop, type Signal, type Subscriber, setSubscriber, getSubscriber, scheduleEffect, getFlushPromise } from './reactivity/state';
+export { derived, getDerived, type DerivedSignal } from './reactivity/derived';
+export { effect } from './reactivity/effect';
+
+// ── Re-exports from blocks ─────────────────────────────────────────
+
+export { if_block } from './blocks/if';
+export { for_block } from './blocks/for';
+export { switch_block, type SwitchCase } from './blocks/switch';
+export { try_block } from './blocks/try';
 
 // ── Re-exports from bindings ───────────────────────────────────────
 
-export { bindValue } from './bindings/input.js';
+export { bindValue } from './bindings/input';
 
 // ── Imports needed internally ──────────────────────────────────────
 
-import { state, set, prop, get as signalGet, type Signal, scheduleEffect, getFlushPromise } from './reactivity/state.js';
-import { derived, getDerived, type DerivedSignal } from './reactivity/derived.js';
-import { effect } from './reactivity/effect.js';
-import { bindValue } from './bindings/input.js';
+import { state, set, prop, get as signalGet, type Signal, scheduleEffect, getFlushPromise } from './reactivity/state';
+import { derived, getDerived, type DerivedSignal } from './reactivity/derived';
+import { effect } from './reactivity/effect';
+import { if_block } from './blocks/if';
+import { for_block } from './blocks/for';
+import { switch_block } from './blocks/switch';
+import { try_block } from './blocks/try';
+import { bindValue } from './bindings/input';
+
+// ── Component context (for lifecycle hooks) ────────────────────────
+
+export interface ComponentContext {
+    onMountCallbacks: (() => void | (() => void))[];
+    onDestroyCallbacks: (() => void)[];
+    cleanupCallbacks: (() => void)[];
+}
+
+let currentComponent: ComponentContext | null = null;
+
+export function getCurrentComponent(): ComponentContext | null {
+    return currentComponent;
+}
+
+export function setCurrentComponent(ctx: ComponentContext | null): ComponentContext | null {
+    const prev = currentComponent;
+    currentComponent = ctx;
+    return prev;
+}
 
 // ── Unified get — works for both Signal and DerivedSignal ──────────
 
@@ -103,11 +134,16 @@ export function setText(node: Node, value: string): void {
     node.textContent = value;
 }
 
-// ── Append nodes to anchor ─────────────────────────────────────────
+// ── Append nodes before anchor ─────────────────────────────────────
 
+/**
+ * Insert nodes into the DOM before the anchor node.
+ * The anchor is a comment marker; nodes are inserted as siblings before it.
+ */
 export function append(anchor: Node, ...nodes: Node[]): void {
-    for (const node of nodes) {
-        anchor.appendChild(node);
+    const parent = anchor.parentNode!;
+    for (const n of nodes) {
+        parent.insertBefore(n, anchor);
     }
 }
 
@@ -157,15 +193,6 @@ export function delegated(eventType: string, element: Element, handler: (e: Even
     (element as any)[`__${eventType}`] = handler;
 }
 
-// ── Component mounting helper ──────────────────────────────────────
-
-/**
- * Mount a component to a DOM node.
- */
-export function mount(component: (anchor: Node) => void, target: Element): void {
-    component(target);
-}
-
 // ── Attribute / prop setting ───────────────────────────────────────
 
 export function attr(element: Element, name: string, value: any): void {
@@ -195,9 +222,12 @@ export default {
     setText,
     append,
     delegated,
-    mount,
     attr,
     bindValue,
+    if: if_block,
+    for: for_block,
+    switch: switch_block,
+    try: try_block,
     scheduleEffect,
     getFlushPromise,
 };

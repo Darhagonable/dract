@@ -78,21 +78,19 @@ function notifySubscribers(subs: Set<Subscriber>): void {
 
 // ── $.prop(propsSignalOrGetter, defaultValue?) ─────────────────────
 
-export function prop<T>(getter: (() => T) | Signal<T>, defaultValue?: T): Signal<T> {
+import { derived, type DerivedSignal } from './derived';
+
+export function prop<T>(getter: (() => T) | Signal<T>, defaultValue?: T): DerivedSignal<T> | Signal<T> {
     // If it's already a signal (bind prop), return it as-is
     if (getter && typeof getter === 'object' && 'v' in getter) {
         return getter as Signal<T>;
     }
-    // Otherwise wrap the getter in a derived-like signal
+    // Wrap the getter in a derived signal for reactivity
     const fn = getter as () => T;
-    const sig = state<T>(undefined as T);
-    const read = () => {
+    return derived(() => {
         const val = fn();
-        return val === undefined && defaultValue !== undefined ? defaultValue : val;
-    };
-    // Initial read
-    sig.v = read();
-    return sig;
+        return val === undefined && defaultValue !== undefined ? defaultValue! : val;
+    });
 }
 
 // ── Effect scheduling (batched microtask) ──────────────────────────

@@ -3,9 +3,9 @@
  *
  * Pipeline: preprocess → parse (OXC) → analyze → transform → output JS
  */
-import { preprocess, parse } from './phases/1-parse/index.js';
-import { analyze } from './phases/2-analyze/index.js';
-import { transform } from './phases/3-transform/index.js';
+import { preprocess, parse } from './phases/1-parse';
+import { analyze } from './phases/2-analyze';
+import { transform } from './phases/3-transform';
 
 export interface CompileResult {
     /** The generated JavaScript code */

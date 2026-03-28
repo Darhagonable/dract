@@ -346,7 +346,7 @@ export component MultiLogger() {
   state foo = "foo";
   state bar = "bar";
 
-  effect([foo, bar], ([foo, bar], [prevFoo, prevBar]) => {
+  effect([foo, bar], ([foo, prevFoo], [bar, prevBar]) => {
     console.log(`foo: ${prevFoo} -> ${foo}, bar: ${prevBar} -> ${bar}`);
   });
 

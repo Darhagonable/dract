@@ -4,7 +4,7 @@
  * Walks the OXC AST and, using metadata from the pre-processor,
  * produces an Intermediate Representation (IR) for each component.
  */
-import type { ComponentMeta, PreprocessResult } from '../1-parse/index.js';
+import type { ComponentMeta, PreprocessResult } from '../1-parse';
 
 // ── IR Types ───────────────────────────────────────────────────────
 
@@ -33,7 +33,9 @@ export type JSXNodeIR =
     | JSXElementIR
     | JSXFragmentIR
     | JSXTextIR
-    | JSXExpressionIR;
+    | JSXExpressionIR
+    | JSXIfBlockIR
+    | JSXForBlockIR;
 
 export interface JSXElementIR {
     type: 'element';
@@ -58,6 +60,30 @@ export interface JSXExpressionIR {
     type: 'expression';
     /** Raw source text of the expression */
     raw: string;
+}
+
+export interface JSXIfBlockIR {
+    type: 'if_block';
+    /** Raw condition expression */
+    condition: string;
+    /** Children for the true branch */
+    trueBranch: JSXNodeIR[];
+    /** Children for the false branch (null if no else) */
+    falseBranch: JSXNodeIR[] | null;
+}
+
+export interface JSXForBlockIR {
+    type: 'for_block';
+    /** Raw collection expression */
+    collection: string;
+    /** Loop item variable name */
+    itemName: string;
+    /** Optional index variable name */
+    indexName: string | null;
+    /** Optional key expression */
+    keyExpr: string | null;
+    /** Children for the loop body */
+    body: JSXNodeIR[];
 }
 
 export interface JSXAttrIR {
@@ -139,7 +165,12 @@ function analyzeComponent(
 
     // Analyze params
     for (const param of fn.params) {
-        params.push(analyzeParam(param, source));
+        const p = analyzeParam(param, source);
+        params.push(p);
+        // All non-rest props are reactive (wrapped in $.prop → derived signal)
+        if (!p.isRest) {
+            reactiveVars.add(p.name);
+        }
     }
 
     // Walk the function body
@@ -224,11 +255,29 @@ function analyzeJSXNode(node: any, source: string): JSXNodeIR {
             return analyzeJSXFragment(node, source);
         case 'JSXText':
             return { type: 'text', value: node.value };
-        case 'JSXExpressionContainer':
+        case 'JSXExpressionContainer': {
+            const expr = node.expression;
+            // Detect __if() calls
+            if (
+                expr.type === 'CallExpression' &&
+                expr.callee?.type === 'Identifier' &&
+                expr.callee.name === '__if'
+            ) {
+                return analyzeIfBlock(expr, source);
+            }
+            // Detect __for() calls
+            if (
+                expr.type === 'CallExpression' &&
+                expr.callee?.type === 'Identifier' &&
+                expr.callee.name === '__for'
+            ) {
+                return analyzeForBlock(expr, source);
+            }
             return {
                 type: 'expression',
-                raw: source.slice(node.expression.start, node.expression.end),
+                raw: source.slice(expr.start, expr.end),
             };
+        }
         default:
             // Fallback: treat as text
             return { type: 'text', value: '' };
@@ -344,4 +393,69 @@ function getAttrValue(attr: any, source: string): string | null {
         return source.slice(attr.value.expression.start, attr.value.expression.end);
     }
     return source.slice(attr.value.start, attr.value.end);
+}
+
+// ── Control flow block analysis ────────────────────────────────────
+
+function unwrapParen(node: any): any {
+    while (node?.type === 'ParenthesizedExpression') node = node.expression;
+    return node;
+}
+
+function extractJSXChildren(node: any, source: string): JSXNodeIR[] {
+    const jsx = unwrapParen(node);
+    if (!jsx) return [];
+    if (jsx.type === 'JSXFragment') {
+        return (jsx.children || []).map((c: any) => analyzeJSXNode(c, source));
+    }
+    const analyzed = analyzeJSXNode(jsx, source);
+    return analyzed.type === 'fragment' ? analyzed.children : [analyzed];
+}
+
+function analyzeIfBlock(callExpr: any, source: string): JSXIfBlockIR {
+    const args = callExpr.arguments;
+
+    // First arg: () => (condition)
+    const condArrow = args[0];
+    const condBody = unwrapParen(condArrow?.body);
+    const condition = condBody ? source.slice(condBody.start, condBody.end) : 'true';
+
+    // Second arg: () => (<>trueBranch</>)
+    const trueArrow = args[1];
+    const trueBranch = trueArrow ? extractJSXChildren(trueArrow.body, source) : [];
+
+    // Third arg (optional): () => (<>falseBranch</>)
+    let falseBranch: JSXNodeIR[] | null = null;
+    if (args.length > 2) {
+        const falseArrow = args[2];
+        falseBranch = falseArrow ? extractJSXChildren(falseArrow.body, source) : null;
+    }
+
+    return { type: 'if_block', condition, trueBranch, falseBranch };
+}
+
+function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
+    const args = callExpr.arguments;
+
+    // First arg: () => (collection)
+    const collArrow = args[0];
+    const collBody = unwrapParen(collArrow?.body);
+    const collection = collBody ? source.slice(collBody.start, collBody.end) : '[]';
+
+    // Second arg: (item, index?) => (<>body</>)
+    const bodyArrow = args[1];
+    const params = bodyArrow?.params || [];
+    const itemName = params[0]?.name || 'item';
+    const indexName = params.length > 1 ? params[1]?.name : null;
+    const body = bodyArrow ? extractJSXChildren(bodyArrow.body, source) : [];
+
+    // Third arg (optional): (item) => (key)
+    let keyExpr: string | null = null;
+    if (args.length > 2) {
+        const keyArrow = args[2];
+        const keyBody = unwrapParen(keyArrow?.body);
+        keyExpr = keyBody ? source.slice(keyBody.start, keyBody.end) : null;
+    }
+
+    return { type: 'for_block', collection, itemName, indexName, keyExpr, body };
 }

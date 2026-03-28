@@ -146,7 +146,11 @@ export function transformEventHandler(raw: string, reactiveVars: Set<string>): s
             const bodyStart = arrow.body.start - WRAPPER_OFFSET;
             const bodyEnd = arrow.body.end - WRAPPER_OFFSET;
             const bodySource = trimmed.slice(bodyStart, bodyEnd);
-            const transformedBody = transformExpr(bodySource, arrow.body, reactiveVars);
+            // Re-parse body so span offsets are relative to bodySource
+            const bodyAST = parseExpression(bodySource);
+            const transformedBody = bodyAST
+                ? transformExpr(bodySource, bodyAST as ASTNode, reactiveVars)
+                : wrapReadsInGet(bodySource, reactiveVars);
             return `${prefix} ${transformedBody}`;
         }
         // Block body — just wrap reads
@@ -209,11 +213,104 @@ function transformExpr(source: string, node: ASTNode, reactiveVars: Set<string>)
         const parts = seq.expressions.map((expr: ASTNode) => {
             const s = expr.start - WRAPPER_OFFSET;
             const e = expr.end - WRAPPER_OFFSET;
-            return transformExpr(source.slice(s, e), expr, reactiveVars);
+            const subSource = source.slice(s, e);
+            // Re-parse each sub-expression for correct span offsets
+            const subAST = parseExpression(subSource);
+            return subAST
+                ? transformExpr(subSource, subAST as ASTNode, reactiveVars)
+                : wrapReadsInGet(subSource, reactiveVars);
         });
         return parts.join(', ');
     }
 
     // Default: just wrap reads
     return wrapReadsInGet(source, reactiveVars);
+}
+
+// ── Body statement transformer ─────────────────────────────────────
+
+/**
+ * Transform a body statement string, converting reactive variable reads to
+ * `$.get()` and assignments to `$.set()`. Handles special cases like
+ * `effect(dep, callback)` where the dep argument must remain a Signal object.
+ */
+export function transformBodyStatement(stmt: string, reactiveVars: Set<string>): string {
+    if (reactiveVars.size === 0) return stmt;
+
+    const result = parseSync('stmt.tsx', stmt, {
+        sourceType: 'module',
+        lang: 'tsx',
+    });
+    if (result.errors.length > 0) return stmt;
+
+    const replacements: Replacement[] = [];
+    const coveredSpans: { start: number; end: number }[] = [];
+
+    // Collect exclusion zones: first argument of effect() calls
+    // (deps must remain as Signal objects, not unwrapped via $.get())
+    const exclusionZones: { start: number; end: number }[] = [];
+    walk(result.program as ASTNode, (node) => {
+        if (
+            node.type === 'CallExpression' &&
+            node.callee?.type === 'Identifier' &&
+            node.callee.name === 'effect' &&
+            node.arguments?.length >= 2
+        ) {
+            exclusionZones.push({ start: node.arguments[0].start, end: node.arguments[0].end });
+        }
+    });
+
+    // Pass 1: Assignments and updates to reactive vars
+    walk(result.program as ASTNode, (node, parent, key) => {
+        if (node.type === 'AssignmentExpression') {
+            const left = node.left;
+            if (left?.type === 'Identifier' && reactiveVars.has(left.name)) {
+                const name = left.name;
+                const rhsSource = stmt.slice(node.right.start, node.right.end);
+                const wrappedRhs = wrapReadsInGet(rhsSource, reactiveVars);
+
+                const text = node.operator === '='
+                    ? `$.set(${name}, ${wrappedRhs})`
+                    : `$.set(${name}, $.get(${name}) ${node.operator.slice(0, -1)} ${wrappedRhs})`;
+
+                replacements.push({ start: node.start, end: node.end, text });
+                coveredSpans.push({ start: node.start, end: node.end });
+            }
+        }
+
+        if (node.type === 'UpdateExpression') {
+            const arg = node.argument;
+            if (arg?.type === 'Identifier' && reactiveVars.has(arg.name)) {
+                const delta = node.operator === '++' ? '+ 1' : '- 1';
+                replacements.push({
+                    start: node.start,
+                    end: node.end,
+                    text: `$.set(${arg.name}, $.get(${arg.name}) ${delta})`,
+                });
+                coveredSpans.push({ start: node.start, end: node.end });
+            }
+        }
+    });
+
+    // Pass 2: Identifier reads not already covered by assignment/update transforms
+    walk(result.program as ASTNode, (node, parent, key) => {
+        if (node.type !== 'Identifier' || !reactiveVars.has(node.name)) return;
+        // Skip assignment LHS
+        if (parent?.type === 'AssignmentExpression' && key === 'left') return;
+        // Skip update argument
+        if (parent?.type === 'UpdateExpression') return;
+        // Skip non-computed member property (obj.x)
+        if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) return;
+
+        const s = node.start;
+        const e = node.end;
+        // Skip if inside a span already covered by Pass 1
+        if (coveredSpans.some((c) => s >= c.start && e <= c.end)) return;
+        // Skip if inside an exclusion zone (effect dep argument)
+        if (exclusionZones.some((z) => s >= z.start && e <= z.end)) return;
+
+        replacements.push({ start: s, end: e, text: `$.get(${node.name})` });
+    });
+
+    return replacements.length > 0 ? applyReplacements(stmt, replacements) : stmt;
 }

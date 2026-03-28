@@ -1,4 +1,4 @@
-import { type Subscriber, setSubscriber } from './state.js';
+import { type Subscriber, setSubscriber } from './state';
 
 // ── effect — granular render effect that re-runs on dependency changes ─
 

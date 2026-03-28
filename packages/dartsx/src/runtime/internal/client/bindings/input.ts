@@ -1,4 +1,4 @@
-import { type Signal, get, set, type Subscriber, setSubscriber } from '../reactivity/state.js';
+import { type Signal, get, set, type Subscriber, setSubscriber } from '../reactivity/state';
 
 /**
  * Two-way bind an input element's value to a signal.

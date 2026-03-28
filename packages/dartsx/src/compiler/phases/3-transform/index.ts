@@ -9,9 +9,11 @@ import type {
     JSXNodeIR,
     JSXElementIR,
     JSXFragmentIR,
+    JSXIfBlockIR,
+    JSXForBlockIR,
     JSXAttrIR,
-} from '../2-analyze/index.js';
-import { wrapReadsInGet, transformEventHandler } from './expr.js';
+} from '../2-analyze';
+import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from './expr';
 
 // ── Main entry ─────────────────────────────────────────────────────
 
@@ -117,12 +119,10 @@ function transformComponent(comp: ComponentIR, ctx: ModuleContext): string {
         for (const p of comp.params) {
             if (p.isRest) {
                 lines.push(`    let ${p.name} = $$props; // TODO: rest props`);
-            } else if (p.isBind) {
-                lines.push(`    let ${p.name} = $.prop($$props.${p.name});`);
             } else if (p.defaultValue) {
                 lines.push(`    let ${p.name} = $.prop($$props.${p.name}, ${p.defaultValue});`);
             } else {
-                lines.push(`    let ${p.name} = $$props.${p.name};`);
+                lines.push(`    let ${p.name} = $.prop($$props.${p.name});`);
             }
         }
     }
@@ -131,31 +131,81 @@ function transformComponent(comp: ComponentIR, ctx: ModuleContext): string {
         lines.push('');
     }
 
-    // Preserved body statements
+    // Preserved body statements (with reactive transforms)
     for (const stmt of comp.bodyStatements) {
-        lines.push(`    ${stmt}`);
+        lines.push(`    ${transformBodyStatement(stmt, comp.reactiveVars)}`);
     }
 
     // Generate element factories and collect the top-level calls for append
-    const appendArgs: string[] = [];
+    const rootChildren = comp.jsx.type === 'fragment' ? comp.jsx.children : [comp.jsx];
+    const hasDynamicRoot = rootChildren.some(
+        (c) =>
+            (c.type === 'element' && (c as JSXElementIR).isComponent) ||
+            c.type === 'if_block' ||
+            c.type === 'for_block',
+    );
 
-    if (comp.jsx.type === 'fragment') {
-        for (const child of comp.jsx.children) {
-            if (child.type === 'element') {
-                const factoryCode = emitElementFactory(child as JSXElementIR, comp.reactiveVars, ctx, nameCounter, '    ');
+    if (hasDynamicRoot) {
+        // Emit in order — individual appends for elements, direct calls for components/blocks
+        lines.push('');
+        for (const child of rootChildren) {
+            if (child.type === 'element' && (child as JSXElementIR).isComponent) {
+                const el = child as JSXElementIR;
+                const propsStr = buildComponentProps(el, comp.reactiveVars);
+                if (propsStr) {
+                    lines.push(`    ${el.tag}($$anchor, ${propsStr});`);
+                } else {
+                    lines.push(`    ${el.tag}($$anchor);`);
+                }
+            } else if (child.type === 'if_block') {
+                emitIfBlock(child as JSXIfBlockIR, '$$anchor', comp.reactiveVars, ctx, nameCounter, lines, '    ');
+            } else if (child.type === 'for_block') {
+                emitForBlock(child as JSXForBlockIR, '$$anchor', comp.reactiveVars, ctx, nameCounter, lines, '    ');
+            } else if (child.type === 'element') {
+                const factoryCode = emitElementFactory(
+                    child as JSXElementIR,
+                    comp.reactiveVars,
+                    ctx,
+                    nameCounter,
+                    '    ',
+                );
                 lines.push(factoryCode.declaration);
-                appendArgs.push(factoryCode.callExpr);
+                lines.push(`    $.append($$anchor, ${factoryCode.callExpr});`);
             }
-            // text-only children at fragment root are ignored for now (whitespace)
         }
-    } else if (comp.jsx.type === 'element') {
-        const factoryCode = emitElementFactory(comp.jsx as JSXElementIR, comp.reactiveVars, ctx, nameCounter, '    ');
-        lines.push(factoryCode.declaration);
-        appendArgs.push(factoryCode.callExpr);
+    } else {
+        // No components — use batch append
+        const appendArgs: string[] = [];
+        if (comp.jsx.type === 'fragment') {
+            for (const child of comp.jsx.children) {
+                if (child.type === 'element') {
+                    const factoryCode = emitElementFactory(
+                        child as JSXElementIR,
+                        comp.reactiveVars,
+                        ctx,
+                        nameCounter,
+                        '    ',
+                    );
+                    lines.push(factoryCode.declaration);
+                    appendArgs.push(factoryCode.callExpr);
+                }
+            }
+        } else if (comp.jsx.type === 'element') {
+            const factoryCode = emitElementFactory(
+                comp.jsx as JSXElementIR,
+                comp.reactiveVars,
+                ctx,
+                nameCounter,
+                '    ',
+            );
+            lines.push(factoryCode.declaration);
+            appendArgs.push(factoryCode.callExpr);
+        }
+
+        lines.push('');
+        lines.push(`    $.append($$anchor, ${appendArgs.join(', ')});`);
     }
 
-    lines.push('');
-    lines.push(`    $.append($$anchor, ${appendArgs.join(', ')});`);
     lines.push('}');
 
     return lines.join('\n');
@@ -184,42 +234,36 @@ function emitElementFactory(
 
     const bodyLines: string[] = [];
 
-    // Dynamic text content
-    const hasDynamicText = node.children.some((c) => c.type === 'expression');
-    if (hasDynamicText && !node.selfClosing) {
-        bodyLines.push(`${inner}const text = $.child(el);`);
-        const textExpr = buildTextTemplateLiteral(node.children, reactiveVars);
-        bodyLines.push(`${inner}$.effect(() => {`);
-        bodyLines.push(`${inner}    text.data = ${textExpr};`);
-        bodyLines.push(`${inner}});`);
-    }
+    if (!node.selfClosing) {
+        const hasComponentChild = node.children.some(
+            (c) => c.type === 'element' && (c as JSXElementIR).isComponent,
+        );
+        const hasElementChild = node.children.some(
+            (c) => c.type === 'element' && !(c as JSXElementIR).isComponent,
+        );
+        const hasControlFlow = node.children.some(
+            (c) => c.type === 'if_block' || c.type === 'for_block',
+        );
+        const hasDynamicText = node.children.some((c) => c.type === 'expression');
 
-    // Static-only child elements (nested)
-    if (!hasDynamicText && !node.selfClosing) {
-        const childElements = node.children.filter((c) => c.type === 'element') as JSXElementIR[];
-        if (childElements.length > 0) {
-            let prevChildVar: string | null = null;
-            for (let i = 0; i < childElements.length; i++) {
-                const childEl = childElements[i];
-                const childVar = getName(nameCounter, `${childEl.tag}_el`);
-                if (i === 0) {
-                    bodyLines.push(`${inner}const ${childVar} = $.firstChild(el);`);
-                } else {
-                    bodyLines.push(`${inner}const ${childVar} = $.sibling(${prevChildVar}, 2);`);
-                }
-
-                const childHasDynamic = childEl.children.some((c) => c.type === 'expression');
-                if (childHasDynamic) {
-                    bodyLines.push(`${inner}const ${childVar}_text = $.child(${childVar});`);
-                    const childTextExpr = buildTextTemplateLiteral(childEl.children, reactiveVars);
-                    bodyLines.push(`${inner}$.effect(() => {`);
-                    bodyLines.push(`${inner}    ${childVar}_text.data = ${childTextExpr};`);
-                    bodyLines.push(`${inner}});`);
-                }
-
-                emitAttributeBindings(childEl, childVar, reactiveVars, bodyLines, inner);
-                prevChildVar = childVar;
-            }
+        if (!hasComponentChild && !hasElementChild && !hasControlFlow && hasDynamicText) {
+            // Pure text/expression children — single text node + effect
+            bodyLines.push(`${inner}const text = $.child(el);`);
+            const textExpr = buildTextTemplateLiteral(node.children, reactiveVars);
+            bodyLines.push(`${inner}$.effect(() => {`);
+            bodyLines.push(`${inner}    text.data = ${textExpr};`);
+            bodyLines.push(`${inner}});`);
+        } else if (hasElementChild || hasComponentChild || hasControlFlow) {
+            // Mixed children — sequential navigation
+            emitChildrenSequential(
+                node.children,
+                'el',
+                reactiveVars,
+                ctx,
+                nameCounter,
+                bodyLines,
+                inner,
+            );
         }
     }
 
@@ -241,6 +285,277 @@ function emitElementFactory(
     }
 
     return { declaration: decl, callExpr: factoryName };
+}
+
+// ── Sequential children processing (handles element + component mix) ─
+
+function emitChildrenSequential(
+    children: JSXNodeIR[],
+    parentVar: string,
+    reactiveVars: Set<string>,
+    ctx: ModuleContext,
+    nameCounter: NameCounter,
+    bodyLines: string[],
+    indent: string,
+): void {
+    // Filter out whitespace-only text
+    const templateNodes: JSXNodeIR[] = [];
+    for (const child of children) {
+        if (child.type === 'text') {
+            const normalized = normalizeJSXTextForTemplate(child.value);
+            if (normalized.length > 0) templateNodes.push(child);
+        } else {
+            templateNodes.push(child);
+        }
+    }
+
+    let prevVar: string | null = null;
+
+    for (let i = 0; i < templateNodes.length; i++) {
+        const child = templateNodes[i];
+
+        if (child.type === 'text') {
+            // Static text in template — occupies a DOM position, track for navigation
+            if (i < templateNodes.length - 1) {
+                const textVar = getName(nameCounter, 'text_node');
+                if (prevVar === null) {
+                    bodyLines.push(`${indent}const ${textVar} = $.firstChild(${parentVar});`);
+                } else {
+                    bodyLines.push(`${indent}const ${textVar} = $.sibling(${prevVar}, 1);`);
+                }
+                prevVar = textVar;
+            }
+            continue;
+        }
+
+        if (child.type === 'expression') {
+            // Dynamic expression — placeholder text node (' ') is in the template
+            const textVar = getName(nameCounter, 'text');
+            if (prevVar === null) {
+                bodyLines.push(`${indent}const ${textVar} = $.firstChild(${parentVar});`);
+            } else {
+                bodyLines.push(`${indent}const ${textVar} = $.sibling(${prevVar}, 1);`);
+            }
+            const textExpr = wrapReadsInGet(child.raw, reactiveVars);
+            bodyLines.push(`${indent}$.effect(() => {`);
+            bodyLines.push(`${indent}    ${textVar}.data = \`\${${textExpr} ?? ''}\`;`);
+            bodyLines.push(`${indent}});`);
+            prevVar = textVar;
+            continue;
+        }
+
+        if (child.type === 'element') {
+            const el = child as JSXElementIR;
+
+            if (el.isComponent) {
+                // Component — navigate to <!> anchor and call
+                const anchorVar = getName(nameCounter, 'anchor');
+                if (prevVar === null) {
+                    bodyLines.push(`${indent}const ${anchorVar} = $.firstChild(${parentVar});`);
+                } else {
+                    bodyLines.push(`${indent}const ${anchorVar} = $.sibling(${prevVar}, 1);`);
+                }
+                const propsStr = buildComponentProps(el, reactiveVars);
+                if (propsStr) {
+                    bodyLines.push(`${indent}${el.tag}(${anchorVar}, ${propsStr});`);
+                } else {
+                    bodyLines.push(`${indent}${el.tag}(${anchorVar});`);
+                }
+                prevVar = anchorVar;
+            } else {
+                // Native element — baked into template, navigate to it
+                const childVar = getName(nameCounter, `${el.tag}_el`);
+                if (prevVar === null) {
+                    bodyLines.push(`${indent}const ${childVar} = $.firstChild(${parentVar});`);
+                } else {
+                    bodyLines.push(`${indent}const ${childVar} = $.sibling(${prevVar}, 1);`);
+                }
+
+                const childHasDynamic = el.children.some((c) => c.type === 'expression');
+                const childHasComponent = el.children.some(
+                    (c) => c.type === 'element' && (c as JSXElementIR).isComponent,
+                );
+                const childHasElement = el.children.some(
+                    (c) => c.type === 'element' && !(c as JSXElementIR).isComponent,
+                );
+
+                if (!childHasComponent && !childHasElement && childHasDynamic) {
+                    bodyLines.push(`${indent}const ${childVar}_text = $.child(${childVar});`);
+                    const childTextExpr = buildTextTemplateLiteral(el.children, reactiveVars);
+                    bodyLines.push(`${indent}$.effect(() => {`);
+                    bodyLines.push(`${indent}    ${childVar}_text.data = ${childTextExpr};`);
+                    bodyLines.push(`${indent}});`);
+                } else if (childHasElement || childHasComponent) {
+                    emitChildrenSequential(
+                        el.children,
+                        childVar,
+                        reactiveVars,
+                        ctx,
+                        nameCounter,
+                        bodyLines,
+                        indent,
+                    );
+                }
+
+                emitAttributeBindings(el, childVar, reactiveVars, bodyLines, indent);
+                prevVar = childVar;
+            }
+        }
+
+        if (child.type === 'if_block' || child.type === 'for_block') {
+            // Control flow block — navigate to <!> anchor
+            const anchorVar = getName(nameCounter, 'anchor');
+            if (prevVar === null) {
+                bodyLines.push(`${indent}const ${anchorVar} = $.firstChild(${parentVar});`);
+            } else {
+                bodyLines.push(`${indent}const ${anchorVar} = $.sibling(${prevVar}, 1);`);
+            }
+            if (child.type === 'if_block') {
+                emitIfBlock(child as JSXIfBlockIR, anchorVar, reactiveVars, ctx, nameCounter, bodyLines, indent);
+            } else {
+                emitForBlock(child as JSXForBlockIR, anchorVar, reactiveVars, ctx, nameCounter, bodyLines, indent);
+            }
+            prevVar = anchorVar;
+        }
+    }
+}
+
+// ── Build component props object ───────────────────────────────────
+
+function buildComponentProps(node: JSXElementIR, reactiveVars: Set<string>): string | null {
+    const entries: string[] = [];
+
+    for (const attr of node.attributes) {
+        if (attr.kind === 'static' && attr.value !== 'true') {
+            entries.push(`${attr.name}: () => "${escapeAttr(attr.value || '')}"`);
+        } else if (attr.kind === 'static' && attr.value === 'true') {
+            entries.push(`${attr.name}: () => true`);
+        } else if (attr.kind === 'dynamic') {
+            const wrapped = wrapReadsInGet(attr.value || '', reactiveVars);
+            entries.push(`${attr.name}: () => ${wrapped}`);
+        } else if (attr.kind === 'bind' && attr.bindProperty && attr.value) {
+            entries.push(`${attr.bindProperty}: ${attr.value}`);
+        } else if (attr.kind === 'event') {
+            const handler = transformEventHandler(attr.value || '', reactiveVars);
+            entries.push(`${attr.name}: ${handler}`);
+        } else if (attr.kind === 'spread') {
+            entries.push(`...${attr.value}`);
+        }
+    }
+
+    if (entries.length === 0) return null;
+    return `{ ${entries.join(', ')} }`;
+}
+
+// ── If block emission ──────────────────────────────────────────────
+
+function emitIfBlock(
+    node: JSXIfBlockIR,
+    anchorVar: string,
+    reactiveVars: Set<string>,
+    ctx: ModuleContext,
+    nameCounter: NameCounter,
+    lines: string[],
+    indent: string,
+): void {
+    const condExpr = wrapReadsInGet(node.condition, reactiveVars);
+    const inner = indent + '    ';
+
+    // True branch
+    const trueBranchCode = emitBranchBody(
+        node.trueBranch,
+        reactiveVars,
+        ctx,
+        nameCounter,
+        inner,
+    );
+
+    lines.push(`${indent}$.if(${anchorVar}, () => ${condExpr}, ($$anchor) => {`);
+    lines.push(trueBranchCode);
+    if (node.falseBranch) {
+        const falseBranchCode = emitBranchBody(
+            node.falseBranch,
+            reactiveVars,
+            ctx,
+            nameCounter,
+            inner,
+        );
+        lines.push(`${indent}}, ($$anchor) => {`);
+        lines.push(falseBranchCode);
+    }
+    lines.push(`${indent}});`);
+}
+
+// ── For block emission ─────────────────────────────────────────────
+
+function emitForBlock(
+    node: JSXForBlockIR,
+    anchorVar: string,
+    reactiveVars: Set<string>,
+    ctx: ModuleContext,
+    nameCounter: NameCounter,
+    lines: string[],
+    indent: string,
+): void {
+    const collExpr = wrapReadsInGet(node.collection, reactiveVars);
+    const inner = indent + '    ';
+    const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
+
+    const bodyCode = emitBranchBody(node.body, reactiveVars, ctx, nameCounter, inner);
+
+    if (node.keyExpr) {
+        const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars);
+        lines.push(`${indent}$.for(${anchorVar}, () => ${collExpr}, ($$anchor, ${params}) => {`);
+        lines.push(bodyCode);
+        lines.push(`${indent}}, (${node.itemName}) => ${keyExpr});`);
+    } else {
+        lines.push(`${indent}$.for(${anchorVar}, () => ${collExpr}, ($$anchor, ${params}) => {`);
+        lines.push(bodyCode);
+        lines.push(`${indent}});`);
+    }
+}
+
+// ── Branch body emission (shared by if/for) ────────────────────────
+
+function emitBranchBody(
+    children: JSXNodeIR[],
+    reactiveVars: Set<string>,
+    ctx: ModuleContext,
+    nameCounter: NameCounter,
+    indent: string,
+): string {
+    const branchLines: string[] = [];
+    const appendArgs: string[] = [];
+
+    for (const child of children) {
+        if (child.type === 'element' && !(child as JSXElementIR).isComponent) {
+            const factory = emitElementFactory(
+                child as JSXElementIR,
+                reactiveVars,
+                ctx,
+                nameCounter,
+                indent,
+            );
+            branchLines.push(factory.declaration);
+            appendArgs.push(factory.callExpr);
+        } else if (child.type === 'element' && (child as JSXElementIR).isComponent) {
+            // Component in branch — just call with $$anchor
+            const el = child as JSXElementIR;
+            const propsStr = buildComponentProps(el, reactiveVars);
+            if (propsStr) {
+                branchLines.push(`${indent}${el.tag}($$anchor, ${propsStr});`);
+            } else {
+                branchLines.push(`${indent}${el.tag}($$anchor);`);
+            }
+        }
+        // text nodes are whitespace — skip
+    }
+
+    if (appendArgs.length > 0) {
+        branchLines.push(`${indent}$.append($$anchor, ${appendArgs.join(', ')});`);
+    }
+
+    return branchLines.join('\n');
 }
 
 // ── Emit attribute bindings (events, bind:, dynamic attrs) ─────────
@@ -291,14 +606,29 @@ function buildSingleElementHTML(node: JSXElementIR): string {
     html += '>';
 
     const hasDynamic = node.children.some((c) => c.type === 'expression');
-    if (hasDynamic) {
+    const hasStructural = node.children.some(
+        (c) =>
+            (c.type === 'element' && (c as JSXElementIR).isComponent) ||
+            c.type === 'if_block' ||
+            c.type === 'for_block',
+    );
+    const hasNativeElements = node.children.some(
+        (c) => c.type === 'element' && !(c as JSXElementIR).isComponent,
+    );
+    if (hasDynamic && !hasStructural && !hasNativeElements) {
         html += ' '; // text node placeholder
     } else {
         for (const child of node.children) {
             if (child.type === 'text') {
                 html += normalizeJSXTextForTemplate(child.value);
-            } else if (child.type === 'element') {
-                html += buildSingleElementHTML(child);
+            } else if (child.type === 'element' && !(child as JSXElementIR).isComponent) {
+                html += buildSingleElementHTML(child as JSXElementIR);
+            } else if (child.type === 'element' && (child as JSXElementIR).isComponent) {
+                html += '<!>'; // anchor placeholder for component
+            } else if (child.type === 'if_block' || child.type === 'for_block') {
+                html += '<!>'; // anchor placeholder for control flow
+            } else if (child.type === 'expression') {
+                html += ' '; // text node placeholder for expression
             }
         }
     }

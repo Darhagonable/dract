@@ -1,4 +1,4 @@
-import { type Signal, type Subscriber, get as signalGet, getSubscriber, setSubscriber } from './state.js';
+import { type Signal, type Subscriber, get as signalGet, getSubscriber, setSubscriber } from './state';
 
 export interface DerivedSignal<T = any> extends Signal<T> {
     /** The computation function */

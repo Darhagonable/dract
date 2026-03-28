@@ -4,11 +4,14 @@ import {
     get,
     set,
     type Signal,
-} from '../src/runtime/internal/client/reactivity/state.js';
+    getFlushPromise,
+} from '../src/runtime/internal/client/reactivity/state';
 import {
     derived,
     getDerived,
-} from '../src/runtime/internal/client/reactivity/derived.js';
+} from '../src/runtime/internal/client/reactivity/derived';
+import { tick } from '../src/runtime/external/tick';
+import { effect } from '../src/runtime/external/effect';
 
 describe('state', () => {
     it('creates a signal with an initial value', () => {
@@ -107,4 +110,67 @@ describe('derived', () => {
         set(a, 4);
         expect(getDerived(c)).toBe(13); // 4*3 + 1
     });
+});
+
+describe('tick', () => {
+    it('resolves after pending state changes flush', async () => {
+        const count = state(0);
+        let effectRan = false;
+
+        // Create a subscriber that tracks effect execution
+        const sub = {
+            run() { effectRan = true; },
+            deps: new Set<Signal>(),
+            dirty: false,
+        };
+        count.subs.add(sub);
+
+        set(count, 1);
+        expect(effectRan).toBe(false); // not yet — batched
+
+        await tick();
+        // After tick, the flush should have happened and run() was called
+        expect(effectRan).toBe(true);
+    });
+
+    it('resolves immediately when no changes pending', async () => {
+        const before = Date.now();
+        await tick();
+        const after = Date.now();
+        expect(after - before).toBeLessThan(50);
+    });
+});
+
+describe('user effect', () => {
+    it('runs with single dependency', async () => {
+        const count = state(0);
+        const values: number[] = [];
+
+        effect(count, (newVal: number) => {
+            values.push(newVal);
+        });
+
+        expect(values).toEqual([0]); // initial run
+
+        set(count, 5);
+        await tick();
+        expect(values).toEqual([0, 5]);
+    });
+
+    it('runs with multiple dependencies', async () => {
+        const a = state(1);
+        const b = state(2);
+        const results: number[][][] = [];
+
+        effect([a, b], ([newA, oldA], [newB, oldB]) => {
+            results.push([[newA, oldA], [newB, oldB]]);
+        });
+
+        expect(results).toEqual([[[1, 1], [2, 2]]]); // initial: new === old
+
+        set(a, 10);
+        await tick();
+        expect(results).toEqual([[[1, 1], [2, 2]], [[10, 1], [2, 2]]]);
+    });
+
 });

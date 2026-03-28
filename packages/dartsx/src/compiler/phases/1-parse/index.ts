@@ -94,6 +94,9 @@ export function preprocess(source: string): PreprocessResult {
     // 6. Transform `bind:{x}` shorthand → `bind:value={x}`
     code = code.replace(/bind:\{(\w+)\}/g, 'bind:value={$1}');
 
+    // 7. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
+    code = transformControlFlowBlocks(code);
+
     return { code, components, stateVars, derivedVars, stateImports };
 }
 
@@ -177,4 +180,190 @@ function skipTemplateLiteral(code: string, start: number): number {
 
 export function parse(filename: string, code: string) {
     return parseSync(filename, code, { sourceType: 'module', lang: 'tsx' });
+}
+
+// ── Control flow block transformation ──────────────────────────────
+
+interface ControlFlowResult {
+    text: string;
+    end: number;
+}
+
+function transformControlFlowBlocks(code: string): string {
+    let result = '';
+    let i = 0;
+
+    while (i < code.length) {
+        // Skip strings
+        if (code[i] === "'" || code[i] === '"') {
+            const end = skipString(code, i);
+            result += code.slice(i, end);
+            i = end;
+            continue;
+        }
+        if (code[i] === '`') {
+            const end = skipTemplateLiteral(code, i);
+            result += code.slice(i, end);
+            i = end;
+            continue;
+        }
+
+        if (code[i] === '{') {
+            let j = i + 1;
+            while (j < code.length && /\s/.test(code[j])) j++;
+
+            if (/^if\s*\(/.test(code.slice(j))) {
+                const parsed = tryParseIfBlock(code, i);
+                if (parsed) {
+                    result += parsed.text;
+                    i = parsed.end;
+                    continue;
+                }
+            }
+
+            if (/^for\s*\(/.test(code.slice(j))) {
+                const parsed = tryParseForBlock(code, i);
+                if (parsed) {
+                    result += parsed.text;
+                    i = parsed.end;
+                    continue;
+                }
+            }
+        }
+
+        result += code[i];
+        i++;
+    }
+
+    return result;
+}
+
+function tryParseIfBlock(code: string, outerBrace: number): ControlFlowResult | null {
+    // Find the matching brace of the JSX expression container {if (...) {...}}
+    const outerClose = findMatchingBrace(code, outerBrace);
+    const content = code.slice(outerBrace + 1, outerClose).trim();
+
+    if (!content.startsWith('if')) return null;
+
+    // Recursively transform nested control flow blocks first,
+    // so the content becomes valid TSX that OXC can parse.
+    const transformed = transformControlFlowBlocks(content);
+
+    // Parse the transformed if statement with OXC
+    const result = parseSync('if-block.tsx', transformed, {
+        sourceType: 'script',
+        lang: 'tsx',
+    });
+    if (result.errors.length > 0) return null;
+
+    const stmts = result.program.body;
+    if (stmts.length === 0 || stmts[0].type !== 'IfStatement') return null;
+
+    const output = buildIfCall(transformed, stmts[0] as any);
+    return { text: `{${output}}`, end: outerClose + 1 };
+}
+
+/**
+ * Recursively build __if() calls from an OXC IfStatement AST node.
+ * Handles else-if chains naturally through AST recursion.
+ */
+function buildIfCall(source: string, stmt: any): string {
+    const condition = source.slice(stmt.test.start, stmt.test.end);
+    const trueBody = source.slice(stmt.consequent.start + 1, stmt.consequent.end - 1).trim();
+
+    if (stmt.alternate) {
+        if (stmt.alternate.type === 'IfStatement') {
+            // else if — recurse to build nested __if
+            const nestedCall = buildIfCall(source, stmt.alternate);
+            return `__if(() => (${condition}), () => (<>${trueBody}</>), () => (<>${nestedCall}</>))`;
+        }
+        // else block
+        const falseBody = source.slice(stmt.alternate.start + 1, stmt.alternate.end - 1).trim();
+        return `__if(() => (${condition}), () => (<>${trueBody}</>), () => (<>${falseBody}</>))`;
+    }
+
+    return `__if(() => (${condition}), () => (<>${trueBody}</>))`;
+}
+
+function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult | null {
+    const outerClose = findMatchingBrace(code, outerBrace);
+    const content = code.slice(outerBrace + 1, outerClose).trim();
+
+    if (!content.startsWith('for')) return null;
+
+    // Find the header parentheses: for (...)
+    const parenStart = content.indexOf('(');
+    if (parenStart === -1) return null;
+    const parenEnd = findMatchingParen(content, parenStart);
+    const fullHeader = content.slice(parenStart + 1, parenEnd).trim();
+
+    // Split on ';' to separate DarTsx extensions (index, key)
+    const parts = fullHeader.split(';').map((s) => s.trim());
+    const mainPart = parts[0];
+
+    let indexName: string | null = null;
+    let keyExpr: string | null = null;
+    for (let k = 1; k < parts.length; k++) {
+        const part = parts[k];
+        if (part.startsWith('index ')) indexName = part.slice(6).trim();
+        else if (part.startsWith('key ')) keyExpr = part.slice(4).trim();
+    }
+
+    // Use OXC to parse the standard for-of part (handles destructuring patterns)
+    const forSource = `for (${mainPart}) {}`;
+    const result = parseSync('for-block.tsx', forSource, {
+        sourceType: 'script',
+        lang: 'tsx',
+    });
+    if (result.errors.length > 0 || result.program.body.length === 0) return null;
+
+    const forStmt = result.program.body[0] as any;
+    if (forStmt.type !== 'ForOfStatement') return null;
+
+    // Extract variable pattern and collection from the OXC AST
+    const leftSource = forSource.slice(forStmt.left.start, forStmt.left.end);
+    const collection = forSource.slice(forStmt.right.start, forStmt.right.end);
+
+    // Strip const/let/var to get the callback parameter pattern
+    const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
+
+    // Extract body (everything after the header parens)
+    const bodyText = content.slice(parenEnd + 1).trim();
+    if (!bodyText.startsWith('{') || !bodyText.endsWith('}')) return null;
+    const body = bodyText.slice(1, -1).trim();
+
+    // Recursively transform nested control flow
+    const transformedBody = transformControlFlowBlocks(body);
+
+    // Build the __for call
+    const params = indexName ? `${paramPattern}, ${indexName}` : paramPattern;
+    let text: string;
+    if (keyExpr) {
+        text = `{__for(() => (${collection}), (${params}) => (<>${transformedBody}</>), (${paramPattern}) => (${keyExpr}))}`;
+    } else {
+        text = `{__for(() => (${collection}), (${params}) => (<>${transformedBody}</>))}`;
+    }
+
+    return { text, end: outerClose + 1 };
+}
+
+// ── Helper: find matching brace ────────────────────────────────────
+
+function findMatchingBrace(code: string, openPos: number): number {
+    let depth = 1;
+    let i = openPos + 1;
+    while (i < code.length && depth > 0) {
+        const ch = code[i];
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+        else if (ch === "'" || ch === '"') {
+            i = skipString(code, i);
+            continue;
+        } else if (ch === '`') {
+            i = skipTemplateLiteral(code, i);
+            continue;
+        }
+        i++;
+    }
+    return i - 1;
 }

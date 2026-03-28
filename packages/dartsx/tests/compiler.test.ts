@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compile } from '../src/compiler/index.js';
+import { compile } from '../src/compiler';
 
 function normalizeWhitespace(code: string): string {
   return code
@@ -225,5 +225,210 @@ describe('compiler', () => {
 
     const result = compile(source);
     expect(result.code).toContain('$.get(count).toString()');
+  });
+
+  // ── Component instantiation tests ────────────────────────────────
+
+  it('compiles component call at root level (no props)', () => {
+    const source = `component App() {
+  render (
+    <Child />
+  )
+}`;
+    const result = compile(source);
+    expect(result.code).toContain('Child($$anchor)');
+  });
+
+  it('compiles component call with static and dynamic props', () => {
+    const source = `component App() {
+  state count = 0
+  render (
+    <Greeting name="Alice" count={count} />
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('Greeting($$anchor, { name: () => "Alice", count: () => $.get(count) })');
+  });
+
+  it('compiles component mixed with elements at root', () => {
+    const source = `component App() {
+  render (
+    <h1>Title</h1>
+    <Child />
+    <p>Footer</p>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // h1 and p should be created with $.node and appended individually
+    expect(code).toContain('$.append($$anchor, h1)');
+    expect(code).toContain('Child($$anchor)');
+    expect(code).toContain('$.append($$anchor, p)');
+  });
+
+  it('compiles component child inside a native element', () => {
+    const source = `component App() {
+  render (
+    <div>
+      <Child />
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Template should have <!> anchor for the component
+    expect(code).toContain('<div><!></div>');
+    // Should navigate to the anchor and call the component
+    expect(code).toContain('const anchor = $.firstChild(el)');
+    expect(code).toContain('Child(anchor)');
+  });
+
+  it('compiles component between native elements', () => {
+    const source = `component App() {
+  render (
+    <div>
+      <h1>Title</h1>
+      <Child />
+      <p>Footer</p>
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Template: <div><h1>Title</h1><!><p>Footer</p></div>
+    expect(code).toContain('<h1>Title</h1><!><p>Footer</p>');
+    expect(code).toContain('const h1_el = $.firstChild(el)');
+    expect(code).toContain('const anchor = $.sibling(h1_el, 1)');
+    expect(code).toContain('Child(anchor)');
+    expect(code).toContain('const p_el = $.sibling(anchor, 1)');
+  });
+
+  it('compiles props as getters and wraps reads in $.prop()', () => {
+    const source = `export default component Greeting(name: string = "World") {
+  render (
+    <h1>Hello, {name}</h1>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Prop should use $.prop() with getter
+    expect(code).toContain('let name = $.prop($$props.name, "World")');
+    // Prop reads in template should use $.get()
+    expect(code).toContain('$.get(name)');
+  });
+
+  // ── If block tests ───────────────────────────────────────────────
+
+  it('compiles if/else block in JSX', () => {
+    const source = `component App() {
+  state show = true
+  render (
+    <div>
+      {if (show) {
+        <p>Visible</p>
+      } else {
+        <span>Hidden</span>
+      }}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Template should have anchor for the if block
+    expect(code).toContain('<!>');
+    // Should emit $.if() call
+    expect(code).toContain('$.if(');
+    // Condition should wrap reactive read
+    expect(code).toContain('() => $.get(show)');
+    // True branch
+    expect(code).toContain('<p>Visible</p>');
+    // False branch
+    expect(code).toContain('<span>Hidden</span>');
+  });
+
+  it('compiles if block without else', () => {
+    const source = `component App() {
+  state loaded = false
+  render (
+    <div>
+      {if (loaded) {
+        <p>Content</p>
+      }}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.if(');
+    expect(code).toContain('() => $.get(loaded)');
+    // Should have true branch but no false branch
+    expect(code).toContain('<p>Content</p>');
+  });
+
+  it('compiles if block at root level', () => {
+    const source = `component App() {
+  state show = true
+  render (
+    {if (show) {
+      <p>Hello</p>
+    }}
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.if($$anchor');
+  });
+
+  // ── For loop tests ──────────────────────────────────────────────
+
+  it('compiles for loop in JSX', () => {
+    const source = `component App() {
+  state items = ["a", "b", "c"]
+  render (
+    <ul>
+      {for (const item of items) {
+        <li>{item}</li>
+      }}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for(');
+    expect(code).toContain('() => $.get(items)');
+    expect(code).toContain('($$anchor, item) => {');
+  });
+
+  it('compiles for loop with index and key', () => {
+    const source = `component App() {
+  state todos = [{id: 1, text: "a"}]
+  render (
+    <ul>
+      {for (const todo of todos; index i; key todo.id) {
+        <li>{todo.text}</li>
+      }}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for(');
+    expect(code).toContain('($$anchor, todo, i) => {');
+    expect(code).toContain('(todo) => todo.id');
+  });
+
+  it('compiles for loop at root level', () => {
+    const source = `component App() {
+  state items = [1, 2, 3]
+  render (
+    {for (const n of items) {
+      <p>{n}</p>
+    }}
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for($$anchor');
   });
 });
