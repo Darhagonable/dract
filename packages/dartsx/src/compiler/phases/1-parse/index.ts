@@ -25,8 +25,6 @@ export interface PreprocessResult {
     stateVars: string[];
     /** Names of `derived` variable declarations */
     derivedVars: string[];
-    /** State imports: `import { state x } from '...'` */
-    stateImports: string[];
 }
 
 // ── Pre-process ────────────────────────────────────────────────────
@@ -36,25 +34,8 @@ export function preprocess(source: string): PreprocessResult {
     const components: ComponentMeta[] = [];
     const stateVars: string[] = [];
     const derivedVars: string[] = [];
-    const stateImports: string[] = [];
 
-    // 1. Transform `import { state x } from '...'` to `import { x } from '...'`
-    //    and record x as a state import
-    code = code.replace(
-        /\bimport\s*\{([^}]*)\}\s*from/g,
-        (_match, specifiers: string) => {
-            const transformed = specifiers.replace(
-                /\bstate\s+(\w+)/g,
-                (_m: string, name: string) => {
-                    stateImports.push(name);
-                    return name;
-                },
-            );
-            return `import {${transformed}} from`;
-        },
-    );
-
-    // 2. Transform component declarations
+    // 1. Transform component declarations
     //    Handles: [export] [default] [async] component Name(...)
     code = code.replace(
         /\b(export\s+)?(default\s+)?(async\s+)?component\s+(\w+)/g,
@@ -69,35 +50,36 @@ export function preprocess(source: string): PreprocessResult {
         },
     );
 
-    // 3. Transform `state varName = expr` → `let varName = expr`
+    // 2. Transform `state varName = expr` → `let varName = expr`
     //    Only match when `state` is used as a declaration keyword (not property access)
+    //    Also detect `export state` to track reactive exports
     code = code.replace(
-        /(?<!\.)(?<!\w)\bstate\s+(\w+)\s*(?==)/g,
-        (_match, name) => {
+        /(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)\s*(?==)/g,
+        (_match, exportKw, name) => {
             stateVars.push(name);
-            return `let ${name} `;
+            return `${exportKw || ''}let ${name} `;
         },
     );
 
-    // 4. Transform `derived varName = expr` → `let varName = expr`
+    // 3. Transform `derived varName = expr` → `let varName = expr`
     code = code.replace(
-        /(?<!\.)(?<!\w)\bderived\s+(\w+)\s*(?==)/g,
-        (_match, name) => {
+        /(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)\s*(?==)/g,
+        (_match, exportKw, name) => {
             derivedVars.push(name);
-            return `let ${name} `;
+            return `${exportKw || ''}let ${name} `;
         },
     );
 
-    // 5. Transform `render (` blocks → `return (<>` ... `</>)`
+    // 4. Transform `render (` blocks → `return (<>` ... `</>)`
     code = transformRenderBlocks(code);
 
-    // 6. Transform `bind:{x}` shorthand → `bind:value={x}`
+    // 5. Transform `bind:{x}` shorthand → `bind:value={x}`
     code = code.replace(/bind:\{(\w+)\}/g, 'bind:value={$1}');
 
-    // 7. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
+    // 6. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
     code = transformControlFlowBlocks(code);
 
-    return { code, components, stateVars, derivedVars, stateImports };
+    return { code, components, stateVars, derivedVars };
 }
 
 // ── Render block transformation ────────────────────────────────────

@@ -234,17 +234,35 @@ function transformExpr(source: string, node: ASTNode, reactiveVars: Set<string>)
  * `$.get()` and assignments to `$.set()`. Handles special cases like
  * `effect(dep, callback)` where the dep argument must remain a Signal object.
  */
-export function transformBodyStatement(stmt: string, reactiveVars: Set<string>): string {
+export function transformBodyStatement(
+    stmt: string,
+    reactiveVars: Set<string>,
+    reactiveCallTargets?: Map<string, Set<number>>,
+): string {
     if (reactiveVars.size === 0) return stmt;
 
-    const result = parseSync('stmt.tsx', stmt, {
+    let result = parseSync('stmt.tsx', stmt, {
         sourceType: 'module',
         lang: 'tsx',
     });
-    if (result.errors.length > 0) return stmt;
+
+    // If parsing fails (e.g. `return` outside function), wrap in a function
+    let unwrapOffset = 0;
+    if (result.errors.length > 0) {
+        const wrapper = `function __(){${stmt}}`;
+        result = parseSync('stmt.tsx', wrapper, {
+            sourceType: 'module',
+            lang: 'tsx',
+        });
+        if (result.errors.length > 0) return stmt;
+        unwrapOffset = 'function __(){'.length;
+    }
 
     const replacements: Replacement[] = [];
     const coveredSpans: { start: number; end: number }[] = [];
+
+    // Helper to translate AST spans back to original stmt coordinates
+    const s = (pos: number) => pos - unwrapOffset;
 
     // Collect exclusion zones: first argument of effect() calls
     // (deps must remain as Signal objects, not unwrapped via $.get())
@@ -258,6 +276,22 @@ export function transformBodyStatement(stmt: string, reactiveVars: Set<string>):
         ) {
             exclusionZones.push({ start: node.arguments[0].start, end: node.arguments[0].end });
         }
+        // Exclude args at reactive positions for functions with reactive params
+        if (
+            reactiveCallTargets &&
+            node.type === 'CallExpression' &&
+            node.callee?.type === 'Identifier'
+        ) {
+            const indices = reactiveCallTargets.get(node.callee.name);
+            if (indices) {
+                for (const idx of indices) {
+                    const arg = node.arguments?.[idx];
+                    if (arg) {
+                        exclusionZones.push({ start: arg.start, end: arg.end });
+                    }
+                }
+            }
+        }
     });
 
     // Pass 1: Assignments and updates to reactive vars
@@ -266,14 +300,14 @@ export function transformBodyStatement(stmt: string, reactiveVars: Set<string>):
             const left = node.left;
             if (left?.type === 'Identifier' && reactiveVars.has(left.name)) {
                 const name = left.name;
-                const rhsSource = stmt.slice(node.right.start, node.right.end);
+                const rhsSource = stmt.slice(s(node.right.start), s(node.right.end));
                 const wrappedRhs = wrapReadsInGet(rhsSource, reactiveVars);
 
                 const text = node.operator === '='
                     ? `$.set(${name}, ${wrappedRhs})`
                     : `$.set(${name}, $.get(${name}) ${node.operator.slice(0, -1)} ${wrappedRhs})`;
 
-                replacements.push({ start: node.start, end: node.end, text });
+                replacements.push({ start: s(node.start), end: s(node.end), text });
                 coveredSpans.push({ start: node.start, end: node.end });
             }
         }
@@ -283,8 +317,8 @@ export function transformBodyStatement(stmt: string, reactiveVars: Set<string>):
             if (arg?.type === 'Identifier' && reactiveVars.has(arg.name)) {
                 const delta = node.operator === '++' ? '+ 1' : '- 1';
                 replacements.push({
-                    start: node.start,
-                    end: node.end,
+                    start: s(node.start),
+                    end: s(node.end),
                     text: `$.set(${arg.name}, $.get(${arg.name}) ${delta})`,
                 });
                 coveredSpans.push({ start: node.start, end: node.end });
@@ -301,15 +335,17 @@ export function transformBodyStatement(stmt: string, reactiveVars: Set<string>):
         if (parent?.type === 'UpdateExpression') return;
         // Skip non-computed member property (obj.x)
         if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) return;
+        // Skip function param declarations (BindingIdentifier)
+        if (parent?.type === 'FormalParameter' || parent?.type === 'FormalParameters') return;
 
-        const s = node.start;
-        const e = node.end;
+        const start = node.start;
+        const end = node.end;
         // Skip if inside a span already covered by Pass 1
-        if (coveredSpans.some((c) => s >= c.start && e <= c.end)) return;
-        // Skip if inside an exclusion zone (effect dep argument)
-        if (exclusionZones.some((z) => s >= z.start && e <= z.end)) return;
+        if (coveredSpans.some((c) => start >= c.start && end <= c.end)) return;
+        // Skip if inside an exclusion zone (effect dep argument or reactive call arg)
+        if (exclusionZones.some((z) => start >= z.start && end <= z.end)) return;
 
-        replacements.push({ start: s, end: e, text: `$.get(${node.name})` });
+        replacements.push({ start: s(start), end: s(end), text: `$.get(${node.name})` });
     });
 
     return replacements.length > 0 ? applyReplacements(stmt, replacements) : stmt;

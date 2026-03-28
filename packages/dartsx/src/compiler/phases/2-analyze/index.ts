@@ -95,33 +95,344 @@ export interface JSXAttrIR {
     value: string | null;
 }
 
+// ── Analysis Result (full module) ──────────────────────────────────
+
+export interface AnalysisResult {
+    components: ComponentIR[];
+    /** Source text of user import declarations to preserve */
+    userImports: string[];
+    /** Module-level state variable declarations */
+    moduleStateVars: { name: string; initExpr: string; exported: boolean }[];
+    /** Module-level derived variable declarations */
+    moduleDerivedVars: { name: string; expr: string; exported: boolean }[];
+    /** Module-level functions with reactive params */
+    moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[] }[];
+    /** Other module-level statements (not imports, not components, not state/derived, not reactive-param functions) */
+    moduleStatements: string[];
+    /** Module-level reactive var names (state + derived + cross-file imports) */
+    moduleReactiveVars: Set<string>;
+    /** Names of reactive exports (state + derived) for implicit-mode cross-file tracking */
+    reactiveExports: string[];
+    /**
+     * Cross-file reactive function calls detected at call sites.
+     * Maps import specifier → { exportedName → reactive param indices }.
+     * E.g. { './helper': { test: [0] } } means test() from './helper' is called with a signal at position 0.
+     */
+    reactiveCalls: Record<string, Record<string, number[]>>;
+    /**
+     * Maps callable function names to their reactive param indices (for suppressing $.get() on call args).
+     * Combines both local functions with reactive params and imported functions with cross-file reactive calls.
+     */
+    reactiveCallTargets: Map<string, Set<number>>;
+    /**
+     * Import specifiers found in this module (e.g. ['./helper', './store']).
+     * Provided so the Vite plugin can resolve them without regex-parsing the source.
+     */
+    importSpecifiers: string[];
+}
+
 // ── Analyze ────────────────────────────────────────────────────────
 
 export function analyze(
     ast: any,
     source: string,
     meta: PreprocessResult,
-): ComponentIR[] {
+    reactiveImports?: Record<string, string[]>,
+    reactiveCallImports?: Record<string, number[]>,
+): AnalysisResult {
     const components: ComponentIR[] = [];
     const componentNames = new Set(meta.components.map((c) => c.name));
     const stateSet = new Set(meta.stateVars);
     const derivedSet = new Set(meta.derivedVars);
-    const stateImportSet = new Set(meta.stateImports);
 
-    for (const node of ast.body) {
-        const fn = extractFunctionDecl(node);
-        if (!fn) continue;
-        if (!componentNames.has(fn.name)) continue;
+    const userImports: string[] = [];
+    const moduleStateVars: { name: string; initExpr: string; exported: boolean }[] = [];
+    const moduleDerivedVars: { name: string; expr: string; exported: boolean }[] = [];
+    const moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[] }[] = [];
+    const moduleStatements: string[] = [];
+    const moduleReactiveVars = new Set<string>();
+    const reactiveExports: string[] = [];
+    const pendingFunctions: { node: any; fnInfo: FnInfo }[] = [];
+    const pendingStatements: any[] = [];
+    /** Maps function names to their ordered param name lists (for call-site analysis) */
+    const functionParamMap = new Map<string, string[]>();
+    /** Maps imported local names to their source specifier and exported name (for cross-file call tracking) */
+    const importSourceMap = new Map<string, { specifier: string; exportedName: string }>();
+    /** All import specifiers found in this module */
+    const importSpecifiers: string[] = [];
 
-        const compMeta = meta.components.find((c) => c.name === fn.name)!;
-        const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, stateImportSet);
-        components.push(ir);
+    // Resolve cross-file reactive imports from AST import declarations
+    if (reactiveImports) {
+        for (const node of ast.body) {
+            if (node.type === 'ImportDeclaration' && node.source?.value) {
+                const specifier = node.source.value;
+                const reactiveNames = reactiveImports[specifier];
+                if (!reactiveNames) continue;
+                const reactiveSet = new Set(reactiveNames);
+                for (const spec of node.specifiers || []) {
+                    if (spec.type === 'ImportSpecifier') {
+                        const importedName = spec.imported?.name || spec.local?.name;
+                        if (reactiveSet.has(importedName)) {
+                            moduleReactiveVars.add(spec.local?.name || importedName);
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    return components;
+    for (const node of ast.body) {
+        // Collect user imports (not the runtime import — that's generated)
+        if (node.type === 'ImportDeclaration') {
+            const src = node.source?.value || '';
+            // Skip dartsx internal imports (will be regenerated)
+            if (!src.startsWith('dartsx/internal')) {
+                userImports.push(source.slice(node.start, node.end));
+                if (src) importSpecifiers.push(src);
+            }
+            // Track import sources for cross-file call detection
+            if (src) {
+                for (const spec of node.specifiers || []) {
+                    if (spec.type === 'ImportSpecifier') {
+                        const localName = spec.local?.name || spec.imported?.name;
+                        const exportedName = spec.imported?.name || localName;
+                        if (localName) {
+                            importSourceMap.set(localName, { specifier: src, exportedName });
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Check if this is a component function declaration
+        const fn = extractFunctionDecl(node);
+        if (fn && componentNames.has(fn.name)) {
+            const compMeta = meta.components.find((c) => c.name === fn.name)!;
+            const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars);
+            components.push(ir);
+            continue;
+        }
+
+        // Module-level variable declarations (state/derived)
+        if (node.type === 'VariableDeclaration' || node.type === 'ExportNamedDeclaration') {
+            const varDecl = node.type === 'ExportNamedDeclaration' ? node.declaration : node;
+            const exported = node.type === 'ExportNamedDeclaration';
+
+            if (varDecl?.type === 'VariableDeclaration') {
+                let handled = false;
+                for (const decl of varDecl.declarations) {
+                    const name = decl.id?.name;
+                    if (!name) continue;
+
+                    if (stateSet.has(name)) {
+                        const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+                        moduleStateVars.push({ name, initExpr, exported });
+                        moduleReactiveVars.add(name);
+                        if (exported) reactiveExports.push(name);
+                        handled = true;
+                    } else if (derivedSet.has(name)) {
+                        const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+                        moduleDerivedVars.push({ name, expr, exported });
+                        moduleReactiveVars.add(name);
+                        if (exported) reactiveExports.push(name);
+                        handled = true;
+                    }
+                }
+                if (handled) continue;
+            }
+        }
+
+        // Check if this is a non-component function — collect for later processing
+        const fnInfo = extractFunctionDecl(node);
+        if (fnInfo && !componentNames.has(fnInfo.name)) {
+            pendingFunctions.push({ node, fnInfo });
+            // Collect param names for call-site analysis
+            const paramNames = fnInfo.params
+                .map((p: any) => p.name || p.argument?.name || p.left?.name)
+                .filter(Boolean) as string[];
+            functionParamMap.set(fnInfo.name, paramNames);
+            continue;
+        }
+
+        // Everything else — collect for later
+        pendingStatements.push(node);
+    }
+
+    // Analyze call sites to determine which params receive signals
+    const implicitReactiveParams = new Map<string, Set<string>>();
+    const importedReactiveCalls: Record<string, Record<string, Set<number>>> = {};
+    // Build a comprehensive set of ALL reactive vars (module + component-level)
+    const allReactiveVars = new Set([...moduleReactiveVars, ...stateSet, ...derivedSet]);
+    // Walk the entire AST looking for call expressions
+    walkCallSites(ast, allReactiveVars, functionParamMap, implicitReactiveParams, importSourceMap, importedReactiveCalls);
+
+    // Now process pending functions
+    for (const { node, fnInfo } of pendingFunctions) {
+        let reactiveParams: string[] | undefined;
+
+        if (implicitReactiveParams.has(fnInfo.name)) {
+            // Params detected at same-file call sites
+            reactiveParams = [...implicitReactiveParams.get(fnInfo.name)!];
+        } else if (reactiveCallImports?.[fnInfo.name]) {
+            // Params detected at cross-file call sites (via Vite plugin)
+            const indices = reactiveCallImports[fnInfo.name];
+            const paramNames = functionParamMap.get(fnInfo.name) || [];
+            reactiveParams = indices
+                .filter((i) => i < paramNames.length)
+                .map((i) => paramNames[i]);
+        }
+
+        if (reactiveParams && reactiveParams.length > 0) {
+            const signature = source.slice(node.start, fnInfo.body.start + 1);
+            const bodyStmts: string[] = [];
+            const stmts = fnInfo.body.statements || fnInfo.body.body || [];
+            for (const s of stmts) {
+                bodyStmts.push(source.slice(s.start, s.end));
+            }
+            moduleFunctions.push({ signature, bodyStatements: bodyStmts, reactiveParams });
+        } else {
+            // No reactive params — preserve as-is
+            moduleStatements.push(source.slice(node.start, node.end));
+        }
+    }
+
+    // Process pending non-function statements
+    for (const node of pendingStatements) {
+        moduleStatements.push(source.slice(node.start, node.end));
+    }
+
+    // Convert Set<number> to number[] for the result
+    const reactiveCalls: Record<string, Record<string, number[]>> = {};
+    for (const [specifier, fns] of Object.entries(importedReactiveCalls)) {
+        reactiveCalls[specifier] = {};
+        for (const [fnName, indices] of Object.entries(fns)) {
+            reactiveCalls[specifier][fnName] = [...indices];
+        }
+    }
+
+    // Build reactiveCallTargets: which functions should NOT have their args unwrapped
+    const reactiveCallTargets = new Map<string, Set<number>>();
+    // Local functions with reactive params: map param names to indices
+    for (const fn of moduleFunctions) {
+        const paramNames = functionParamMap.get(fn.signature.match(/function\s+(\w+)/)?.[1] || '') || [];
+        const indices = new Set<number>();
+        for (const rp of fn.reactiveParams) {
+            const idx = paramNames.indexOf(rp);
+            if (idx >= 0) indices.add(idx);
+        }
+        const fnName = fn.signature.match(/function\s+(\w+)/)?.[1];
+        if (fnName && indices.size > 0) {
+            reactiveCallTargets.set(fnName, indices);
+        }
+    }
+    // Imported functions with detected reactive call positions
+    for (const [_specifier, fns] of Object.entries(reactiveCalls)) {
+        for (const [fnName, indices] of Object.entries(fns)) {
+            // Find the local name for this imported function
+            for (const [localName, info] of importSourceMap) {
+                if (info.exportedName === fnName) {
+                    const existing = reactiveCallTargets.get(localName) || new Set();
+                    for (const idx of indices) existing.add(idx);
+                    reactiveCallTargets.set(localName, existing);
+                }
+            }
+        }
+    }
+
+    return {
+        components,
+        userImports,
+        moduleStateVars,
+        moduleDerivedVars,
+        moduleFunctions,
+        moduleStatements,
+        moduleReactiveVars,
+        reactiveExports,
+        reactiveCalls,
+        reactiveCallTargets,
+        importSpecifiers,
+    };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Walk the AST looking for call expressions like `test(reactiveVar, normalVar)`.
+ * When a call targets a known local function and passes a reactive variable as an argument,
+ * mark that positional parameter as reactive.
+ * Also detects calls to imported functions and records which positions receive reactive args.
+ */
+function walkCallSites(
+    ast: any,
+    reactiveVars: Set<string>,
+    functionParamMap: Map<string, string[]>,
+    localResult: Map<string, Set<string>>,
+    importSourceMap: Map<string, { specifier: string; exportedName: string }>,
+    importedResult: Record<string, Record<string, Set<number>>>,
+) {
+    function visit(node: any) {
+        if (!node || typeof node !== 'object') return;
+
+        if (node.type === 'CallExpression' && node.callee?.type === 'Identifier') {
+            const fnName = node.callee.name;
+            const args: any[] = node.arguments || [];
+
+            // Check calls to local functions
+            const paramNames = functionParamMap.get(fnName);
+            if (paramNames) {
+                for (let i = 0; i < args.length && i < paramNames.length; i++) {
+                    const arg = args[i];
+                    if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) {
+                        if (!localResult.has(fnName)) localResult.set(fnName, new Set());
+                        localResult.get(fnName)!.add(paramNames[i]);
+                    }
+                }
+            }
+
+            // Check calls to imported functions
+            const importInfo = importSourceMap.get(fnName);
+            if (importInfo) {
+                for (let i = 0; i < args.length; i++) {
+                    const arg = args[i];
+                    if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) {
+                        if (!importedResult[importInfo.specifier]) importedResult[importInfo.specifier] = {};
+                        if (!importedResult[importInfo.specifier][importInfo.exportedName]) {
+                            importedResult[importInfo.specifier][importInfo.exportedName] = new Set();
+                        }
+                        importedResult[importInfo.specifier][importInfo.exportedName].add(i);
+                    }
+                }
+            }
+        }
+
+        // Recurse into known AST child fields (avoids Object.keys() on every node)
+        for (const key of AST_CHILD_FIELDS) {
+            const child = node[key];
+            if (child == null) continue;
+            if (Array.isArray(child)) {
+                for (const item of child) {
+                    if (item && typeof item === 'object' && item.type) visit(item);
+                }
+            } else if (typeof child === 'object' && child.type) {
+                visit(child);
+            }
+        }
+    }
+
+    visit(ast);
+}
+
+/** Known AST fields that contain child nodes — avoids iterating all object keys */
+const AST_CHILD_FIELDS = [
+    'body', 'declarations', 'declaration', 'init', 'test', 'consequent',
+    'alternate', 'expression', 'expressions', 'left', 'right', 'object',
+    'property', 'callee', 'arguments', 'elements', 'properties', 'value',
+    'argument', 'params', 'items', 'statements', 'block', 'handler',
+    'finalizer', 'cases', 'discriminant', 'update', 'children',
+    'openingElement', 'closingElement', 'attributes', 'specifiers',
+    'source', 'key', 'id', 'label', 'tag', 'quasi', 'quasis',
+];
 
 interface FnInfo {
     name: string;
@@ -154,12 +465,12 @@ function analyzeComponent(
     source: string,
     stateSet: Set<string>,
     derivedSet: Set<string>,
-    stateImportSet: Set<string>,
+    crossFileReactiveVars: Set<string>,
 ): ComponentIR {
     const params: ParamIR[] = [];
     const stateVars: { name: string; initExpr: string }[] = [];
     const derivedVars: { name: string; expr: string }[] = [];
-    const reactiveVars = new Set<string>([...stateImportSet]);
+    const reactiveVars = new Set<string>(crossFileReactiveVars);
     const bodyStatements: string[] = [];
     let jsx: JSXNodeIR | null = null;
 

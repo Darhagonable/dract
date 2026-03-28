@@ -48,11 +48,15 @@ export function setCurrentComponent(ctx: ComponentContext | null): ComponentCont
 
 // ── Unified get — works for both Signal and DerivedSignal ──────────
 
-export function get<T>(sig: Signal<T> | DerivedSignal<T>): T {
-    if ('fn' in sig) {
+export function get<T>(sig: Signal<T> | DerivedSignal<T> | T): T {
+    // Passthrough for non-signal values
+    if (!sig || typeof sig !== 'object' || !('v' in (sig as any))) {
+        return sig as T;
+    }
+    if ('fn' in (sig as any)) {
         return getDerived(sig as DerivedSignal<T>);
     }
-    return signalGet(sig);
+    return signalGet(sig as Signal<T>);
 }
 
 // ── Template system ────────────────────────────────────────────────

@@ -41,23 +41,34 @@ export function state<T>(initialValue: T): Signal<T> {
 
 // ── $.get(signal) ──────────────────────────────────────────────────
 
-export function get<T>(signal: Signal<T>): T {
+export function get<T>(signal: Signal<T> | T): T {
+    // Passthrough for non-signal values (enables implicit reactive mode)
+    if (!signal || typeof signal !== 'object' || !('v' in (signal as any))) {
+        return signal as T;
+    }
+    const sig = signal as Signal<T>;
     // If we're inside a reactive context, track this read.
     if (currentSubscriber) {
-        signal.subs.add(currentSubscriber);
-        currentSubscriber.deps.add(signal);
+        sig.subs.add(currentSubscriber);
+        currentSubscriber.deps.add(sig);
     }
-    return signal.v;
+    return sig.v;
 }
 
 // ── $.set(signal, value) ───────────────────────────────────────────
 
-export function set<T>(signal: Signal<T>, value: T): void {
-    if (Object.is(signal.v, value)) return;
-    signal.v = value;
-    signal.version++;
+export function set<T>(signal: Signal<T> | T, value: T): T {
+    // Passthrough for non-signal values (enables implicit reactive mode)
+    if (!signal || typeof signal !== 'object' || !('v' in (signal as any))) {
+        return value;
+    }
+    const sig = signal as Signal<T>;
+    if (Object.is(sig.v, value)) return value;
+    sig.v = value;
+    sig.version++;
     // Synchronously propagate dirty flags through the entire dependency graph
-    notifySubscribers(signal.subs);
+    notifySubscribers(sig.subs);
+    return value;
 }
 
 function notifySubscribers(subs: Set<Subscriber>): void {

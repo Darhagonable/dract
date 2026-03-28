@@ -5,6 +5,7 @@
  * Template clones are hoisted to module scope for reuse.
  */
 import type {
+    AnalysisResult,
     ComponentIR,
     JSXNodeIR,
     JSXElementIR,
@@ -17,7 +18,7 @@ import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from '.
 
 // ── Main entry ─────────────────────────────────────────────────────
 
-export function transform(components: ComponentIR[]): string {
+export function transform(analysis: AnalysisResult): string {
     const ctx: ModuleContext = {
         templates: [],
         templateMap: new Map(),
@@ -25,21 +26,68 @@ export function transform(components: ComponentIR[]): string {
     };
 
     const componentBlocks: string[] = [];
-    for (const comp of components) {
-        componentBlocks.push(transformComponent(comp, ctx));
+    for (const comp of analysis.components) {
+        componentBlocks.push(transformComponent(comp, ctx, analysis.reactiveCallTargets));
     }
 
     const lines: string[] = [];
 
-    // Runtime import
-    lines.push("import $ from 'dartsx/internal/client';");
-    lines.push('');
+    // Runtime import (only if there are components or module-level reactive vars)
+    const needsRuntime =
+        analysis.components.length > 0 ||
+        analysis.moduleStateVars.length > 0 ||
+        analysis.moduleDerivedVars.length > 0 ||
+        analysis.moduleFunctions.length > 0;
+    if (needsRuntime) {
+        lines.push("import $ from 'dartsx/internal/client';");
+    }
+
+    // User imports (preserved from original source)
+    for (const imp of analysis.userImports) {
+        lines.push(imp);
+    }
+    if (lines.length > 0) lines.push('');
 
     // Hoisted template declarations
     for (const t of ctx.templates) {
         lines.push(`const ${t.varName} = $.template(\`${t.html}\`);`);
     }
     if (ctx.templates.length > 0) lines.push('');
+
+    // Module-level state declarations
+    for (const s of analysis.moduleStateVars) {
+        const prefix = s.exported ? 'export ' : '';
+        lines.push(`${prefix}let ${s.name} = $.state(${s.initExpr});`);
+    }
+
+    // Module-level derived declarations
+    for (const d of analysis.moduleDerivedVars) {
+        const prefix = d.exported ? 'export ' : '';
+        const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars);
+        lines.push(`${prefix}let ${d.name} = $.derived(() => ${wrappedExpr});`);
+    }
+
+    if (analysis.moduleStateVars.length > 0 || analysis.moduleDerivedVars.length > 0) {
+        lines.push('');
+    }
+
+    // Module-level functions with reactive params
+    for (const fn of analysis.moduleFunctions) {
+        const mergedReactive = new Set(analysis.moduleReactiveVars);
+        for (const p of fn.reactiveParams) mergedReactive.add(p);
+        lines.push(fn.signature);
+        for (const stmt of fn.bodyStatements) {
+            lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets)}`);
+        }
+        lines.push('}');
+    }
+    if (analysis.moduleFunctions.length > 0) lines.push('');
+
+    // Other module-level statements (with reactive transforms)
+    for (const stmt of analysis.moduleStatements) {
+        lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets));
+    }
+    if (analysis.moduleStatements.length > 0) lines.push('');
 
     // Component functions
     for (const block of componentBlocks) {
@@ -88,7 +136,7 @@ function getName(counter: NameCounter, base: string): string {
 
 // ── Component code generation ──────────────────────────────────────
 
-function transformComponent(comp: ComponentIR, ctx: ModuleContext): string {
+function transformComponent(comp: ComponentIR, ctx: ModuleContext, reactiveCallTargets?: Map<string, Set<number>>): string {
     const lines: string[] = [];
     const hasProps = comp.params.length > 0;
     const nameCounter: NameCounter = { counts: new Map() };
@@ -133,7 +181,7 @@ function transformComponent(comp: ComponentIR, ctx: ModuleContext): string {
 
     // Preserved body statements (with reactive transforms)
     for (const stmt of comp.bodyStatements) {
-        lines.push(`    ${transformBodyStatement(stmt, comp.reactiveVars)}`);
+        lines.push(`    ${transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets)}`);
     }
 
     // Generate element factories and collect the top-level calls for append

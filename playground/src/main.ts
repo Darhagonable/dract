@@ -1,4 +1,4 @@
 import { mount } from 'dartsx';
-import Counter from './Counter.tsx';
+import App from './App';
 
-mount(Counter, document.querySelector('app-root')!);
+mount(App, document.querySelector('app-root')!);

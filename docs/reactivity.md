@@ -168,9 +168,7 @@ b = 4;
 console.log(total()); // 7
 ```
 
-State in this framework is different — when you reference something declared with `state`, it will always be ractive.
-
-Note that 'functions' is broad — it encompasses properties of proxies and [`get`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get)/[`set`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set) properties...
+State in this framework is different — when you pass a `state` variable to a function, the compiler detects this at the call site and automatically transforms the function to work with the underlying signal. You don't need any special annotation:
 
 ```tsx
 function add(a: number, b: number) {
@@ -187,11 +185,18 @@ b = 4;
 console.log(total); // 7
 ```
 
+Under the hood, the compiler sees that `add(a, b)` passes two reactive variables. It transforms the function body so that `a` and `b` are read with `$.get()` and written with `$.set()`. The signal objects are passed directly — never the raw values — so the function always sees the current state.
+
+This works for any function, not just ones in the same file. The compiler and Vite plugin cooperate to track which parameter positions receive signals across module boundaries (see [Passing state across modules](#passing-state-across-modules)).
+
+> [!NOTE] Only parameters at positions where a reactive variable is actually passed will be transformed. If a parameter only ever receives plain values, it stays untouched. The runtime is also safe — `$.get(nonSignal)` returns the value as-is, and `$.set(nonSignal, val)` returns `val`.
+
 ## Passing state across modules
 
-You can declare state in shared files, but you can only _export_ that state if it's not directly reassigned. In other words you can't do this:
+State flows naturally across module boundaries — no special syntax required. You can export `state` and `derived` variables, and the compiler + Vite plugin will automatically track them:
 
 ```tsx
+// @filename: store.ts
 export state count = 0;
 
 export function increment() {
@@ -199,39 +204,56 @@ export function increment() {
 }
 ```
 
-That's because every reference to `count` is transformed by the Svelte compiler — the code above is roughly equivalent to this:
+```tsx
+// @filename: App.tsx
+import { count, increment } from './store';
 
-```js
-export let count = $.state(0);
-
-export function increment() {
-  $.set(count, $.get(count) + 1);
+export default component App() {
+  render (
+    <button onclick={increment}>
+      clicks: {count}
+    </button>
+  );
 }
 ```
 
-Since the compiler only operates on one file at a time, if another file imports `count` Svelte doesn't know that it needs to wrap each reference in `$.get` and `$.set`:
+This works because the Vite plugin maintains a registry of reactive exports. When `store.ts` is compiled, the plugin records that `count` is reactive. When `App.tsx` imports it, the compiler knows to wrap reads in `$.get()` and writes in `$.set()`.
 
-```js
-// @filename: state.svelte.js
-export state count = 0;
+### Cross-file function calls
 
-// @filename: index.js
-import { count } from './state.svelte.js';
+When you pass state to an imported function, the compiler detects this at the call site and coordinates with the Vite plugin to recompile the target module:
 
-console.log(typeof count); // 'object', not 'number'
+```tsx
+// @filename: helpers.ts
+export function double(value: number) {
+  return value * 2;
+}
+
+export function reset(value: number) {
+  value = 0;
+}
 ```
 
-This framework comes with a handy solution to this by introducing state imports similar to how typescript has type imports. This will let framework know that it needs to wrap each reference in `$.get` and `$.set`:
+```tsx
+// @filename: App.tsx
+import { double, reset } from './helpers';
 
-```js
-// @filename: state.svelte.js
-export state count = 0;
+export default component App() {
+  state count = 5;
+  derived doubled = double(count);
 
-// @filename: index.js
-import { state count } from './state.svelte.js';
-
-console.log(typeof count); // 'object', not 'number'
+  render (
+    <button onclick={() => reset(count)}>
+      {count} × 2 = {doubled}
+    </button>
+  );
+}
 ```
+
+The compiler sees that `double(count)` and `reset(count)` pass a signal at position 0. The Vite plugin records this and recompiles `helpers.ts` so that `value` is treated as reactive — reads become `$.get(value)` and assignments become `$.set(value, 0)`.
+
+> [!NOTE] This analysis is positional. If a function is called from multiple sites, the union of all reactive positions is used. For example, if `test(signal, plain)` is called in one place and `test(plain, signal)` in another, both parameters are treated as reactive.
+
 ## derived
 
 Derived state is declared with the `derived` keyword:
