@@ -4,10 +4,6 @@ export { state, set, prop, type Signal, type Subscriber, setSubscriber, getSubsc
 export { derived, getDerived, type DerivedSignal } from './reactivity/derived';
 export { effect } from './reactivity/effect';
 
-// ── Re-exports from bindings ───────────────────────────────────────
-
-export { bindValue } from './bindings/input';
-
 // ── Re-exports from jsx ────────────────────────────────────────────
 
 export { jsx, Fragment } from './jsx';
@@ -21,7 +17,6 @@ export { try_block } from './blocks/try';
 import { state, set, prop, get as signalGet, type Signal, scheduleEffect, getFlushPromise } from './reactivity/state';
 import { derived, getDerived, type DerivedSignal } from './reactivity/derived';
 import { effect } from './reactivity/effect';
-import { bindValue } from './bindings/input';
 import { jsx, Fragment } from './jsx';
 import { if_block } from './blocks/if';
 import { for_block } from './blocks/for';
@@ -75,7 +70,6 @@ export default {
     for: for_block,
     switch: switch_block,
     try: try_block,
-    bindValue,
     scheduleEffect,
     getFlushPromise,
 };

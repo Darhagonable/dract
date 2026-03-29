@@ -240,12 +240,7 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
         }
         case 'bind': {
             if (attr.bindProperty && attr.value) {
-                if (isComponent) {
-                    // Pass the raw signal directly — $.prop() detects it and keeps it writable
-                    entries.push(`${attr.bindProperty}: ${attr.value}`);
-                } else {
-                    entries.push(`"bind:${attr.bindProperty}": ${attr.value}`);
-                }
+                entries.push(`"bind:${attr.bindProperty}": ${attr.value}`);
             }
             break;
         }

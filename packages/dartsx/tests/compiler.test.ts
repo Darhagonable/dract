@@ -145,9 +145,8 @@ describe('compiler', () => {
 
     const result = compile(source);
     const code = normalizeWhitespace(result.code);
-    // Component should get the raw signal, not "bind:name"
-    expect(code).toContain('Child({ name: name })');
-    expect(code).not.toContain('"bind:name"');
+    // Component should pass bind:name with the raw signal
+    expect(code).toContain('Child({ "bind:name": name })');
   });
 
   it('supports bind keyword in component param declarations', () => {

@@ -1,7 +1,7 @@
 // ── JSX runtime ────────────────────────────────────────────────────
 
 import { effect } from '../reactivity/effect';
-import { bindValue } from '../bindings/input';
+import { applyBinding } from '../bindings';
 
 // ── Fragment sentinel ──────────────────────────────────────────────
 
@@ -96,10 +96,7 @@ function applyProp(el: Element, key: string, value: any): void {
 
     // Two-way binding: bind:value, bind:checked, etc.
     if (key.startsWith('bind:')) {
-        const prop = key.slice(5);
-        if (prop === 'value') {
-            bindValue(el as HTMLInputElement, value);
-        }
+        applyBinding(el, key.slice(5), value);
         return;
     }
 

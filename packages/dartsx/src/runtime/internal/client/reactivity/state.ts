@@ -112,9 +112,9 @@ prop = function prop<T>(propsObj: Record<string, any>, key: string, defaultValue
 }
 
 prop.bind = function bindProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T> {
-    const value = propsObj[key];
-    if (value && typeof value === 'object' && 'v' in value) {
-        return value as Signal<T>;
+    const bindKey = `bind:${key}`;
+    if (bindKey in propsObj) {
+        return propsObj[bindKey] as Signal<T>;
     }
     return resolveProp(propsObj, key, defaultValue);
 };
