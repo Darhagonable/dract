@@ -211,6 +211,24 @@ function transformControlFlowBlocks(code: string): string {
                     continue;
                 }
             }
+
+            if (/^switch\s*\(/.test(code.slice(j))) {
+                const parsed = tryParseSwitchBlock(code, i);
+                if (parsed) {
+                    result += parsed.text;
+                    i = parsed.end;
+                    continue;
+                }
+            }
+
+            if (/^try\s*\{/.test(code.slice(j))) {
+                const parsed = tryParseTryBlock(code, i);
+                if (parsed) {
+                    result += parsed.text;
+                    i = parsed.end;
+                    continue;
+                }
+            }
         }
 
         result += code[i];
@@ -279,7 +297,63 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
     const parenEnd = findMatchingParen(content, parenStart);
     const fullHeader = content.slice(parenStart + 1, parenEnd).trim();
 
-    // Split on ';' to separate DarTsx extensions (index, key)
+    // Extract body (everything after the header parens)
+    const bodyText = content.slice(parenEnd + 1).trim();
+    if (!bodyText.startsWith('{') || !bodyText.endsWith('}')) return null;
+    const body = bodyText.slice(1, -1).trim();
+
+    // Recursively transform nested control flow
+    const transformedBody = transformControlFlowBlocks(body);
+
+    // Try parsing the full header to determine loop type
+    const forSource = `for (${fullHeader}) {}`;
+    const fullResult = parseSync('for-block.tsx', forSource, {
+        sourceType: 'script',
+        lang: 'tsx',
+    });
+
+    if (fullResult.errors.length === 0 && fullResult.program.body.length > 0) {
+        const forStmt = fullResult.program.body[0] as any;
+
+        // for...in: for (const key in obj)
+        if (forStmt.type === 'ForInStatement') {
+            const leftSource = forSource.slice(forStmt.left.start, forStmt.left.end);
+            const objectExpr = forSource.slice(forStmt.right.start, forStmt.right.end);
+            const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
+            const text = `{__for(() => (Object.keys(${objectExpr})), (${paramPattern}) => (<>${transformedBody}</>))}`;
+            return { text, end: outerClose + 1 };
+        }
+
+        // C-style for: for (let i = 0; i < 10; i++)
+        if (forStmt.type === 'ForStatement') {
+            const initSrc = forStmt.init ? forSource.slice(forStmt.init.start, forStmt.init.end) : '';
+            const testSrc = forStmt.test ? forSource.slice(forStmt.test.start, forStmt.test.end) : '';
+            const updateSrc = forStmt.update ? forSource.slice(forStmt.update.start, forStmt.update.end) : '';
+
+            // Extract loop variable name from init
+            let loopVar = '__i';
+            if (forStmt.init?.type === 'VariableDeclaration' && forStmt.init.declarations?.[0]?.id?.name) {
+                loopVar = forStmt.init.declarations[0].id.name;
+            } else if (forStmt.init?.type === 'AssignmentExpression' && forStmt.init.left?.name) {
+                loopVar = forStmt.init.left.name;
+            }
+
+            const collectionFn = `{ const __a = []; for (${initSrc}; ${testSrc}; ${updateSrc}) __a.push(${loopVar}); return __a; }`;
+            const text = `{__for(() => ${collectionFn}, (${loopVar}) => (<>${transformedBody}</>))}`;
+            return { text, end: outerClose + 1 };
+        }
+
+        // for...of without extensions
+        if (forStmt.type === 'ForOfStatement') {
+            const leftSource = forSource.slice(forStmt.left.start, forStmt.left.end);
+            const collection = forSource.slice(forStmt.right.start, forStmt.right.end);
+            const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
+            const text = `{__for(() => (${collection}), (${paramPattern}) => (<>${transformedBody}</>))}`;
+            return { text, end: outerClose + 1 };
+        }
+    }
+
+    // Full header didn't parse — try for-of with DarTsx extensions (index, key)
     const parts = fullHeader.split(';').map((s) => s.trim());
     const mainPart = parts[0];
 
@@ -291,33 +365,20 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
         else if (part.startsWith('key ')) keyExpr = part.slice(4).trim();
     }
 
-    // Use OXC to parse the standard for-of part (handles destructuring patterns)
-    const forSource = `for (${mainPart}) {}`;
-    const result = parseSync('for-block.tsx', forSource, {
+    const forOfSource = `for (${mainPart}) {}`;
+    const forOfResult = parseSync('for-block.tsx', forOfSource, {
         sourceType: 'script',
         lang: 'tsx',
     });
-    if (result.errors.length > 0 || result.program.body.length === 0) return null;
+    if (forOfResult.errors.length > 0 || forOfResult.program.body.length === 0) return null;
 
-    const forStmt = result.program.body[0] as any;
-    if (forStmt.type !== 'ForOfStatement') return null;
+    const forOfStmt = forOfResult.program.body[0] as any;
+    if (forOfStmt.type !== 'ForOfStatement') return null;
 
-    // Extract variable pattern and collection from the OXC AST
-    const leftSource = forSource.slice(forStmt.left.start, forStmt.left.end);
-    const collection = forSource.slice(forStmt.right.start, forStmt.right.end);
-
-    // Strip const/let/var to get the callback parameter pattern
+    const leftSource = forOfSource.slice(forOfStmt.left.start, forOfStmt.left.end);
+    const collection = forOfSource.slice(forOfStmt.right.start, forOfStmt.right.end);
     const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
 
-    // Extract body (everything after the header parens)
-    const bodyText = content.slice(parenEnd + 1).trim();
-    if (!bodyText.startsWith('{') || !bodyText.endsWith('}')) return null;
-    const body = bodyText.slice(1, -1).trim();
-
-    // Recursively transform nested control flow
-    const transformedBody = transformControlFlowBlocks(body);
-
-    // Build the __for call
     const params = indexName ? `${paramPattern}, ${indexName}` : paramPattern;
     let text: string;
     if (keyExpr) {
@@ -327,6 +388,161 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
     }
 
     return { text, end: outerClose + 1 };
+}
+
+function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResult | null {
+    const outerClose = findMatchingBrace(code, outerBrace);
+    const content = code.slice(outerBrace + 1, outerClose).trim();
+
+    if (!content.startsWith('switch')) return null;
+
+    // Recursively transform nested control flow blocks first
+    const transformed = transformControlFlowBlocks(content);
+
+    // Parse the transformed switch statement with OXC
+    const result = parseSync('switch-block.tsx', transformed, {
+        sourceType: 'script',
+        lang: 'tsx',
+    });
+    if (result.errors.length > 0) return null;
+
+    const stmts = result.program.body;
+    if (stmts.length === 0 || stmts[0].type !== 'SwitchStatement') return null;
+
+    const switchStmt = stmts[0] as any;
+    const discriminant = transformed.slice(switchStmt.discriminant.start, switchStmt.discriminant.end);
+    const switchCases = switchStmt.cases || [];
+
+    // Group cases with fall-through support
+    const groups: { values: string[]; isDefault: boolean; body: string }[] = [];
+    let pendingValues: string[] = [];
+    let pendingDefault = false;
+
+    for (let ci = 0; ci < switchCases.length; ci++) {
+        const sc = switchCases[ci];
+
+        if (sc.test) {
+            pendingValues.push(transformed.slice(sc.test.start, sc.test.end));
+        } else {
+            pendingDefault = true;
+        }
+
+        const consequent: any[] = sc.consequent || [];
+        const bodyStmts = consequent.filter((s: any) => s.type !== 'BreakStatement');
+        const hasBreak = consequent.some((s: any) => s.type === 'BreakStatement');
+        const isLast = ci === switchCases.length - 1;
+
+        // A case terminates its group if it has body content, a break, or is the last case
+        if (bodyStmts.length > 0 || hasBreak || isLast) {
+            let body = '';
+            if (bodyStmts.length > 0) {
+                const start = bodyStmts[0].start;
+                const end = bodyStmts[bodyStmts.length - 1].end;
+                body = transformed.slice(start, end);
+            }
+
+            groups.push({
+                values: [...pendingValues],
+                isDefault: pendingDefault,
+                body: body.trim(),
+            });
+            pendingValues = [];
+            pendingDefault = false;
+        }
+    }
+
+    // Build __switch call: discriminant fn, then pairs of (values, body fn)
+    const args: string[] = [`() => (${discriminant})`];
+    for (const g of groups) {
+        if (g.isDefault) {
+            args.push('null');
+        } else {
+            args.push(`[${g.values.join(', ')}]`);
+        }
+        args.push(`() => (<>${g.body}</>)`);
+    }
+
+    const output = `__switch(${args.join(', ')})`;
+    return { text: `{${output}}`, end: outerClose + 1 };
+}
+
+function tryParseTryBlock(code: string, outerBrace: number): ControlFlowResult | null {
+    const outerClose = findMatchingBrace(code, outerBrace);
+    const content = code.slice(outerBrace + 1, outerClose).trim();
+
+    if (!content.startsWith('try')) return null;
+
+    // Manually parse: try { ... } [pending { ... }] [catch (param) { ... }]
+    // Can't use OXC because "pending { }" isn't valid JavaScript
+    let pos = 3; // skip "try"
+    while (pos < content.length && /\s/.test(content[pos])) pos++;
+    if (content[pos] !== '{') return null;
+
+    const tryBodyEnd = findMatchingBrace(content, pos);
+    const tryBody = content.slice(pos + 1, tryBodyEnd).trim();
+    pos = tryBodyEnd + 1;
+
+    let catchParam: string | null = null;
+    let catchBody: string | null = null;
+    let pendingBody: string | null = null;
+
+    // Look for pending and catch blocks (in any order)
+    while (pos < content.length) {
+        while (pos < content.length && /\s/.test(content[pos])) pos++;
+        if (pos >= content.length) break;
+
+        const remaining = content.slice(pos);
+
+        if (remaining.startsWith('pending')) {
+            pos += 7;
+            while (pos < content.length && /\s/.test(content[pos])) pos++;
+            if (content[pos] !== '{') return null;
+            const pendEnd = findMatchingBrace(content, pos);
+            pendingBody = content.slice(pos + 1, pendEnd).trim();
+            pos = pendEnd + 1;
+        } else if (remaining.startsWith('catch')) {
+            pos += 5;
+            while (pos < content.length && /\s/.test(content[pos])) pos++;
+
+            // Extract catch parameter
+            if (content[pos] === '(') {
+                const parenClose = findMatchingParen(content, pos);
+                catchParam = content.slice(pos + 1, parenClose).trim();
+                pos = parenClose + 1;
+            }
+
+            while (pos < content.length && /\s/.test(content[pos])) pos++;
+            if (content[pos] !== '{') return null;
+            const catchEnd = findMatchingBrace(content, pos);
+            catchBody = content.slice(pos + 1, catchEnd).trim();
+            pos = catchEnd + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Transform nested control flow in bodies
+    const transformedTryBody = transformControlFlowBlocks(tryBody);
+    const transformedCatchBody = catchBody ? transformControlFlowBlocks(catchBody) : null;
+    const transformedPendingBody = pendingBody ? transformControlFlowBlocks(pendingBody) : null;
+
+    // Build __try call: tryFn [, catchFn] [, pendingFn]
+    let call = `__try(() => (<>${transformedTryBody}</>)`;
+
+    if (transformedCatchBody !== null) {
+        const param = catchParam || 'e';
+        call += `, (${param}) => (<>${transformedCatchBody}</>)`;
+    } else if (transformedPendingBody !== null) {
+        call += ', null';
+    }
+
+    if (transformedPendingBody !== null) {
+        call += `, () => (<>${transformedPendingBody}</>)`;
+    }
+
+    call += ')';
+
+    return { text: `{${call}}`, end: outerClose + 1 };
 }
 
 // ── Helper: find matching brace ────────────────────────────────────

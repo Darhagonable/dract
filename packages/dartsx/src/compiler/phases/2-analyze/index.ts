@@ -35,7 +35,9 @@ export type JSXNodeIR =
     | JSXTextIR
     | JSXExpressionIR
     | JSXIfBlockIR
-    | JSXForBlockIR;
+    | JSXForBlockIR
+    | JSXSwitchBlockIR
+    | JSXTryBlockIR;
 
 export interface JSXElementIR {
     type: 'element';
@@ -84,6 +86,26 @@ export interface JSXForBlockIR {
     keyExpr: string | null;
     /** Children for the loop body */
     body: JSXNodeIR[];
+}
+
+export interface JSXSwitchBlockIR {
+    type: 'switch_block';
+    /** Raw discriminant expression */
+    discriminant: string;
+    /** Cases with grouped values (null values = default case) */
+    cases: { values: string[] | null; body: JSXNodeIR[] }[];
+}
+
+export interface JSXTryBlockIR {
+    type: 'try_block';
+    /** Try branch children */
+    tryBranch: JSXNodeIR[];
+    /** Catch parameter name (null if no catch) */
+    catchParam: string | null;
+    /** Catch branch children (null if no catch) */
+    catchBranch: JSXNodeIR[] | null;
+    /** Pending branch children (null if no pending) */
+    pendingBranch: JSXNodeIR[] | null;
 }
 
 export interface JSXAttrIR {
@@ -584,6 +606,52 @@ function analyzeJSXNode(node: any, source: string): JSXNodeIR {
             ) {
                 return analyzeForBlock(expr, source);
             }
+            // Detect __switch() calls
+            if (
+                expr.type === 'CallExpression' &&
+                expr.callee?.type === 'Identifier' &&
+                expr.callee.name === '__switch'
+            ) {
+                return analyzeSwitchBlock(expr, source);
+            }
+            // Detect __try() calls
+            if (
+                expr.type === 'CallExpression' &&
+                expr.callee?.type === 'Identifier' &&
+                expr.callee.name === '__try'
+            ) {
+                return analyzeTryBlock(expr, source);
+            }
+            // Detect .map() calls returning JSX: expr.map(item => <jsx/>)
+            if (
+                expr.type === 'CallExpression' &&
+                expr.callee?.type === 'MemberExpression' &&
+                expr.callee.property?.name === 'map'
+            ) {
+                const callback = expr.arguments?.[0];
+                if (
+                    callback &&
+                    (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression') &&
+                    isJSXNode(callback.body)
+                ) {
+                    return analyzeMapExpression(expr, source);
+                }
+            }
+            // Detect ternary: condition ? <JSX/> : <JSX/>
+            if (expr.type === 'ConditionalExpression') {
+                const consqIsJSX = isJSXNode(expr.consequent);
+                const altIsJSX = isJSXNode(expr.alternate);
+                const altIsNullish = isNullishNode(expr.alternate);
+                if (consqIsJSX && (altIsJSX || altIsNullish)) {
+                    return analyzeTernaryExpression(expr, source);
+                }
+            }
+            // Detect logical &&: condition && <JSX/>
+            if (expr.type === 'LogicalExpression' && expr.operator === '&&') {
+                if (isJSXNode(expr.right)) {
+                    return analyzeLogicalAndExpression(expr, source);
+                }
+            }
             return {
                 type: 'expression',
                 raw: source.slice(expr.start, expr.end),
@@ -756,7 +824,8 @@ function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
     // Second arg: (item, index?) => (<>body</>)
     const bodyArrow = args[1];
     const params = bodyArrow?.params || [];
-    const itemName = params[0]?.name || 'item';
+    const itemParam = params[0];
+    const itemName = itemParam?.name || (itemParam ? source.slice(itemParam.start, itemParam.end) : 'item');
     const indexName = params.length > 1 ? params[1]?.name : null;
     const body = bodyArrow ? extractJSXChildren(bodyArrow.body, source) : [];
 
@@ -769,4 +838,102 @@ function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
     }
 
     return { type: 'for_block', collection, itemName, indexName, keyExpr, body };
+}
+
+function analyzeSwitchBlock(callExpr: any, source: string): JSXSwitchBlockIR {
+    const args = callExpr.arguments;
+
+    // First arg: () => (discriminant)
+    const discArrow = args[0];
+    const discBody = unwrapParen(discArrow?.body);
+    const discriminant = discBody ? source.slice(discBody.start, discBody.end) : '""';
+
+    // Remaining args come in pairs: (values-array-or-null, body-fn)
+    const cases: { values: string[] | null; body: JSXNodeIR[] }[] = [];
+    for (let i = 1; i < args.length; i += 2) {
+        const valuesArg = args[i];
+        const fnArg = args[i + 1];
+
+        let values: string[] | null = null;
+        if (valuesArg.type === 'ArrayExpression') {
+            values = (valuesArg.elements || []).map((el: any) =>
+                source.slice(el.start, el.end),
+            );
+        }
+        // NullLiteral → values stays null (default case)
+
+        const body = fnArg ? extractJSXChildren(fnArg.body, source) : [];
+        cases.push({ values, body });
+    }
+
+    return { type: 'switch_block', discriminant, cases };
+}
+
+function analyzeTryBlock(callExpr: any, source: string): JSXTryBlockIR {
+    const args = callExpr.arguments;
+
+    // First arg: () => (<>tryBody</>)
+    const tryArrow = args[0];
+    const tryBranch = tryArrow ? extractJSXChildren(tryArrow.body, source) : [];
+
+    // Second arg (optional): (param) => (<>catchBody</>) or null
+    let catchParam: string | null = null;
+    let catchBranch: JSXNodeIR[] | null = null;
+    if (args.length > 1 && args[1].type !== 'NullLiteral') {
+        const catchArrow = args[1];
+        catchParam = catchArrow.params?.[0]?.name || 'e';
+        catchBranch = extractJSXChildren(catchArrow.body, source);
+    }
+
+    // Third arg (optional): () => (<>pendingBody</>)
+    let pendingBranch: JSXNodeIR[] | null = null;
+    if (args.length > 2) {
+        const pendArrow = args[2];
+        pendingBranch = extractJSXChildren(pendArrow.body, source);
+    }
+
+    return { type: 'try_block', tryBranch, catchParam, catchBranch, pendingBranch };
+}
+
+// ── JSX expression pattern detection helpers ───────────────────────
+
+function isJSXNode(node: any): boolean {
+    const unwrapped = unwrapParen(node);
+    return unwrapped?.type === 'JSXElement' || unwrapped?.type === 'JSXFragment';
+}
+
+function isNullishNode(node: any): boolean {
+    const unwrapped = unwrapParen(node);
+    if (!unwrapped) return false;
+    if (unwrapped.type === 'NullLiteral') return true;
+    if (unwrapped.type === 'Literal' && unwrapped.value === null) return true;
+    if (unwrapped.type === 'Identifier' && unwrapped.name === 'undefined') return true;
+    return false;
+}
+
+function analyzeMapExpression(callExpr: any, source: string): JSXForBlockIR {
+    const collection = source.slice(callExpr.callee.object.start, callExpr.callee.object.end);
+    const callback = callExpr.arguments[0];
+    const params = callback.params || [];
+    const itemParam = params[0];
+    const itemName = itemParam?.name || (itemParam ? source.slice(itemParam.start, itemParam.end) : 'item');
+    const indexName = params.length > 1 ? (params[1]?.name || null) : null;
+    const body = extractJSXChildren(callback.body, source);
+    return { type: 'for_block', collection, itemName, indexName, keyExpr: null, body };
+}
+
+function analyzeTernaryExpression(expr: any, source: string): JSXIfBlockIR {
+    const condition = source.slice(expr.test.start, expr.test.end);
+    const trueBranch = extractJSXChildren(expr.consequent, source);
+    let falseBranch: JSXNodeIR[] | null = null;
+    if (!isNullishNode(expr.alternate)) {
+        falseBranch = extractJSXChildren(expr.alternate, source);
+    }
+    return { type: 'if_block', condition, trueBranch, falseBranch };
+}
+
+function analyzeLogicalAndExpression(expr: any, source: string): JSXIfBlockIR {
+    const condition = source.slice(expr.left.start, expr.left.end);
+    const trueBranch = extractJSXChildren(expr.right, source);
+    return { type: 'if_block', condition, trueBranch, falseBranch: null };
 }

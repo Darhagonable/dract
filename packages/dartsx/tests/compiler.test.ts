@@ -431,4 +431,289 @@ describe('compiler', () => {
     const code = normalizeWhitespace(result.code);
     expect(code).toContain('$.for($$anchor');
   });
+
+  it('compiles for...in loop', () => {
+    const source = `component App() {
+  state obj = { a: 1, b: 2 }
+  render (
+    <ul>
+      {for (const key in obj) {
+        <li>{key}</li>
+      }}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for(');
+    // for...in converts to Object.keys()
+    expect(code).toContain('Object.keys(');
+    expect(code).toContain('($$anchor, key) => {');
+  });
+
+  it('compiles C-style for loop', () => {
+    const source = `component App() {
+  render (
+    <ul>
+      {for (let i = 0; i < 5; i++) {
+        <li>{i}</li>
+      }}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for(');
+    expect(code).toContain('($$anchor, i) => {');
+    // Should generate a collection-building block
+    expect(code).toContain('__a.push(i)');
+  });
+
+  it('compiles C-style for loop with reactive bound', () => {
+    const source = `component App() {
+  state count = 5
+  render (
+    <ul>
+      {for (let i = 0; i < count; i++) {
+        <li>{i}</li>
+      }}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for(');
+    // Reactive bound should be wrapped in $.get()
+    expect(code).toContain('$.get(count)');
+  });
+
+  it('compiles .map() with JSX', () => {
+    const source = `component App() {
+  state items = ["a", "b", "c"]
+  render (
+    <ul>
+      {items.map(item => <li>{item}</li>)}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // .map() should be converted to $.for()
+    expect(code).toContain('$.for(');
+    expect(code).toContain('() => $.get(items)');
+    expect(code).toContain('($$anchor, item) => {');
+  });
+
+  it('compiles .map() with index parameter', () => {
+    const source = `component App() {
+  state items = ["a", "b"]
+  render (
+    <ul>
+      {items.map((item, i) => <li>{i}: {item}</li>)}
+    </ul>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.for(');
+    expect(code).toContain('($$anchor, item, i) => {');
+  });
+
+  it('compiles ternary expression with JSX', () => {
+    const source = `component App() {
+  state show = true
+  render (
+    <div>
+      {show ? <p>Visible</p> : <span>Hidden</span>}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Ternary with JSX should produce $.if()
+    expect(code).toContain('$.if(');
+    expect(code).toContain('() => $.get(show)');
+    expect(code).toContain('<p>Visible</p>');
+    expect(code).toContain('<span>Hidden</span>');
+  });
+
+  it('compiles ternary with null alternate as if-only', () => {
+    const source = `component App() {
+  state show = true
+  render (
+    <div>
+      {show ? <p>Visible</p> : null}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.if(');
+    expect(code).toContain('<p>Visible</p>');
+  });
+
+  it('compiles logical && with JSX', () => {
+    const source = `component App() {
+  state show = true
+  render (
+    <div>
+      {show && <p>Visible</p>}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // && with JSX should produce $.if()
+    expect(code).toContain('$.if(');
+    expect(code).toContain('() => $.get(show)');
+    expect(code).toContain('<p>Visible</p>');
+  });
+
+  // ── Switch block tests ───────────────────────────────────────────
+
+  it('compiles switch block in JSX', () => {
+    const source = `component App() {
+  state status = 'loading'
+  render (
+    <div>
+      {switch (status) {
+        case 'loading':
+          <p>Loading...</p>
+          break;
+        case 'success':
+          <p>Success!</p>
+          break;
+        default:
+          <p>Unknown</p>
+      }}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Template should have anchor for the switch block
+    expect(code).toContain('<!>');
+    // Should emit $.switch() call
+    expect(code).toContain('$.switch(');
+    // Discriminant should wrap reactive read
+    expect(code).toContain('() => $.get(status)');
+    // Case branches should be present
+    expect(code).toContain('<p>Loading...</p>');
+    expect(code).toContain('<p>Success!</p>');
+    expect(code).toContain('<p>Unknown</p>');
+    // Should have values arrays and null for default
+    expect(code).toContain("values: ['loading']");
+    expect(code).toContain("values: ['success']");
+    expect(code).toContain('values: null');
+  });
+
+  it('compiles switch block with fall-through cases', () => {
+    const source = `component App() {
+  state status = 'init'
+  render (
+    <div>
+      {switch (status) {
+        case 'init':
+        case 'loading':
+          <p>Loading...</p>
+          break;
+        case 'success':
+          <p>Done!</p>
+          break;
+      }}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.switch(');
+    // Fall-through: 'init' and 'loading' should be grouped
+    expect(code).toContain("values: ['init', 'loading']");
+    expect(code).toContain("values: ['success']");
+  });
+
+  it('compiles switch block at root level', () => {
+    const source = `component App() {
+  state mode = 'a'
+  render (
+    {switch (mode) {
+      case 'a':
+        <p>A</p>
+        break;
+      case 'b':
+        <p>B</p>
+        break;
+    }}
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.switch($$anchor');
+  });
+
+  // ── Try/catch block tests ────────────────────────────────────────
+
+  it('compiles try/catch block in JSX', () => {
+    const source = `component App() {
+  render (
+    <div>
+      {try {
+        <p>Content</p>
+      } catch (e) {
+        <p>Error occurred</p>
+      }}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Template should have anchor
+    expect(code).toContain('<!>');
+    // Should emit $.try() call
+    expect(code).toContain('$.try(');
+    // Both branches should be present
+    expect(code).toContain('<p>Content</p>');
+    expect(code).toContain('<p>Error occurred</p>');
+    // Catch parameter
+    expect(code).toContain('($$anchor, e)');
+  });
+
+  it('compiles try/catch/pending block', () => {
+    const source = `component App() {
+  render (
+    <div>
+      {try {
+        <p>Content</p>
+      } pending {
+        <p>Loading...</p>
+      } catch (err) {
+        <p>Failed</p>
+      }}
+    </div>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.try(');
+    expect(code).toContain('<p>Content</p>');
+    expect(code).toContain('<p>Failed</p>');
+    expect(code).toContain('<p>Loading...</p>');
+    // Catch parameter should be 'err'
+    expect(code).toContain('($$anchor, err)');
+  });
+
+  it('compiles try block at root level', () => {
+    const source = `component App() {
+  render (
+    {try {
+      <p>Content</p>
+    } catch (e) {
+      <p>Error</p>
+    }}
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.try($$anchor');
+  });
 });

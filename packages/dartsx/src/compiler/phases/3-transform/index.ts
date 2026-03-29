@@ -12,6 +12,8 @@ import type {
     JSXFragmentIR,
     JSXIfBlockIR,
     JSXForBlockIR,
+    JSXSwitchBlockIR,
+    JSXTryBlockIR,
     JSXAttrIR,
 } from '../2-analyze';
 import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from './expr';
@@ -190,7 +192,9 @@ function transformComponent(comp: ComponentIR, ctx: ModuleContext, reactiveCallT
         (c) =>
             (c.type === 'element' && (c as JSXElementIR).isComponent) ||
             c.type === 'if_block' ||
-            c.type === 'for_block',
+            c.type === 'for_block' ||
+            c.type === 'switch_block' ||
+            c.type === 'try_block',
     );
 
     if (hasDynamicRoot) {
@@ -209,6 +213,10 @@ function transformComponent(comp: ComponentIR, ctx: ModuleContext, reactiveCallT
                 emitIfBlock(child as JSXIfBlockIR, '$$anchor', comp.reactiveVars, ctx, nameCounter, lines, '    ');
             } else if (child.type === 'for_block') {
                 emitForBlock(child as JSXForBlockIR, '$$anchor', comp.reactiveVars, ctx, nameCounter, lines, '    ');
+            } else if (child.type === 'switch_block') {
+                emitSwitchBlock(child as JSXSwitchBlockIR, '$$anchor', comp.reactiveVars, ctx, nameCounter, lines, '    ');
+            } else if (child.type === 'try_block') {
+                emitTryBlock(child as JSXTryBlockIR, '$$anchor', comp.reactiveVars, ctx, nameCounter, lines, '    ');
             } else if (child.type === 'element') {
                 const factoryCode = emitElementFactory(
                     child as JSXElementIR,
@@ -290,7 +298,7 @@ function emitElementFactory(
             (c) => c.type === 'element' && !(c as JSXElementIR).isComponent,
         );
         const hasControlFlow = node.children.some(
-            (c) => c.type === 'if_block' || c.type === 'for_block',
+            (c) => c.type === 'if_block' || c.type === 'for_block' || c.type === 'switch_block' || c.type === 'try_block',
         );
         const hasDynamicText = node.children.some((c) => c.type === 'expression');
 
@@ -450,7 +458,7 @@ function emitChildrenSequential(
             }
         }
 
-        if (child.type === 'if_block' || child.type === 'for_block') {
+        if (child.type === 'if_block' || child.type === 'for_block' || child.type === 'switch_block' || child.type === 'try_block') {
             // Control flow block — navigate to <!> anchor
             const anchorVar = getName(nameCounter, 'anchor');
             if (prevVar === null) {
@@ -460,8 +468,12 @@ function emitChildrenSequential(
             }
             if (child.type === 'if_block') {
                 emitIfBlock(child as JSXIfBlockIR, anchorVar, reactiveVars, ctx, nameCounter, bodyLines, indent);
-            } else {
+            } else if (child.type === 'for_block') {
                 emitForBlock(child as JSXForBlockIR, anchorVar, reactiveVars, ctx, nameCounter, bodyLines, indent);
+            } else if (child.type === 'switch_block') {
+                emitSwitchBlock(child as JSXSwitchBlockIR, anchorVar, reactiveVars, ctx, nameCounter, bodyLines, indent);
+            } else if (child.type === 'try_block') {
+                emitTryBlock(child as JSXTryBlockIR, anchorVar, reactiveVars, ctx, nameCounter, bodyLines, indent);
             }
             prevVar = anchorVar;
         }
@@ -545,7 +557,11 @@ function emitForBlock(
     lines: string[],
     indent: string,
 ): void {
-    const collExpr = wrapReadsInGet(node.collection, reactiveVars);
+    // Block-body collections (C-style for) need statement-level transforms;
+    // simple expression collections use expression-level wrapping
+    const collExpr = node.collection.trimStart().startsWith('{')
+        ? transformBodyStatement(node.collection, reactiveVars)
+        : wrapReadsInGet(node.collection, reactiveVars);
     const inner = indent + '    ';
     const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
 
@@ -563,7 +579,72 @@ function emitForBlock(
     }
 }
 
-// ── Branch body emission (shared by if/for) ────────────────────────
+// ── Switch block emission ──────────────────────────────────────────
+
+function emitSwitchBlock(
+    node: JSXSwitchBlockIR,
+    anchorVar: string,
+    reactiveVars: Set<string>,
+    ctx: ModuleContext,
+    nameCounter: NameCounter,
+    lines: string[],
+    indent: string,
+): void {
+    const discExpr = wrapReadsInGet(node.discriminant, reactiveVars);
+    const inner = indent + '    ';
+    const innerInner = inner + '    ';
+
+    lines.push(`${indent}$.switch(${anchorVar}, () => ${discExpr}, [`);
+
+    for (const c of node.cases) {
+        const valuesStr = c.values === null ? 'null' : `[${c.values.join(', ')}]`;
+        const branchCode = emitBranchBody(c.body, reactiveVars, ctx, nameCounter, innerInner);
+        lines.push(`${inner}{ values: ${valuesStr}, fn: ($$anchor) => {`);
+        lines.push(branchCode);
+        lines.push(`${inner}}},`);
+    }
+
+    lines.push(`${indent}]);`);
+}
+
+// ── Try block emission ─────────────────────────────────────────────
+
+function emitTryBlock(
+    node: JSXTryBlockIR,
+    anchorVar: string,
+    reactiveVars: Set<string>,
+    ctx: ModuleContext,
+    nameCounter: NameCounter,
+    lines: string[],
+    indent: string,
+): void {
+    const inner = indent + '    ';
+
+    const tryCode = emitBranchBody(node.tryBranch, reactiveVars, ctx, nameCounter, inner);
+    lines.push(`${indent}$.try(${anchorVar}, ($$anchor) => {`);
+    lines.push(tryCode);
+
+    if (node.catchBranch) {
+        const catchCode = emitBranchBody(node.catchBranch, reactiveVars, ctx, nameCounter, inner);
+        const param = node.catchParam || 'e';
+        lines.push(`${indent}}, ($$anchor, ${param}) => {`);
+        lines.push(catchCode);
+    }
+
+    if (node.pendingBranch) {
+        const pendCode = emitBranchBody(node.pendingBranch, reactiveVars, ctx, nameCounter, inner);
+        if (!node.catchBranch) {
+            lines.push(`${indent}}, undefined, ($$anchor) => {`);
+        } else {
+            lines.push(`${indent}}, ($$anchor) => {`);
+        }
+        lines.push(pendCode);
+    }
+
+    lines.push(`${indent}});`);
+}
+
+// ── Branch body emission (shared by if/for/switch/try) ─────────────
 
 function emitBranchBody(
     children: JSXNodeIR[],
@@ -658,7 +739,9 @@ function buildSingleElementHTML(node: JSXElementIR): string {
         (c) =>
             (c.type === 'element' && (c as JSXElementIR).isComponent) ||
             c.type === 'if_block' ||
-            c.type === 'for_block',
+            c.type === 'for_block' ||
+            c.type === 'switch_block' ||
+            c.type === 'try_block',
     );
     const hasNativeElements = node.children.some(
         (c) => c.type === 'element' && !(c as JSXElementIR).isComponent,
@@ -673,7 +756,7 @@ function buildSingleElementHTML(node: JSXElementIR): string {
                 html += buildSingleElementHTML(child as JSXElementIR);
             } else if (child.type === 'element' && (child as JSXElementIR).isComponent) {
                 html += '<!>'; // anchor placeholder for component
-            } else if (child.type === 'if_block' || child.type === 'for_block') {
+            } else if (child.type === 'if_block' || child.type === 'for_block' || child.type === 'switch_block' || child.type === 'try_block') {
                 html += '<!>'; // anchor placeholder for control flow
             } else if (child.type === 'expression') {
                 html += ' '; // text node placeholder for expression
