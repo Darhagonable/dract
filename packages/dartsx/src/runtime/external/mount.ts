@@ -2,13 +2,9 @@ import { setCurrentComponent, type ComponentContext } from '../internal/client';
 
 /**
  * Mount a component into a target element.
- * Creates a comment anchor inside the target, sets up a component context,
- * and flushes onMount callbacks after the component initializes.
+ * Components return DOM nodes; mount appends them to the target.
  */
-export function mount(component: (anchor: Node) => void, target: Element): void {
-    const anchor = document.createComment('');
-    target.appendChild(anchor);
-
+export function mount(component: (props?: any) => Node, target: Element, props?: Record<string, any>): void {
     const ctx: ComponentContext = {
         onMountCallbacks: [],
         onDestroyCallbacks: [],
@@ -16,8 +12,12 @@ export function mount(component: (anchor: Node) => void, target: Element): void 
     };
 
     const prev = setCurrentComponent(ctx);
-    component(anchor);
+    const dom = component(props || {});
     setCurrentComponent(prev);
+
+    if (dom instanceof Node) {
+        target.appendChild(dom);
+    }
 
     // Flush onMount callbacks after the component is in the DOM
     for (const cb of ctx.onMountCallbacks) {

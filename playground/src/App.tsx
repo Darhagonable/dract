@@ -1,4 +1,5 @@
 import Counter from "./Counter";
+import ProfileForm from "./ProfileForm";
 import { test } from "./helper-test";
 
 export default component App() {
@@ -21,6 +22,8 @@ export default component App() {
       <button onclick={changeVars}>Change Vars</button>
       <button onclick={changeVars2}>Change Vars 2</button>
       <Counter />
+      <hr />
+      <ProfileForm />
     </div>
   )
 }

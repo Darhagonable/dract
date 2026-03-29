@@ -1,17 +1,15 @@
 import { effect } from '../reactivity/effect';
 
-/**
- * Reactive if block. Renders one branch at a time; swaps when condition changes.
- * Content is inserted before the anchor comment node.
- */
 export function if_block(
-    anchor: Node,
-    condFn: () => boolean,
-    trueFn: (anchor: Node) => void,
-    falseFn?: (anchor: Node) => void,
-): void {
-    const startMarker = document.createComment('');
-    anchor.parentNode!.insertBefore(startMarker, anchor);
+    condFn: () => any,
+    trueFn: () => any,
+    falseFn?: () => any,
+): Node {
+    const start = document.createComment('');
+    const end = document.createComment('');
+    const frag = document.createDocumentFragment();
+    frag.appendChild(start);
+    frag.appendChild(end);
 
     let currentBranch: boolean | null = null;
 
@@ -20,16 +18,17 @@ export function if_block(
         if (cond === currentBranch) return;
         currentBranch = cond;
 
-        // Remove old content between markers
-        while (startMarker.nextSibling !== anchor) {
-            startMarker.nextSibling!.remove();
+        while (start.nextSibling !== end) {
+            start.nextSibling!.remove();
         }
 
-        // Render new branch — content inserts before anchor
-        if (cond) {
-            trueFn(anchor);
-        } else if (falseFn) {
-            falseFn(anchor);
+        const result = cond ? trueFn() : (falseFn ? falseFn() : null);
+        if (result instanceof Node) {
+            end.parentNode!.insertBefore(result, end);
+        } else if (result != null && result !== false && result !== true) {
+            end.parentNode!.insertBefore(document.createTextNode(String(result)), end);
         }
     });
+
+    return frag;
 }

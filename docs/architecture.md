@@ -41,7 +41,7 @@ Component props are wrapped in `$.prop()` which returns a derived signal:
 
 ```js
 let value = $.prop.bind($$props, 'value');
-let onSubmit = $.prop($$props, 'onSubmit', alert);
+const onSubmit = $.prop($$props, 'onSubmit', alert);
 ```
 
 ### Cross-file reactivity

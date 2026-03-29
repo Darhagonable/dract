@@ -22,6 +22,8 @@ export interface ComponentIR {
 
 export interface ParamIR {
     name: string;
+    /** External prop name if renamed via 'ext-name' as localName syntax */
+    externalName: string | null;
     isBind: boolean;
     isRest: boolean;
     defaultValue: string | null;
@@ -231,7 +233,7 @@ export function analyze(
         const fn = extractFunctionDecl(node);
         if (fn && componentNames.has(fn.name)) {
             const compMeta = meta.components.find((c) => c.name === fn.name)!;
-            const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars);
+            const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams);
             components.push(ir);
             continue;
         }
@@ -488,6 +490,7 @@ function analyzeComponent(
     stateSet: Set<string>,
     derivedSet: Set<string>,
     crossFileReactiveVars: Set<string>,
+    renamedParams: Record<string, string>,
 ): ComponentIR {
     const params: ParamIR[] = [];
     const stateVars: { name: string; initExpr: string }[] = [];
@@ -498,7 +501,7 @@ function analyzeComponent(
 
     // Analyze params
     for (const param of fn.params) {
-        const p = analyzeParam(param, source);
+        const p = analyzeParam(param, source, renamedParams);
         params.push(p);
         // All non-rest props are reactive (wrapped in $.prop → derived signal)
         if (!p.isRest) {
@@ -549,33 +552,42 @@ function analyzeComponent(
     return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, jsx, bodyStatements };
 }
 
-function analyzeParam(param: any, source: string): ParamIR {
+function analyzeParam(param: any, source: string, renamedParams: Record<string, string>): ParamIR {
     if (param.type === 'RestElement') {
         return {
             name: param.argument?.name || 'rest',
+            externalName: null,
             isBind: false,
             isRest: true,
             defaultValue: null,
         };
     }
     if (param.type === 'AssignmentPattern') {
+        const rawName = param.left?.name || 'unknown';
+        const isBind = rawName.startsWith('__bind__');
+        const name = isBind ? rawName.slice(8) : rawName;
         return {
-            name: param.left?.name || 'unknown',
-            isBind: false,
+            name,
+            externalName: renamedParams[name] || null,
+            isBind,
             isRest: false,
             defaultValue: source.slice(param.right.start, param.right.end),
         };
     }
     if (param.type === 'Identifier') {
+        const rawName = param.name;
+        const isBind = rawName.startsWith('__bind__');
+        const name = isBind ? rawName.slice(8) : rawName;
         return {
-            name: param.name,
-            isBind: false,
+            name,
+            externalName: renamedParams[name] || null,
+            isBind,
             isRest: false,
             defaultValue: null,
         };
     }
     // Fallback
-    return { name: 'unknown', isBind: false, isRest: false, defaultValue: null };
+    return { name: 'unknown', externalName: null, isBind: false, isRest: false, defaultValue: null };
 }
 
 // ── JSX Analysis ───────────────────────────────────────────────────

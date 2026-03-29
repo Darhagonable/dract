@@ -1,33 +1,86 @@
 import { effect } from '../reactivity/effect';
 
-/**
- * Reactive for block. Re-renders list items when the collection changes.
- * Uses optional key function for efficient reconciliation.
- */
-export function for_block(
-    anchor: Node,
-    collFn: () => any[],
-    bodyFn: (anchor: Node, item: any, index: number) => void,
-    keyFn?: (item: any) => any,
-): void {
-    const startMarker = document.createComment('');
-    anchor.parentNode!.insertBefore(startMarker, anchor);
+interface KeyedEntry {
+    key: any;
+    nodes: Node[];
+}
 
-    let currentItems: any[] = [];
+function collectNodes(result: any): Node[] {
+    if (result instanceof DocumentFragment) {
+        return Array.from(result.childNodes);
+    }
+    if (result instanceof Node) {
+        return [result];
+    }
+    if (result != null && result !== false && result !== true) {
+        return [document.createTextNode(String(result))];
+    }
+    return [];
+}
+
+function insertNodes(nodes: Node[], before: Node): void {
+    const parent = before.parentNode!;
+    for (const n of nodes) parent.insertBefore(n, before);
+}
+
+export function for_block(
+    collFn: () => any[],
+    bodyFn: (item: any, index: number) => any,
+    keyFn?: (item: any) => any,
+): Node {
+    const start = document.createComment('');
+    const end = document.createComment('');
+    const frag = document.createDocumentFragment();
+    frag.appendChild(start);
+    frag.appendChild(end);
+
+    let mapped: KeyedEntry[] = [];
 
     effect(() => {
         const items = collFn() || [];
 
-        // Remove old content
-        while (startMarker.nextSibling !== anchor) {
-            startMarker.nextSibling!.remove();
+        // Clear existing content
+        while (start.nextSibling !== end) {
+            start.nextSibling!.remove();
         }
 
-        // Render each item
+        if (!keyFn) {
+            // No key function — simple rebuild
+            mapped = [];
+            for (let i = 0; i < items.length; i++) {
+                const nodes = collectNodes(bodyFn(items[i], i));
+                insertNodes(nodes, end);
+                mapped.push({ key: i, nodes });
+            }
+            return;
+        }
+
+        // Keyed reconciliation — reuse DOM nodes for items with matching keys
+        const oldMap = new Map<any, KeyedEntry>();
+        for (const entry of mapped) {
+            oldMap.set(entry.key, entry);
+        }
+
+        const newMapped: KeyedEntry[] = [];
         for (let i = 0; i < items.length; i++) {
-            bodyFn(anchor, items[i], i);
+            const key = keyFn(items[i]);
+            const existing = oldMap.get(key);
+
+            if (existing) {
+                // Reuse existing DOM nodes (preserves internal state, listeners, etc.)
+                insertNodes(existing.nodes, end);
+                newMapped.push(existing);
+                oldMap.delete(key);
+            } else {
+                // Create new DOM nodes for this item
+                const nodes = collectNodes(bodyFn(items[i], i));
+                insertNodes(nodes, end);
+                newMapped.push({ key, nodes });
+            }
         }
 
-        currentItems = [...items];
+        mapped = newMapped;
     });
+
+    return frag;
 }

@@ -87,22 +87,39 @@ function notifySubscribers(subs: Set<Subscriber>): void {
     }
 }
 
-// ── $.prop(propsSignalOrGetter, defaultValue?) ─────────────────────
+// ── $.prop(propsObj, key, defaultValue?) — read-only prop ──────────
+// ── $.prop.bind(propsObj, key, defaultValue?) — two-way bindable prop
 
 import { derived, type DerivedSignal } from './derived';
 
-export function prop<T>(getter: (() => T) | Signal<T>, defaultValue?: T): DerivedSignal<T> | Signal<T> {
-    // If it's already a signal (bind prop), return it as-is
-    if (getter && typeof getter === 'object' && 'v' in getter) {
-        return getter as Signal<T>;
-    }
-    // Wrap the getter in a derived signal for reactivity
-    const fn = getter as () => T;
+export interface PropFunction {
+    <T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T>;
+    bind<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T>;
+}
+
+function resolveProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T> {
     return derived(() => {
-        const val = fn();
+        const getter = propsObj[key];
+        const val = typeof getter === 'function' ? getter() : getter;
         return val === undefined && defaultValue !== undefined ? defaultValue! : val;
     });
 }
+
+let prop: PropFunction
+
+prop = function prop<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T> {
+    return resolveProp(propsObj, key, defaultValue);
+}
+
+prop.bind = function bindProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T> {
+    const value = propsObj[key];
+    if (value && typeof value === 'object' && 'v' in value) {
+        return value as Signal<T>;
+    }
+    return resolveProp(propsObj, key, defaultValue);
+};
+
+export { prop };
 
 // ── Effect scheduling (batched microtask) ──────────────────────────
 

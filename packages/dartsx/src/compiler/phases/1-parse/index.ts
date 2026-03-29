@@ -25,6 +25,8 @@ export interface PreprocessResult {
     stateVars: string[];
     /** Names of `derived` variable declarations */
     derivedVars: string[];
+    /** Renamed params: localName → externalName (from 'ext-name' as localName syntax) */
+    renamedParams: Record<string, string>;
 }
 
 // ── Pre-process ────────────────────────────────────────────────────
@@ -50,6 +52,21 @@ export function preprocess(source: string): PreprocessResult {
         },
     );
 
+    // 1b. Transform renamed params: 'ext-name' as localName → localName
+    //     Store the external→local mapping so the analyzer can set externalName on ParamIR.
+    const renamedParams: Record<string, string> = {};
+    code = code.replace(
+        /(['"])([^'"]+)\1\s+as\s+(\w+)/g,
+        (_match, _quote, externalName, localName) => {
+            renamedParams[localName] = externalName;
+            return localName;
+        },
+    );
+
+    // 1c. Transform `bind paramName` in function params → `__bind__paramName`
+    //     so OXC can parse it as a valid identifier, and the analyzer can detect it.
+    code = code.replace(/\bbind\s+(\w+)/g, '__bind__$1');
+
     // 2. Transform `state varName = expr` → `let varName = expr`
     //    Only match when `state` is used as a declaration keyword (not property access)
     //    Also detect `export state` to track reactive exports
@@ -61,12 +78,12 @@ export function preprocess(source: string): PreprocessResult {
         },
     );
 
-    // 3. Transform `derived varName = expr` → `let varName = expr`
+    // 3. Transform `derived varName = expr` → `const varName = expr`
     code = code.replace(
         /(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)\s*(?==)/g,
         (_match, exportKw, name) => {
             derivedVars.push(name);
-            return `${exportKw || ''}let ${name} `;
+            return `${exportKw || ''}const ${name} `;
         },
     );
 
@@ -79,7 +96,7 @@ export function preprocess(source: string): PreprocessResult {
     // 6. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
     code = transformControlFlowBlocks(code);
 
-    return { code, components, stateVars, derivedVars };
+    return { code, components, stateVars, derivedVars, renamedParams };
 }
 
 // ── Render block transformation ────────────────────────────────────
@@ -273,9 +290,9 @@ function buildIfCall(source: string, stmt: any): string {
 
     if (stmt.alternate) {
         if (stmt.alternate.type === 'IfStatement') {
-            // else if — recurse to build nested __if
+            // else if — recurse to build nested __if, wrapped in expression container
             const nestedCall = buildIfCall(source, stmt.alternate);
-            return `__if(() => (${condition}), () => (<>${trueBody}</>), () => (<>${nestedCall}</>))`;
+            return `__if(() => (${condition}), () => (<>${trueBody}</>), () => (<>{${nestedCall}}</>))`;
         }
         // else block
         const falseBody = source.slice(stmt.alternate.start + 1, stmt.alternate.end - 1).trim();

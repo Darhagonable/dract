@@ -23,7 +23,11 @@ create_test_suite('./reactivity/effect-watch');
 // --- Control flow tests ---
 create_test_suite('./control-flow/if');
 create_test_suite('./control-flow/if-else');
+create_test_suite('./control-flow/else-if');
 create_test_suite('./control-flow/for-basic');
+create_test_suite('./control-flow/switch-basic');
+create_test_suite('./control-flow/try-catch');
+create_test_suite('./control-flow/try-pending-catch');
 
 // --- Lifecycle tests ---
 create_test_suite('./lifecycle/onmount');
