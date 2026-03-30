@@ -15,6 +15,8 @@ export interface ComponentIR {
     derivedVars: { name: string; expr: string }[];
     /** All variable names that are reactive (state + derived + bind props) */
     reactiveVars: Set<string>;
+    /** State vars whose $.state() returns a proxy (object/array init) — skip $.get/$.set */
+    proxyVars: Set<string>;
     jsx: JSXNodeIR;
     /** Raw non-JSX statements between state/derived and render (to preserve) */
     bodyStatements: string[];
@@ -117,6 +119,10 @@ export interface JSXAttrIR {
     bindProperty?: string;
     /** Static attribute value string, or raw expression source */
     value: string | null;
+    /** For function bindings: explicit getter expression (may be 'null') */
+    bindGetter?: string;
+    /** For function bindings: explicit setter expression */
+    bindSetter?: string;
 }
 
 // ── Analysis Result (full module) ──────────────────────────────────
@@ -135,6 +141,8 @@ export interface AnalysisResult {
     moduleStatements: string[];
     /** Module-level reactive var names (state + derived + cross-file imports) */
     moduleReactiveVars: Set<string>;
+    /** Module-level proxy vars (object/array state) — skip $.get/$.set */
+    moduleProxyVars: Set<string>;
     /** Names of reactive exports (state + derived) for implicit-mode cross-file tracking */
     reactiveExports: string[];
     /**
@@ -175,6 +183,7 @@ export function analyze(
     const moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[] }[] = [];
     const moduleStatements: string[] = [];
     const moduleReactiveVars = new Set<string>();
+    const moduleProxyVars = new Set<string>();
     const reactiveExports: string[] = [];
     const pendingFunctions: { node: any; fnInfo: FnInfo }[] = [];
     const pendingStatements: any[] = [];
@@ -253,6 +262,7 @@ export function analyze(
                         const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         moduleStateVars.push({ name, initExpr, exported });
                         moduleReactiveVars.add(name);
+                        if (decl.init && isProxyInit(decl.init)) moduleProxyVars.add(name);
                         if (exported) reactiveExports.push(name);
                         handled = true;
                     } else if (derivedSet.has(name)) {
@@ -274,7 +284,7 @@ export function analyze(
             // Collect param names for call-site analysis
             const paramNames = fnInfo.params
                 .map((p: any) => p.name || p.argument?.name || p.left?.name)
-                .filter(Boolean) as string[];
+                .filter(Boolean);
             functionParamMap.set(fnInfo.name, paramNames);
             continue;
         }
@@ -350,7 +360,7 @@ export function analyze(
             reactiveCallTargets.set(fnName, indices);
         }
     }
-    // Imported functions with detected reactive call positions
+    // Imported functions with detected reactive call positions (from same-file call-site analysis)
     for (const [_specifier, fns] of Object.entries(reactiveCalls)) {
         for (const [fnName, indices] of Object.entries(fns)) {
             // Find the local name for this imported function
@@ -363,6 +373,14 @@ export function analyze(
             }
         }
     }
+    // Imported functions with reactive param info from cross-file tracking (via Vite plugin)
+    if (reactiveCallImports) {
+        for (const [fnName, indices] of Object.entries(reactiveCallImports)) {
+            const existing = reactiveCallTargets.get(fnName) || new Set();
+            for (const idx of indices) existing.add(idx);
+            reactiveCallTargets.set(fnName, existing);
+        }
+    }
 
     return {
         components,
@@ -372,6 +390,7 @@ export function analyze(
         moduleFunctions,
         moduleStatements,
         moduleReactiveVars,
+        moduleProxyVars,
         reactiveExports,
         reactiveCalls,
         reactiveCallTargets,
@@ -496,6 +515,7 @@ function analyzeComponent(
     const stateVars: { name: string; initExpr: string }[] = [];
     const derivedVars: { name: string; expr: string }[] = [];
     const reactiveVars = new Set<string>(crossFileReactiveVars);
+    const proxyVars = new Set<string>();
     const bodyStatements: string[] = [];
     let jsx: JSXNodeIR | null = null;
 
@@ -521,6 +541,7 @@ function analyzeComponent(
                         const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         stateVars.push({ name, initExpr });
                         reactiveVars.add(name);
+                        if (decl.init && isProxyInit(decl.init)) proxyVars.add(name);
                     } else if (derivedSet.has(name)) {
                         const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         derivedVars.push({ name, expr });
@@ -549,7 +570,7 @@ function analyzeComponent(
         jsx = { type: 'fragment', children: [] };
     }
 
-    return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, jsx, bodyStatements };
+    return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, proxyVars, jsx, bodyStatements };
 }
 
 function analyzeParam(param: any, source: string, renamedParams: Record<string, string>): ParamIR {
@@ -707,12 +728,27 @@ function analyzeJSXElement(node: any, source: string): JSXElementIR {
             const ns = attr.name.namespace.name;
             const local = attr.name.name.name;
             if (ns === 'bind') {
-                attributes.push({
-                    kind: 'bind',
-                    name: `bind:${local}`,
-                    bindProperty: local,
-                    value: attrValue,
-                });
+                const expr = attr.value?.type === 'JSXExpressionContainer' ? attr.value.expression : null;
+                if (expr?.type === 'ArrayExpression' && expr.elements.length === 2) {
+                    // Function binding: bind:value={getter, setter} (pre-wrapped as array by parser)
+                    const getExpr = source.slice(expr.elements[0].start, expr.elements[0].end);
+                    const setExpr = source.slice(expr.elements[1].start, expr.elements[1].end);
+                    attributes.push({
+                        kind: 'bind',
+                        name: `bind:${local}`,
+                        bindProperty: local,
+                        value: null,
+                        bindGetter: getExpr,
+                        bindSetter: setExpr,
+                    });
+                } else {
+                    attributes.push({
+                        kind: 'bind',
+                        name: `bind:${local}`,
+                        bindProperty: local,
+                        value: attrValue,
+                    });
+                }
                 continue;
             }
         }
@@ -765,6 +801,18 @@ function getTagName(nameNode: any): string {
         return `${getTagName(nameNode.object)}.${nameNode.property.name}`;
     }
     return 'unknown';
+}
+
+/**
+ * Detect whether a state initializer will produce a proxy at runtime.
+ * $.state() returns a proxy for objects/arrays, a Signal for primitives.
+ */
+function isProxyInit(initNode: any): boolean {
+    if (!initNode) return false;
+    const t = initNode.type;
+    return t === 'ObjectExpression' || t === 'ArrayExpression' ||
+        (t === 'NewExpression' && initNode.callee?.type === 'Identifier' &&
+            ['Map', 'Set', 'WeakMap', 'WeakSet'].includes(initNode.callee.name));
 }
 
 function getAttrName(nameNode: any): string {

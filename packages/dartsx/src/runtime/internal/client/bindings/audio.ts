@@ -1,6 +1,6 @@
-import { type Signal, get, set } from '../reactivity/state';
 import { effect } from '../reactivity/effect';
 import { listen } from './shared';
+import type { Getter, Setter } from './types';
 
 // ── Two-way bindings ───────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ function timeRangesToArray(ranges: TimeRanges): { start: number; end: number }[]
     return arr;
 }
 
-export function bindCurrentTime(media: HTMLMediaElement, signal: Signal<number>): void {
+export function bindCurrentTime(media: HTMLMediaElement, get: Getter<number>, set: Setter<number>): void {
     let raf: number;
     let value: number;
 
@@ -23,7 +23,7 @@ export function bindCurrentTime(media: HTMLMediaElement, signal: Signal<number>)
         }
         const next = media.currentTime;
         if (value !== next) {
-            set(signal, (value = next));
+            set((value = next));
         }
     };
 
@@ -31,60 +31,60 @@ export function bindCurrentTime(media: HTMLMediaElement, signal: Signal<number>)
     media.addEventListener('timeupdate', callback);
 
     effect(() => {
-        const next = get(signal);
+        const next = get();
         if (value !== next && !isNaN(next)) {
             media.currentTime = value = next;
         }
     });
 }
 
-export function bindPaused(media: HTMLMediaElement, signal: Signal<boolean>): void {
-    let paused = get(signal);
+export function bindPaused(media: HTMLMediaElement, get: Getter<boolean>, set: Setter<boolean>): void {
+    let paused = get();
 
     listen(media, ['play', 'pause', 'canplay'], () => {
         if (paused !== media.paused) {
-            set(signal, (paused = media.paused));
+            set((paused = media.paused));
         }
     }, paused == null);
 
     effect(() => {
-        if ((paused = !!get(signal)) !== media.paused) {
+        if ((paused = !!get()) !== media.paused) {
             if (paused) {
                 media.pause();
             } else {
-                media.play().catch(() => {});
+                media.play().catch(() => { });
             }
         }
     });
 }
 
-export function bindVolume(media: HTMLMediaElement, signal: Signal<number>): void {
+export function bindVolume(media: HTMLMediaElement, get: Getter<number>, set: Setter<number>): void {
     listen(media, ['volumechange'], () => {
-        set(signal, media.volume);
-    }, get(signal) == null);
+        set(media.volume);
+    }, get() == null);
 
     effect(() => {
-        const value = get(signal);
+        const value = get();
         if (value !== media.volume && !isNaN(value)) {
             media.volume = value;
         }
     });
 }
 
-export function bindMuted(media: HTMLMediaElement, signal: Signal<boolean>): void {
+export function bindMuted(media: HTMLMediaElement, get: Getter<boolean>, set: Setter<boolean>): void {
     listen(media, ['volumechange'], () => {
-        set(signal, media.muted);
-    }, get(signal) == null);
+        set(media.muted);
+    }, get() == null);
 
     effect(() => {
-        const value = !!get(signal);
+        const value = !!get();
         if (media.muted !== value) media.muted = value;
     });
 }
 
-export function bindPlaybackRate(media: HTMLMediaElement, signal: Signal<number>): void {
+export function bindPlaybackRate(media: HTMLMediaElement, get: Getter<number>, set: Setter<number>): void {
     effect(() => {
-        const value = get(signal);
+        const value = get();
         if (value !== media.playbackRate && !isNaN(value)) {
             media.playbackRate = value;
         }
@@ -92,41 +92,41 @@ export function bindPlaybackRate(media: HTMLMediaElement, signal: Signal<number>
 
     effect(() => {
         listen(media, ['ratechange'], () => {
-            set(signal, media.playbackRate);
+            set(media.playbackRate);
         });
     });
 }
 
 // ── Readonly bindings ──────────────────────────────────────────────
 
-export function bindDuration(media: HTMLMediaElement, signal: Signal): void {
-    listen(media, ['loadedmetadata', 'durationchange'], () => set(signal, media.duration));
+export function bindDuration(media: HTMLMediaElement, _get: any, set: Setter): void {
+    listen(media, ['loadedmetadata', 'durationchange'], () => set(media.duration));
 }
 
-export function bindBuffered(media: HTMLMediaElement, signal: Signal): void {
+export function bindBuffered(media: HTMLMediaElement, _get: any, set: Setter): void {
     listen(media, ['loadedmetadata', 'progress', 'timeupdate', 'seeking'], () => {
-        set(signal, timeRangesToArray(media.buffered));
+        set(timeRangesToArray(media.buffered));
     });
 }
 
-export function bindSeekable(media: HTMLMediaElement, signal: Signal): void {
-    listen(media, ['loadedmetadata'], () => set(signal, timeRangesToArray(media.seekable)));
+export function bindSeekable(media: HTMLMediaElement, _get: any, set: Setter): void {
+    listen(media, ['loadedmetadata'], () => set(timeRangesToArray(media.seekable)));
 }
 
-export function bindSeeking(media: HTMLMediaElement, signal: Signal<boolean>): void {
-    listen(media, ['seeking', 'seeked'], () => set(signal, media.seeking));
+export function bindSeeking(media: HTMLMediaElement, _get: any, set: Setter<boolean>): void {
+    listen(media, ['seeking', 'seeked'], () => set(media.seeking));
 }
 
-export function bindEnded(media: HTMLMediaElement, signal: Signal<boolean>): void {
-    listen(media, ['timeupdate', 'ended'], () => set(signal, media.ended));
+export function bindEnded(media: HTMLMediaElement, _get: any, set: Setter<boolean>): void {
+    listen(media, ['timeupdate', 'ended'], () => set(media.ended));
 }
 
-export function bindReadyState(media: HTMLMediaElement, signal: Signal<number>): void {
+export function bindReadyState(media: HTMLMediaElement, _get: any, set: Setter<number>): void {
     listen(media, ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'playing', 'waiting', 'emptied'], () => {
-        set(signal, media.readyState);
+        set(media.readyState);
     });
 }
 
-export function bindPlayed(media: HTMLMediaElement, signal: Signal): void {
-    listen(media, ['timeupdate'], () => set(signal, timeRangesToArray(media.played)));
+export function bindPlayed(media: HTMLMediaElement, _get: any, set: Setter): void {
+    listen(media, ['timeupdate'], () => set(timeRangesToArray(media.played)));
 }

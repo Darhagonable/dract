@@ -93,10 +93,60 @@ export function preprocess(source: string): PreprocessResult {
     // 5. Transform `bind:{x}` shorthand → `bind:value={x}`
     code = code.replace(/bind:\{(\w+)\}/g, 'bind:value={$1}');
 
-    // 6. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
+    // 6. Wrap function bindings: `bind:prop={get, set}` → `bind:prop={[get, set]}`
+    //    so OXC can parse them (JSX disallows the comma operator)
+    code = wrapFunctionBindings(code);
+
+    // 7. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
     code = transformControlFlowBlocks(code);
 
     return { code, components, stateVars, derivedVars, renamedParams };
+}
+
+// ── Function binding wrapper ───────────────────────────────────────
+
+/**
+ * Finds `bind:prop={expr1, expr2}` and wraps as `bind:prop={[expr1, expr2]}`
+ * so OXC doesn't reject the comma operator inside JSX.
+ */
+function wrapFunctionBindings(code: string): string {
+    const bindRegex = /bind:\w+\s*=\s*\{/g;
+    let match;
+    let result = '';
+    let lastIndex = 0;
+
+    while ((match = bindRegex.exec(code)) !== null) {
+        const openBrace = match.index + match[0].length - 1;
+        const closeBrace = findMatchingBrace(code, openBrace);
+        if (closeBrace === -1) continue;
+
+        const inner = code.slice(openBrace + 1, closeBrace);
+        if (hasTopLevelComma(inner)) {
+            result += code.slice(lastIndex, openBrace + 1);
+            result += `[${inner}]`;
+            result += '}';
+            lastIndex = closeBrace + 1;
+        }
+    }
+
+    result += code.slice(lastIndex);
+    return result;
+}
+
+function hasTopLevelComma(expr: string): boolean {
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+        const ch = expr[i];
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}') depth--;
+        else if (ch === ',' && depth === 0) return true;
+        else if (ch === '\'' || ch === '"') {
+            i = skipString(expr, i) - 1;
+        } else if (ch === '`') {
+            i = skipTemplateLiteral(expr, i) - 1;
+        }
+    }
+    return false;
 }
 
 // ── Render block transformation ────────────────────────────────────
@@ -276,7 +326,7 @@ function tryParseIfBlock(code: string, outerBrace: number): ControlFlowResult | 
     const stmts = result.program.body;
     if (stmts.length === 0 || stmts[0].type !== 'IfStatement') return null;
 
-    const output = buildIfCall(transformed, stmts[0] as any);
+    const output = buildIfCall(transformed, stmts[0]);
     return { text: `{${output}}`, end: outerClose + 1 };
 }
 
@@ -389,7 +439,7 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
     });
     if (forOfResult.errors.length > 0 || forOfResult.program.body.length === 0) return null;
 
-    const forOfStmt = forOfResult.program.body[0] as any;
+    const forOfStmt = forOfResult.program.body[0];
     if (forOfStmt.type !== 'ForOfStatement') return null;
 
     const leftSource = forOfSource.slice(forOfStmt.left.start, forOfStmt.left.end);
@@ -426,7 +476,7 @@ function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResul
     const stmts = result.program.body;
     if (stmts.length === 0 || stmts[0].type !== 'SwitchStatement') return null;
 
-    const switchStmt = stmts[0] as any;
+    const switchStmt = stmts[0];
     const discriminant = transformed.slice(switchStmt.discriminant.start, switchStmt.discriminant.end);
     const switchCases = switchStmt.cases || [];
 

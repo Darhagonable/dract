@@ -116,12 +116,12 @@ export component Clock() {
   state now = new Date();
 
   // Update every second
-  effect(() => {
+  onMount(() => {
     const interval = setInterval(() => {
       now.setTime(Date.now());
     }, 1000);
 
-    return () => clearInterval(interval);
+    onCleanup(() => clearInterval(interval));
   });
 
   render (

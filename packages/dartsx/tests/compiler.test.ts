@@ -54,8 +54,8 @@ describe('compiler', () => {
     expect(code).toContain('() => $.get(count)');
     expect(code).toContain('() => $.get(doubled)');
 
-    // Should have bind:value
-    expect(code).toContain('"bind:value": name');
+    // Should have bind:value with accessor
+    expect(code).toContain('"bind:value": [() => $.get(name), (v) => $.set(name, v)]');
 
     // Should have click event with transformed assignment
     expect(code).toContain('onclick: () => $.set(count, $.get(count) + 1)');
@@ -132,10 +132,10 @@ describe('compiler', () => {
 }`;
 
     const result = compile(source);
-    expect(result.code).toContain('"bind:value": value');
+    expect(result.code).toContain('"bind:value": [() => $.get(value), (v) => $.set(value, v)]');
   });
 
-  it('passes bind:prop as raw signal on components', () => {
+  it('passes bind:prop as [getter, setter] tuple on components', () => {
     const source = `component Parent() {
   state name = "hello"
   render (
@@ -145,8 +145,35 @@ describe('compiler', () => {
 
     const result = compile(source);
     const code = normalizeWhitespace(result.code);
-    // Component should pass bind:name with the raw signal
-    expect(code).toContain('Child({ "bind:name": name })');
+    expect(code).toContain('Child({ "bind:name": [() => $.get(name), (v) => $.set(name, v)] })');
+  });
+
+  it('emits accessor for bind:value on proxy member expression', () => {
+    const source = `component Form() {
+  state form = { name: "", email: "" }
+  render (
+    <input bind:value={form.name} />
+  )
+}`;
+
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Should emit direct proxy access, not $.get() wrapped
+    expect(code).toContain('"bind:value": [() => form.name, (v) => form.name = v]');
+  });
+
+  it('emits [getter, setter] for component bind with member expression', () => {
+    const source = `component Parent() {
+  state form = { name: "" }
+  render (
+    <Child bind:name={form.name} />
+  )
+}`;
+
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Member expression: should emit tuple with direct proxy access
+    expect(code).toContain('"bind:name": [() => form.name, (v) => form.name = v]');
   });
 
   it('supports bind keyword in component param declarations', () => {
@@ -163,6 +190,35 @@ describe('compiler', () => {
     expect(code).toContain("let value = $.prop.bind($$props, 'value')");
     // Should NOT contain __bind__ prefix in output
     expect(code).not.toContain('__bind__');
+  });
+
+  it('supports function binding with custom getter/setter', () => {
+    const source = `component Form() {
+  state value = "hello"
+  render (
+    <input bind:value={
+      () => value,
+      (v) => value = v.toLowerCase()
+    } />
+  )
+}`;
+
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('"bind:value": [() => $.get(value), (v) => $.set(value, v.toLowerCase())]');
+  });
+
+  it('supports readonly function binding with null getter', () => {
+    const source = `component Layout() {
+  state width = 0
+  render (
+    <div bind:clientWidth={null, (v) => width = v}>content</div>
+  )
+}`;
+
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('"bind:clientWidth": [null, (v) => $.set(width, v)]');
   });
 
   it('supports bind keyword with default value in param', () => {
@@ -436,7 +492,7 @@ describe('compiler', () => {
     const result = compile(source);
     const code = normalizeWhitespace(result.code);
     expect(code).toContain('$.for(');
-    expect(code).toContain('() => $.get(items)');
+    expect(code).toContain('() => items');
     expect(code).toContain('(item) =>');
   });
 
@@ -470,7 +526,7 @@ describe('compiler', () => {
     const result = compile(source);
     const code = normalizeWhitespace(result.code);
     expect(code).toContain('$.for(');
-    expect(code).toContain('() => $.get(items)');
+    expect(code).toContain('() => items');
   });
 
   it('compiles for...in loop', () => {
@@ -537,7 +593,7 @@ describe('compiler', () => {
     const result = compile(source);
     const code = normalizeWhitespace(result.code);
     expect(code).toContain('$.for(');
-    expect(code).toContain('() => $.get(items)');
+    expect(code).toContain('() => items');
     expect(code).toContain('(item) =>');
   });
 
@@ -733,5 +789,82 @@ describe('compiler', () => {
     const code = normalizeWhitespace(result.code);
     expect(code).toContain('$.try(');
     expect(code).toContain('(e) =>');
+  });
+
+  it('wraps member expression effect dep in $.derived()', () => {
+    const source = `component App() {
+  state obj = { count: 0 }
+
+  effect(obj.count, (count, prevCount) => {
+    console.log(count);
+  })
+
+  render (
+    <p>{obj.count}</p>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // obj.count in effect dep position should become $.derived(() => obj.count)
+    expect(code).toContain('effect($.derived(() => obj.count),');
+  });
+
+  it('wraps member expression in array effect deps', () => {
+    const source = `component App() {
+  state obj = { a: 1, b: 2 }
+
+  effect([obj.a, obj.b], ([a], [b]) => {
+    console.log(a + b);
+  })
+
+  render (
+    <p>{obj.a}</p>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('$.derived(() => obj.a)');
+    expect(code).toContain('$.derived(() => obj.b)');
+  });
+
+  it('wraps member expression in reactive call target positions', () => {
+    const source = `import { watchCount } from './utils'
+
+component App() {
+  state obj = { count: 0 }
+
+  watchCount(obj.count)
+
+  render (
+    <p>{obj.count}</p>
+  )
+}`;
+    // watchCount has reactive param at position 0
+    const result = compile(source, {
+      filename: 'App.tsx',
+      reactiveImports: {},
+      reactiveCallImports: { watchCount: [0] },
+    });
+    const code = normalizeWhitespace(result.code);
+    expect(code).toContain('watchCount($.derived(() => obj.count))');
+  });
+
+  it('does not wrap plain signal in effect dep', () => {
+    const source = `component App() {
+  state count = 0
+
+  effect(count, (val) => {
+    console.log(val);
+  })
+
+  render (
+    <p>{count}</p>
+  )
+}`;
+    const result = compile(source);
+    const code = normalizeWhitespace(result.code);
+    // Plain signal should stay as-is (no $.get, no $.derived)
+    expect(code).toContain('effect(count,');
+    expect(code).not.toContain('$.derived(() => count)');
   });
 });

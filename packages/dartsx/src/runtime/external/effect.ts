@@ -1,18 +1,63 @@
-import { get, type Signal, type Subscriber } from '../internal/client/reactivity/state.js';
-import { getDerived, type DerivedSignal } from '../internal/client/reactivity/derived.js';
+import { get, SIGNAL, type Signal, type Subscriber } from '../internal/client/reactivity/state.js';
+import { STATE_SYMBOL, RAW, getProxySignal } from '../internal/client/reactivity/proxy.js';
+import { getCurrentComponent } from '../internal/client/index.js';
 
-type ReactiveValue<T> = Signal<T> | DerivedSignal<T>;
+// ── Effect context (so onCleanup knows which effect is running) ────
 
-function readReactive<T>(sig: ReactiveValue<T>): T {
-    if ('fn' in sig) return getDerived(sig as DerivedSignal<T>);
-    return get(sig);
+export interface EffectContext {
+    cleanups: (() => void)[];
+}
+
+let currentEffect: EffectContext | null = null;
+
+export function getCurrentEffect(): EffectContext | null {
+    return currentEffect;
+}
+
+function runCleanups(ctx: EffectContext): void {
+    for (const fn of ctx.cleanups) fn();
+    ctx.cleanups = [];
+}
+
+/** Resolve a dep (Signal, DerivedSignal, or proxy) to a Signal for subscription */
+function resolveSignal(dep: any): Signal {
+    // Signal or DerivedSignal
+    if (dep && typeof dep === 'object' && SIGNAL in dep) {
+        return dep as Signal;
+    }
+    // Proxy → get its root signal
+    if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
+        const sig = getProxySignal(dep);
+        if (sig) return sig;
+    }
+    throw new Error('effect: invalid dependency — expected a signal or proxy');
+}
+
+/** Read the current value of a dep (signal value, or the raw target for proxies) */
+function readDep(dep: any): any {
+    if (dep && typeof dep === 'object' && SIGNAL in dep) {
+        return get(dep);
+    }
+    if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
+        return dep[RAW];
+    }
+    return dep;
+}
+
+/** Snapshot a dep for oldVal tracking (structuredClone for proxies so old !== new) */
+function snapshotDep(dep: any): any {
+    if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
+        return structuredClone(dep[RAW]);
+    }
+    return readDep(dep);
 }
 
 /**
  * User-facing effect with explicit dependency tracking.
+ * Use onCleanup() inside the callback for cleanup logic.
  *
  * Signatures:
- * - effect(dep, (newVal, oldVal) => ...)         — single dependency
+ * - effect(dep, (newVal, oldVal) => ...)            — single dependency (signal or proxy)
  * - effect([dep1, dep2], ([new1, old1], [new2, old2]) => ...)  — multiple deps
  */
 type DepPairs<T extends unknown[]> = {
@@ -29,54 +74,87 @@ export function effect<T>(
 ): void;
 export function effect(
     dep: unknown | unknown[],
-    callback: (...args: any[]) => void | (() => void),
+    callback: (...args: any[]) => void,
 ): void {
-    if (Array.isArray(dep)) {
-        // Multiple dependencies
-        const deps = dep as ReactiveValue<any>[];
-        let oldVals = deps.map((d) => readReactive(d));
-        let cleanup: (() => void) | void;
+    if (Array.isArray(dep) && !(dep && typeof dep === 'object' && STATE_SYMBOL in dep)) {
+        // Multiple dependencies (but not a proxied array)
+        const deps = dep;
+        const signals = deps.map(resolveSignal);
+        let oldVals = deps.map(readDep);
+        const ctx: EffectContext = { cleanups: [] };
 
         const sub: Subscriber = {
             run() {
-                if (cleanup) cleanup();
-                const newVals = deps.map((d) => readReactive(d));
+                runCleanups(ctx);
+
+                const prevEffect = currentEffect;
+                currentEffect = ctx;
+
+                const newVals = deps.map(readDep);
                 const pairs = deps.map((_, i) => [newVals[i], oldVals[i]]);
-                cleanup = callback(...pairs);
-                oldVals = newVals;
+                callback(...pairs);
+
+                currentEffect = prevEffect;
+                oldVals = deps.map(snapshotDep);
                 sub.dirty = false;
             },
             deps: new Set(),
             dirty: true,
         };
 
-        for (const d of deps) {
-            d.subs.add(sub);
-            sub.deps.add(d as Signal);
+        for (const sig of signals) {
+            sig.subs.add(sub);
+            sub.deps.add(sig);
         }
 
         sub.run();
+
+        // Auto-dispose when the owning component unmounts
+        const componentCtx = getCurrentComponent();
+        if (componentCtx) {
+            componentCtx.onDestroyCallbacks.push(() => {
+                runCleanups(ctx);
+                for (const sig of sub.deps) sig.subs.delete(sub);
+                sub.deps.clear();
+            });
+        }
     } else {
         // Single dependency
-        const d = dep as ReactiveValue<any>;
-        let oldVal = readReactive(d);
-        let cleanup: (() => void) | void;
+        const sig = resolveSignal(dep);
+        let oldVal = readDep(dep);
+        const ctx: EffectContext = { cleanups: [] };
 
         const sub: Subscriber = {
             run() {
-                if (cleanup) cleanup();
-                const newVal = readReactive(d);
-                cleanup = callback(newVal, oldVal);
-                oldVal = newVal;
+                runCleanups(ctx);
+
+                const prevEffect = currentEffect;
+                currentEffect = ctx;
+
+                const newVal = readDep(dep);
+                callback(newVal, oldVal);
+
+                currentEffect = prevEffect;
+                oldVal = snapshotDep(dep);
                 sub.dirty = false;
             },
             deps: new Set(),
             dirty: true,
         };
 
-        d.subs.add(sub);
-        sub.deps.add(d as Signal);
+        sig.subs.add(sub);
+        sub.deps.add(sig);
 
         sub.run();
+
+        // Auto-dispose when the owning component unmounts
+        const componentCtx = getCurrentComponent();
+        if (componentCtx) {
+            componentCtx.onDestroyCallbacks.push(() => {
+                runCleanups(ctx);
+                for (const s of sub.deps) s.subs.delete(sub);
+                sub.deps.clear();
+            });
+        }
     }
 }

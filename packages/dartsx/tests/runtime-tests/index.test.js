@@ -19,6 +19,11 @@ create_test_suite('./component/composition');
 create_test_suite('./reactivity/state-basic-counter');
 create_test_suite('./reactivity/derived-basic');
 create_test_suite('./reactivity/effect-watch');
+create_test_suite('./reactivity/bind-proxy-property');
+create_test_suite('./reactivity/bind-function');
+
+// --- Component tests (bind) ---
+create_test_suite('./component/bind-proxy-member');
 
 // --- Control flow tests ---
 create_test_suite('./control-flow/if');

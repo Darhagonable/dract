@@ -1,4 +1,4 @@
-import { type Signal, set } from '../reactivity/state';
+import type { Setter } from './types';
 
 // ── Singleton ResizeObserver ───────────────────────────────────────
 
@@ -47,15 +47,15 @@ const devicePixelObserver = new ResizeObserverSingleton({ box: 'device-pixel-con
 
 // ── Element size bindings (clientWidth, offsetHeight, etc.) ────────
 
-export function bindElementSize(element: Element, prop: string, signal: Signal): void {
+export function bindElementSize(element: Element, prop: string, _get: any, set: Setter): void {
     borderBoxObserver.observe(element, () => {
-        set(signal, (element as any)[prop]);
+        set((element as any)[prop]);
     });
 }
 
 // ── ResizeObserver entry bindings (contentRect, etc.) ──────────────
 
-export function bindResizeObserver(element: Element, prop: string, signal: Signal): void {
+export function bindResizeObserver(element: Element, prop: string, _get: any, set: Setter): void {
     const observer =
         prop === 'contentRect' || prop === 'contentBoxSize'
             ? contentBoxObserver
@@ -64,6 +64,6 @@ export function bindResizeObserver(element: Element, prop: string, signal: Signa
                 : devicePixelObserver;
 
     observer.observe(element, (entry) => {
-        set(signal, (entry as any)[prop]);
+        set((entry as any)[prop]);
     });
 }

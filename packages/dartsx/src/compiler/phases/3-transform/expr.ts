@@ -97,7 +97,7 @@ const WRAPPER_OFFSET = 2; // "0," is 2 chars
  * Transform an expression by wrapping reactive variable reads in `$.get()`.
  * Uses OXC AST to precisely identify `IdentifierReference` nodes.
  */
-export function wrapReadsInGet(expr: string, reactiveVars: Set<string>): string {
+export function wrapReadsInGet(expr: string, reactiveVars: Set<string>, proxyVars?: Set<string>): string {
     const ast = parseExpression(expr);
     if (!ast) return expr; // fallback: return unchanged
 
@@ -105,6 +105,8 @@ export function wrapReadsInGet(expr: string, reactiveVars: Set<string>): string 
 
     walk(ast as ASTNode, (node, parent, key) => {
         if (node.type === 'Identifier' && reactiveVars.has(node.name)) {
+            // Skip proxy vars — proxy traps handle reactivity directly
+            if (proxyVars?.has(node.name)) return;
             // Skip if this is the property of a non-computed member expression (obj.count)
             if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) {
                 return;
@@ -127,10 +129,10 @@ export function wrapReadsInGet(expr: string, reactiveVars: Set<string>): string 
  * - Inline expressions: count++ → () => $.set(count, $.get(count) + 1)
  * - Assignments: count = 5 → () => $.set(count, 5)
  */
-export function transformEventHandler(raw: string, reactiveVars: Set<string>): string {
+export function transformEventHandler(raw: string, reactiveVars: Set<string>, proxyVars?: Set<string>): string {
     const trimmed = raw.trim();
     const ast = parseExpression(trimmed);
-    if (!ast) return `() => ${wrapReadsInGet(trimmed, reactiveVars)}`;
+    if (!ast) return `() => ${wrapReadsInGet(trimmed, reactiveVars, proxyVars)}`;
 
     // Arrow function: transform the body
     if (ast.type === 'ArrowFunctionExpression') {
@@ -149,38 +151,38 @@ export function transformEventHandler(raw: string, reactiveVars: Set<string>): s
             // Re-parse body so span offsets are relative to bodySource
             const bodyAST = parseExpression(bodySource);
             const transformedBody = bodyAST
-                ? transformExpr(bodySource, bodyAST as ASTNode, reactiveVars)
-                : wrapReadsInGet(bodySource, reactiveVars);
+                ? transformExpr(bodySource, bodyAST as ASTNode, reactiveVars, proxyVars)
+                : wrapReadsInGet(bodySource, reactiveVars, proxyVars);
             return `${prefix} ${transformedBody}`;
         }
         // Block body — just wrap reads
-        return wrapReadsInGet(trimmed, reactiveVars);
+        return wrapReadsInGet(trimmed, reactiveVars, proxyVars);
     }
 
     // Bare identifier (function reference) — just wrap if reactive
     if (ast.type === 'Identifier') {
-        return wrapReadsInGet(trimmed, reactiveVars);
+        return wrapReadsInGet(trimmed, reactiveVars, proxyVars);
     }
 
     // Update or assignment — wrap in arrow
-    const transformed = transformExpr(trimmed, ast, reactiveVars);
+    const transformed = transformExpr(trimmed, ast, reactiveVars, proxyVars);
     if (transformed !== trimmed) {
         return `() => ${transformed}`;
     }
 
     // Fallback: wrap reads and put in arrow
-    return `() => ${wrapReadsInGet(trimmed, reactiveVars)}`;
+    return `() => ${wrapReadsInGet(trimmed, reactiveVars, proxyVars)}`;
 }
 
 /**
  * Transform a single expression node, handling assignments and updates.
  */
-function transformExpr(source: string, node: ASTNode, reactiveVars: Set<string>): string {
+function transformExpr(source: string, node: ASTNode, reactiveVars: Set<string>, proxyVars?: Set<string>): string {
     // UpdateExpression: count++ / count-- / ++count / --count
     if (node.type === 'UpdateExpression') {
         const update = node as unknown as UpdateExpression;
         const arg = update.argument;
-        if (arg.type === 'Identifier' && reactiveVars.has((arg as any).name)) {
+        if (arg.type === 'Identifier' && reactiveVars.has((arg as any).name) && !proxyVars?.has((arg as any).name)) {
             const name = (arg as any).name;
             const delta = update.operator === '++' ? '+ 1' : '- 1';
             return `$.set(${name}, $.get(${name}) ${delta})`;
@@ -191,12 +193,12 @@ function transformExpr(source: string, node: ASTNode, reactiveVars: Set<string>)
     if (node.type === 'AssignmentExpression') {
         const assign = node as unknown as AssignmentExpression;
         const left = assign.left;
-        if (left.type === 'Identifier' && reactiveVars.has((left as any).name)) {
+        if (left.type === 'Identifier' && reactiveVars.has((left as any).name) && !proxyVars?.has((left as any).name)) {
             const name = (left as any).name;
             const rhsStart = assign.right.start - WRAPPER_OFFSET;
             const rhsEnd = assign.right.end - WRAPPER_OFFSET;
             const rhsSource = source.slice(rhsStart, rhsEnd);
-            const transformedRhs = wrapReadsInGet(rhsSource, reactiveVars);
+            const transformedRhs = wrapReadsInGet(rhsSource, reactiveVars, proxyVars);
 
             if (assign.operator === '=') {
                 return `$.set(${name}, ${transformedRhs})`;
@@ -217,14 +219,14 @@ function transformExpr(source: string, node: ASTNode, reactiveVars: Set<string>)
             // Re-parse each sub-expression for correct span offsets
             const subAST = parseExpression(subSource);
             return subAST
-                ? transformExpr(subSource, subAST as ASTNode, reactiveVars)
-                : wrapReadsInGet(subSource, reactiveVars);
+                ? transformExpr(subSource, subAST as ASTNode, reactiveVars, proxyVars)
+                : wrapReadsInGet(subSource, reactiveVars, proxyVars);
         });
         return parts.join(', ');
     }
 
     // Default: just wrap reads
-    return wrapReadsInGet(source, reactiveVars);
+    return wrapReadsInGet(source, reactiveVars, proxyVars);
 }
 
 // ── Body statement transformer ─────────────────────────────────────
@@ -238,6 +240,7 @@ export function transformBodyStatement(
     stmt: string,
     reactiveVars: Set<string>,
     reactiveCallTargets?: Map<string, Set<number>>,
+    proxyVars?: Set<string>,
 ): string {
     if (reactiveVars.size === 0) return stmt;
 
@@ -264,9 +267,43 @@ export function transformBodyStatement(
     // Helper to translate AST spans back to original stmt coordinates
     const s = (pos: number) => pos - unwrapOffset;
 
+    // Helper: get the root identifier of a member expression chain (obj.a.b → "obj")
+    function getMemberRoot(node: ASTNode): string | null {
+        if (node.type === 'Identifier') return node.name;
+        if (node.type === 'MemberExpression') return getMemberRoot(node.object);
+        return null;
+    }
+
+    // Helper: wrap a member expression dep in $.derived(() => ...)
+    function wrapDepIfNeeded(arg: ASTNode): void {
+        if (arg.type === 'MemberExpression') {
+            const root = getMemberRoot(arg);
+            if (root && reactiveVars.has(root)) {
+                const exprText = stmt.slice(s(arg.start), s(arg.end));
+                replacements.push({ start: s(arg.start), end: s(arg.end), text: `$.derived(() => ${exprText})` });
+            }
+        }
+    }
+
     // Collect exclusion zones: first argument of effect() calls
     // (deps must remain as Signal objects, not unwrapped via $.get())
+    // and args at reactive positions for functions with reactive params.
+    // For any exclusion-zone arg that is a member expression on a reactive root,
+    // wrap it in $.derived(() => ...) so the callee receives a DerivedSignal.
     const exclusionZones: { start: number; end: number }[] = [];
+
+    function addExclusionArg(arg: ASTNode): void {
+        exclusionZones.push({ start: arg.start, end: arg.end });
+        // Array literal of deps: wrap each element individually
+        if (arg.type === 'ArrayExpression' && arg.elements) {
+            for (const elem of arg.elements) {
+                if (elem) wrapDepIfNeeded(elem);
+            }
+        } else {
+            wrapDepIfNeeded(arg);
+        }
+    }
+
     walk(result.program as ASTNode, (node) => {
         if (
             node.type === 'CallExpression' &&
@@ -274,7 +311,7 @@ export function transformBodyStatement(
             node.callee.name === 'effect' &&
             node.arguments?.length >= 2
         ) {
-            exclusionZones.push({ start: node.arguments[0].start, end: node.arguments[0].end });
+            addExclusionArg(node.arguments[0]);
         }
         // Exclude args at reactive positions for functions with reactive params
         if (
@@ -287,7 +324,7 @@ export function transformBodyStatement(
                 for (const idx of indices) {
                     const arg = node.arguments?.[idx];
                     if (arg) {
-                        exclusionZones.push({ start: arg.start, end: arg.end });
+                        addExclusionArg(arg);
                     }
                 }
             }
@@ -298,10 +335,10 @@ export function transformBodyStatement(
     walk(result.program as ASTNode, (node, parent, key) => {
         if (node.type === 'AssignmentExpression') {
             const left = node.left;
-            if (left?.type === 'Identifier' && reactiveVars.has(left.name)) {
+            if (left?.type === 'Identifier' && reactiveVars.has(left.name) && !proxyVars?.has(left.name)) {
                 const name = left.name;
                 const rhsSource = stmt.slice(s(node.right.start), s(node.right.end));
-                const wrappedRhs = wrapReadsInGet(rhsSource, reactiveVars);
+                const wrappedRhs = wrapReadsInGet(rhsSource, reactiveVars, proxyVars);
 
                 const text = node.operator === '='
                     ? `$.set(${name}, ${wrappedRhs})`
@@ -314,7 +351,7 @@ export function transformBodyStatement(
 
         if (node.type === 'UpdateExpression') {
             const arg = node.argument;
-            if (arg?.type === 'Identifier' && reactiveVars.has(arg.name)) {
+            if (arg?.type === 'Identifier' && reactiveVars.has(arg.name) && !proxyVars?.has(arg.name)) {
                 const delta = node.operator === '++' ? '+ 1' : '- 1';
                 replacements.push({
                     start: s(node.start),
@@ -329,6 +366,8 @@ export function transformBodyStatement(
     // Pass 2: Identifier reads not already covered by assignment/update transforms
     walk(result.program as ASTNode, (node, parent, key) => {
         if (node.type !== 'Identifier' || !reactiveVars.has(node.name)) return;
+        // Skip proxy vars — proxy traps handle reactivity directly
+        if (proxyVars?.has(node.name)) return;
         // Skip assignment LHS
         if (parent?.type === 'AssignmentExpression' && key === 'left') return;
         // Skip update argument

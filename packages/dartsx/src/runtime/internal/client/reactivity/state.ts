@@ -1,7 +1,19 @@
 // ── Reactive context tracking ──────────────────────────────────────
 
+import { proxy, STATE_SYMBOL } from './proxy';
+import { getDerived, type DerivedSignal } from './derived';
+import { scheduleEffect } from './scheduler';
+
+export { scheduleEffect, getFlushPromise } from './scheduler';
+
 /** The currently-running reactive subscriber (effect or derived). */
 let currentSubscriber: Subscriber | null = null;
+
+/** Brand symbol to identify Signal objects */
+export const SIGNAL: unique symbol = Symbol('signal');
+
+/** Symbol to mark a setter on a derived used as a bind signal */
+export const SETTER: unique symbol = Symbol('setter');
 
 export interface Signal<T = any> {
     /** Current value */
@@ -10,6 +22,10 @@ export interface Signal<T = any> {
     version: number;
     /** Subscribers that depend on this signal */
     subs: Set<Subscriber>;
+    /** Brand — always `true` on Signal objects */
+    readonly [SIGNAL]: true;
+    /** Optional bind setter (present on bind-derived signals) */
+    [SETTER]?: (value: T) => void;
 }
 
 export interface Subscriber {
@@ -33,122 +49,86 @@ export function setSubscriber(s: Subscriber | null): Subscriber | null {
     return prev;
 }
 
-// ── $.state(initialValue) ──────────────────────────────────────────
+// ── Type guard ─────────────────────────────────────────────────────
 
-export function state<T>(initialValue: T): Signal<T> {
-    return { v: initialValue, version: 0, subs: new Set() };
+export function isSignal<T>(value: Signal<T> | T): value is Signal<T> {
+    return !!value && typeof value === 'object' && SIGNAL in value;
+}
+
+// ── $.state(initialValue) ──────────────────────────────────────────
+//
+// Primitives → Signal (use get/set to read/write)
+// Objects    → Proxy  (property access is reactive)
+
+export function state<T extends object>(initialValue: T): T;
+export function state<T>(initialValue: T): Signal<T>;
+export function state<T>(initialValue: T): T | Signal<T> {
+    if (typeof initialValue === 'object' && initialValue !== null) {
+        // Already proxied → wrap in Signal (reassignable object pattern)
+        if (STATE_SYMBOL in (initialValue)) {
+            const sig: Signal<T> = { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
+            return sig;
+        }
+        return proxy(initialValue);
+    }
+    const sig: Signal<T> = { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
+    return sig;
 }
 
 // ── $.get(signal) ──────────────────────────────────────────────────
 
 export function get<T>(signal: Signal<T> | T): T {
-    // Passthrough for non-signal values (enables implicit reactive mode)
-    if (!signal || typeof signal !== 'object' || !('v' in (signal as any))) {
-        return signal as T;
+    // Passthrough for non-signal values
+    if (!isSignal(signal)) return signal;
+
+    // DerivedSignal — use getDerived for lazy evaluation
+    if ('fn' in signal) {
+        return getDerived(signal as DerivedSignal<T>);
     }
-    const sig = signal as Signal<T>;
     // If we're inside a reactive context, track this read.
     if (currentSubscriber) {
-        sig.subs.add(currentSubscriber);
-        currentSubscriber.deps.add(sig);
+        signal.subs.add(currentSubscriber);
+        currentSubscriber.deps.add(signal);
     }
-    return sig.v;
+    return signal.v;
 }
 
 // ── $.set(signal, value) ───────────────────────────────────────────
 
 export function set<T>(signal: Signal<T> | T, value: T): T {
-    // Passthrough for non-signal values (enables implicit reactive mode)
-    if (!signal || typeof signal !== 'object' || !('v' in (signal as any))) {
+    // Passthrough for non-signal values
+    if (!isSignal(signal)) return value;
+
+    // Bind-derived with custom setter: delegate to parent's setter
+    if (signal[SETTER]) {
+        signal[SETTER](value);
         return value;
     }
-    const sig = signal as Signal<T>;
-    if (Object.is(sig.v, value)) return value;
-    sig.v = value;
-    sig.version++;
-    // Synchronously propagate dirty flags through the entire dependency graph
-    notifySubscribers(sig.subs);
+    // Auto-proxy object values being stored in a signal (for reassignable objects)
+    const stored = (typeof value === 'object' && value !== null) ? proxy(value) as T : value;
+    if (Object.is(signal.v, stored)) return value;
+    signal.v = stored;
+    notify(signal);
     return value;
 }
 
-function notifySubscribers(subs: Set<Subscriber>): void {
+// ── Notification ───────────────────────────────────────────────────
+
+export function notify(signal: Signal): void {
+    signal.version++;
+    notifySubs(signal.subs);
+}
+
+function notifySubs(subs: Set<Subscriber>): void {
     for (const sub of subs) {
-        if (sub.dirty) continue; // Already dirty — skip to avoid cycles
+        if (sub.dirty) continue;
         sub.dirty = true;
 
-        // If this subscriber is also a signal (derived), propagate to its own subscribers
         const asDerived = sub as any;
         if (asDerived.subs && asDerived.subs.size > 0) {
-            notifySubscribers(asDerived.subs);
+            notifySubs(asDerived.subs);
         }
 
-        // Schedule for execution
         scheduleEffect(sub);
     }
-}
-
-// ── $.prop(propsObj, key, defaultValue?) — read-only prop ──────────
-// ── $.prop.bind(propsObj, key, defaultValue?) — two-way bindable prop
-
-import { derived, type DerivedSignal } from './derived';
-
-export interface PropFunction {
-    <T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T>;
-    bind<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T>;
-}
-
-function resolveProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T> {
-    return derived(() => {
-        const getter = propsObj[key];
-        const val = typeof getter === 'function' ? getter() : getter;
-        return val === undefined && defaultValue !== undefined ? defaultValue! : val;
-    });
-}
-
-let prop: PropFunction
-
-prop = function prop<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T> {
-    return resolveProp(propsObj, key, defaultValue);
-}
-
-prop.bind = function bindProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T> {
-    const bindKey = `bind:${key}`;
-    if (bindKey in propsObj) {
-        return propsObj[bindKey] as Signal<T>;
-    }
-    return resolveProp(propsObj, key, defaultValue);
-};
-
-export { prop };
-
-// ── Effect scheduling (batched microtask) ──────────────────────────
-
-let pendingEffects: Subscriber[] = [];
-let flushScheduled = false;
-let flushPromise: Promise<void> | null = null;
-
-export function scheduleEffect(sub: Subscriber): void {
-    if (pendingEffects.includes(sub)) return;
-    pendingEffects.push(sub);
-    if (!flushScheduled) {
-        flushScheduled = true;
-        flushPromise = Promise.resolve().then(flushEffects);
-    }
-}
-
-function flushEffects(): void {
-    flushScheduled = false;
-    const effects = pendingEffects;
-    pendingEffects = [];
-    for (const effect of effects) {
-        if (effect.dirty) {
-            effect.dirty = false;
-            effect.run();
-        }
-    }
-    flushPromise = null;
-}
-
-export function getFlushPromise(): Promise<void> | null {
-    return flushPromise;
 }

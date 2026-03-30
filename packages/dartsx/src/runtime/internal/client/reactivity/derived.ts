@@ -1,4 +1,4 @@
-import { type Signal, type Subscriber, get as signalGet, getSubscriber, setSubscriber } from './state';
+import { type Signal, type Subscriber, SIGNAL, get as signalGet, getSubscriber, setSubscriber } from './state';
 
 export interface DerivedSignal<T = any> extends Signal<T> {
     /** The computation function */
@@ -12,10 +12,11 @@ export interface DerivedSignal<T = any> extends Signal<T> {
 // ── $.derived(fn) ──────────────────────────────────────────────────
 
 export function derived<T>(fn: () => T): DerivedSignal<T> {
-    const sig: DerivedSignal<T> = {
+    const sig: DerivedSignal<T> & Subscriber = {
         v: undefined as T,
         version: 0,
         subs: new Set(),
+        [SIGNAL]: true,
         fn,
         initialized: false,
         dirty: true,
@@ -30,7 +31,7 @@ export function derived<T>(fn: () => T): DerivedSignal<T> {
                 sub.dirty = true;
             }
         },
-    } as DerivedSignal<T> & Subscriber;
+    };
 
     return sig;
 }
@@ -65,7 +66,7 @@ export function getDerived<T>(sig: DerivedSignal<T>): T {
     const outer = getSubscriber();
     if (outer) {
         sig.subs.add(outer);
-        (outer as Subscriber).deps.add(sig as unknown as Signal);
+        (outer).deps.add(sig);
     }
 
     return sig.v;

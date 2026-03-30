@@ -1,5 +1,5 @@
-import { type Signal, set } from '../reactivity/state';
+import type { Setter } from './types';
 
-export function bindThis(element: Element, signal: Signal<Element | undefined>): void {
-    set(signal, element);
+export function bindThis(element: Element, _get: any, set: Setter<Element | undefined>): void {
+    set(element);
 }

@@ -1,8 +1,12 @@
 // ── Re-exports from reactivity ─────────────────────────────────────
 
-export { state, set, prop, type Signal, type Subscriber, setSubscriber, getSubscriber, scheduleEffect, getFlushPromise } from './reactivity/state';
+export { state, get, set, notify, isSignal, SIGNAL, SETTER, type Signal, type Subscriber, setSubscriber, getSubscriber } from './reactivity/state';
+export { scheduleEffect, getFlushPromise } from './reactivity/scheduler';
+export { prop } from './reactivity/prop';
 export { derived, getDerived, type DerivedSignal } from './reactivity/derived';
 export { effect } from './reactivity/effect';
+export { proxy, RAW, STATE_SYMBOL, getProxySignal } from './reactivity/proxy';
+export type { Getter, Setter, BindTuple } from './bindings/types';
 
 // ── Re-exports from jsx ────────────────────────────────────────────
 
@@ -14,9 +18,12 @@ export { try_block } from './blocks/try';
 
 // ── Imports needed internally ──────────────────────────────────────
 
-import { state, set, prop, get as signalGet, type Signal, scheduleEffect, getFlushPromise } from './reactivity/state';
-import { derived, getDerived, type DerivedSignal } from './reactivity/derived';
+import { state, get, set } from './reactivity/state';
+import { scheduleEffect, getFlushPromise } from './reactivity/scheduler';
+import { prop } from './reactivity/prop';
+import { derived } from './reactivity/derived';
 import { effect } from './reactivity/effect';
+import { proxy } from './reactivity/proxy';
 import { jsx, Fragment } from './jsx';
 import { if_block } from './blocks/if';
 import { for_block } from './blocks/for';
@@ -43,18 +50,6 @@ export function setCurrentComponent(ctx: ComponentContext | null): ComponentCont
     return prev;
 }
 
-// ── Unified get — works for both Signal and DerivedSignal ──────────
-
-export function get<T>(sig: Signal<T> | DerivedSignal<T> | T): T {
-    if (!sig || typeof sig !== 'object' || !('v' in (sig as any))) {
-        return sig as T;
-    }
-    if ('fn' in (sig as any)) {
-        return getDerived(sig as DerivedSignal<T>);
-    }
-    return signalGet(sig as Signal<T>);
-}
-
 // ── Default export ─────────────────────────────────────────────────
 
 export default {
@@ -62,6 +57,7 @@ export default {
     get,
     set,
     prop,
+    proxy,
     derived,
     effect,
     jsx,

@@ -1,12 +1,12 @@
-import { type Signal, get, set } from '../reactivity/state';
 import { effect } from '../reactivity/effect';
+import type { Getter, Setter } from './types';
 
-export function bindOpen(element: HTMLDetailsElement, signal: Signal<boolean>): void {
+export function bindOpen(element: HTMLDetailsElement, get: Getter<boolean>, set: Setter<boolean>): void {
     element.addEventListener('toggle', () => {
-        set(signal, element.open);
+        set(element.open);
     });
 
     effect(() => {
-        element.open = !!get(signal);
+        element.open = !!get();
     });
 }

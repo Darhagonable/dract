@@ -1,69 +1,68 @@
-import { type Signal, get, set } from '../reactivity/state';
 import { effect } from '../reactivity/effect';
+import type { Getter, Setter } from './types';
 
 // ── bind:value ─────────────────────────────────────────────────────
 
-export function bindValue(element: HTMLInputElement | HTMLTextAreaElement, signal: Signal): void {
+export function bindValue(element: HTMLInputElement | HTMLTextAreaElement, get: Getter, set: Setter): void {
     element.addEventListener('input', () => {
         const type = element.type;
         if (type === 'number' || type === 'range') {
             const num = (element as HTMLInputElement).valueAsNumber;
-            set(signal, Number.isNaN(num) ? undefined as any : num);
+            set(Number.isNaN(num) ? undefined : num);
         } else {
-            set(signal, element.value as any);
+            set(element.value);
         }
     });
 
     effect(() => {
-        element.value = get(signal) ?? '';
+        element.value = get() ?? '';
     });
 }
 
 // ── bind:checked ───────────────────────────────────────────────────
 
-export function bindChecked(element: HTMLInputElement, signal: Signal<boolean>): void {
+export function bindChecked(element: HTMLInputElement, get: Getter<boolean>, set: Setter<boolean>): void {
     element.addEventListener('change', () => {
-        set(signal, element.checked);
+        set(element.checked);
     });
 
     effect(() => {
-        element.checked = !!get(signal);
+        element.checked = !!get();
     });
 }
 
 // ── bind:indeterminate ─────────────────────────────────────────────
 
-export function bindIndeterminate(element: HTMLInputElement, signal: Signal<boolean>): void {
+export function bindIndeterminate(element: HTMLInputElement, get: Getter<boolean>, set: Setter<boolean>): void {
     element.addEventListener('change', () => {
-        set(signal, element.indeterminate);
+        set(element.indeterminate);
     });
 
     effect(() => {
-        element.indeterminate = !!get(signal);
+        element.indeterminate = !!get();
     });
 }
 
 // ── bind:group ─────────────────────────────────────────────────────
 
-export function bindGroup(element: HTMLInputElement, signal: Signal): void {
+export function bindGroup(element: HTMLInputElement, get: Getter, set: Setter): void {
     element.addEventListener('change', () => {
         if (element.type === 'radio') {
-            set(signal, element.value);
+            set(element.value);
         } else {
-            // checkbox group — signal holds an array
-            const arr: any[] = [...(get(signal) || [])];
+            const arr: any[] = [...(get() || [])];
             if (element.checked) {
                 if (!arr.includes(element.value)) arr.push(element.value);
             } else {
                 const idx = arr.indexOf(element.value);
                 if (idx !== -1) arr.splice(idx, 1);
             }
-            set(signal, arr);
+            set(arr);
         }
     });
 
     effect(() => {
-        const val = get(signal);
+        const val = get();
         if (element.type === 'radio') {
             element.checked = element.value === val;
         } else {
@@ -74,13 +73,13 @@ export function bindGroup(element: HTMLInputElement, signal: Signal): void {
 
 // ── bind:files ─────────────────────────────────────────────────────
 
-export function bindFiles(element: HTMLInputElement, signal: Signal<FileList | null>): void {
+export function bindFiles(element: HTMLInputElement, get: Getter<FileList | null>, set: Setter<FileList | null>): void {
     element.addEventListener('change', () => {
-        set(signal, element.files);
+        set(element.files);
     });
 
     effect(() => {
-        const files = get(signal);
+        const files = get();
         if (files !== undefined) {
             element.files = files;
         }

@@ -1,22 +1,22 @@
-import { type Signal, get, set } from '../reactivity/state';
 import { effect } from '../reactivity/effect';
+import type { Getter, Setter } from './types';
 
-export function bindSelectValue(element: HTMLSelectElement, signal: Signal): void {
+export function bindSelectValue(element: HTMLSelectElement, get: Getter, set: Setter): void {
     element.addEventListener('change', () => {
         if (element.multiple) {
             const selected: any[] = [];
             for (const opt of element.selectedOptions) {
                 selected.push((opt as any).__value ?? opt.value);
             }
-            set(signal, selected as any);
+            set(selected as any);
         } else {
             const opt = element.selectedOptions[0];
-            set(signal, opt ? ((opt as any).__value ?? opt.value) : undefined as any);
+            set(opt ? ((opt as any).__value ?? opt.value) : undefined as any);
         }
     });
 
     effect(() => {
-        const val = get(signal);
+        const val = get();
         if (element.multiple) {
             const arr = Array.isArray(val) ? val : [];
             for (const opt of element.options) {

@@ -1,4 +1,4 @@
-import { getFlushPromise } from '../internal/client/reactivity/state';
+import { getFlushPromise } from '../internal/client/reactivity/scheduler';
 
 /**
  * Returns a promise that resolves after pending state changes are flushed.
