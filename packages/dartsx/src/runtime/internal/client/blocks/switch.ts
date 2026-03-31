@@ -1,12 +1,12 @@
 import { effect } from '../reactivity/effect';
 
 export interface SwitchCase {
-    values: any[] | null;
-    fn: () => any;
+    values: unknown[] | null;
+    fn: () => unknown;
 }
 
 export function switch_block(
-    discriminantFn: () => any,
+    discriminantFn: () => unknown,
     cases: SwitchCase[],
 ): Node {
     const start = document.createComment('');

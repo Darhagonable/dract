@@ -1,7 +1,7 @@
 export function try_block(
-    tryFn: () => any,
-    catchFn?: (error: unknown) => any,
-    pendingFn?: () => any,
+    tryFn: () => unknown,
+    catchFn?: (error: unknown) => unknown,
+    pendingFn?: () => unknown,
 ): Node {
     const start = document.createComment('');
     const end = document.createComment('');
@@ -15,7 +15,7 @@ export function try_block(
         }
     }
 
-    function insertResult(result: any): void {
+    function insertResult(result: unknown): void {
         if (result instanceof Node) {
             end.parentNode!.insertBefore(result, end);
         } else if (result != null && result !== false && result !== true) {
@@ -24,30 +24,24 @@ export function try_block(
     }
 
     try {
-        const result = tryFn();
+        const result = Promise.resolve(tryFn());
 
-        // Async result — show pending, then resolve or catch
-        if (result != null && typeof result === 'object' && typeof result.then === 'function') {
-            if (pendingFn) {
-                insertResult(pendingFn());
-            }
-
-            (result as Promise<any>).then(
-                (resolved) => {
-                    clearContent();
-                    insertResult(resolved);
-                },
-                (error) => {
-                    clearContent();
-                    if (catchFn) {
-                        insertResult(catchFn(error));
-                    }
-                },
-            );
-        } else {
-            // Synchronous result
-            insertResult(result);
+        if (pendingFn) {
+            insertResult(pendingFn());
         }
+
+        result.then(
+            (resolved) => {
+                clearContent();
+                insertResult(resolved);
+            },
+            (error) => {
+                clearContent();
+                if (catchFn) {
+                    insertResult(catchFn(error));
+                }
+            },
+        );
     } catch (error) {
         if (catchFn) {
             insertResult(catchFn(error));

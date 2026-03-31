@@ -1,7 +1,6 @@
 import { effect } from '../reactivity/effect';
-import type { Getter, Setter } from './types';
 
-export function bindInnerHTML(element: HTMLElement, get: Getter<string>, set: Setter<string>): void {
+export function bindInnerHTML(element: HTMLElement, get: () => string | undefined, set: (html: string) => void) {
     element.addEventListener('input', () => {
         set(element.innerHTML);
     });
@@ -14,7 +13,7 @@ export function bindInnerHTML(element: HTMLElement, get: Getter<string>, set: Se
     });
 }
 
-export function bindInnerText(element: HTMLElement, get: Getter<string>, set: Setter<string>): void {
+export function bindInnerText(element: HTMLElement, get: () => string | undefined, set: (text: string) => void) {
     element.addEventListener('input', () => {
         set(element.innerText);
     });
@@ -27,7 +26,7 @@ export function bindInnerText(element: HTMLElement, get: Getter<string>, set: Se
     });
 }
 
-export function bindTextContent(element: HTMLElement, get: Getter<string>, set: Setter<string>): void {
+export function bindTextContent(element: HTMLElement, get: () => string | undefined, set: (text: string) => void) {
     element.addEventListener('input', () => {
         set(element.textContent ?? '');
     });
@@ -40,12 +39,12 @@ export function bindTextContent(element: HTMLElement, get: Getter<string>, set: 
     });
 }
 
-export function bindProperty(element: Element, prop: string, event: string, get: Getter, set: Setter): void {
+export function bindProperty(element: Element, prop: string, event: string, get: () => unknown, set: (value: unknown) => void) {
     element.addEventListener(event, () => {
-        set((element as any)[prop]);
+        set(Reflect.get(element, prop));
     });
 
     effect(() => {
-        (element as any)[prop] = get();
+        Reflect.set(element, prop, get());
     });
 }

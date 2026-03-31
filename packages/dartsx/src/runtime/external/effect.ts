@@ -1,4 +1,4 @@
-import { get, SIGNAL, type Signal, type Subscriber } from '../internal/client/reactivity/state.js';
+import { get, isSignal, SIGNAL, type Signal, type Subscriber } from '../internal/client/reactivity/state.js';
 import { STATE_SYMBOL, RAW, getProxySignal } from '../internal/client/reactivity/proxy.js';
 import { getCurrentComponent } from '../internal/client/index.js';
 
@@ -23,7 +23,7 @@ function runCleanups(ctx: EffectContext): void {
 function resolveSignal(dep: any): Signal {
     // Signal or DerivedSignal
     if (dep && typeof dep === 'object' && SIGNAL in dep) {
-        return dep as Signal;
+        return dep;
     }
     // Proxy → get its root signal
     if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
@@ -34,7 +34,7 @@ function resolveSignal(dep: any): Signal {
 }
 
 /** Read the current value of a dep (signal value, or the raw target for proxies) */
-function readDep(dep: any): any {
+function readDep(dep: any) {
     if (dep && typeof dep === 'object' && SIGNAL in dep) {
         return get(dep);
     }
@@ -45,7 +45,7 @@ function readDep(dep: any): any {
 }
 
 /** Snapshot a dep for oldVal tracking (structuredClone for proxies so old !== new) */
-function snapshotDep(dep: any): any {
+function snapshotDep(dep: any) {
     if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
         return structuredClone(dep[RAW]);
     }
@@ -68,12 +68,12 @@ export function effect<T extends unknown[]>(
     deps: [...T],
     callback: (...new_and_old: [...DepPairs<T>]) => void,
 ): void;
-export function effect<T>(
+export function effect<T extends unknown>(
     dep: T,
     callback: (newVal: T, oldVal: T) => void,
 ): void;
-export function effect(
-    dep: unknown | unknown[],
+export function effect<T extends unknown>(
+    dep: T | T[],
     callback: (...args: any[]) => void,
 ): void {
     if (Array.isArray(dep) && !(dep && typeof dep === 'object' && STATE_SYMBOL in dep)) {

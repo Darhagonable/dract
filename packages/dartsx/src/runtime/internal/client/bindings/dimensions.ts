@@ -1,10 +1,10 @@
-import type { Setter } from './types';
+import { teardown } from '../reactivity/effect';
 
 // ── Singleton ResizeObserver ───────────────────────────────────────
 
 class ResizeObserverSingleton {
     #listeners = new WeakMap<Element, Set<(entry: ResizeObserverEntry) => void>>();
-    #observer: ResizeObserver | null = null;
+    #observer: ResizeObserver | undefined;
     #options: ResizeObserverOptions;
 
     constructor(options: ResizeObserverOptions) {
@@ -47,15 +47,15 @@ const devicePixelObserver = new ResizeObserverSingleton({ box: 'device-pixel-con
 
 // ── Element size bindings (clientWidth, offsetHeight, etc.) ────────
 
-export function bindElementSize(element: Element, prop: string, _get: any, set: Setter): void {
+export function bindElementSize(element: HTMLElement, prop: 'clientWidth' | 'clientHeight' | 'offsetWidth' | 'offsetHeight' | 'scrollWidth' | 'scrollHeight', set: (size: number) => void) {
     borderBoxObserver.observe(element, () => {
-        set((element as any)[prop]);
+        set(element[prop]);
     });
 }
 
 // ── ResizeObserver entry bindings (contentRect, etc.) ──────────────
 
-export function bindResizeObserver(element: Element, prop: string, _get: any, set: Setter): void {
+export function bindResizeObserver(element: Element, prop: 'contentRect' | 'contentBoxSize' | 'borderBoxSize' | 'devicePixelContentBoxSize', set: (entry: keyof ResizeObserverEntry) => void) {
     const observer =
         prop === 'contentRect' || prop === 'contentBoxSize'
             ? contentBoxObserver
@@ -63,7 +63,6 @@ export function bindResizeObserver(element: Element, prop: string, _get: any, se
                 ? borderBoxObserver
                 : devicePixelObserver;
 
-    observer.observe(element, (entry) => {
-        set((entry as any)[prop]);
-    });
+    const unsub = observer.observe(element, (entry) => set(entry[prop] as any));
+    teardown(unsub);
 }

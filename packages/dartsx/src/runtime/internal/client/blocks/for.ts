@@ -1,11 +1,11 @@
 import { effect } from '../reactivity/effect';
 
 interface KeyedEntry {
-    key: any;
+    key: unknown;
     nodes: Node[];
 }
 
-function collectNodes(result: any): Node[] {
+function collectNodes(result: unknown): Node[] {
     if (result instanceof DocumentFragment) {
         return Array.from(result.childNodes);
     }
@@ -24,9 +24,9 @@ function insertNodes(nodes: Node[], before: Node): void {
 }
 
 export function for_block(
-    collFn: () => any[],
-    bodyFn: (item: any, index: number) => any,
-    keyFn?: (item: any) => any,
+    collFn: () => unknown[],
+    bodyFn: (item: unknown, index: number) => unknown,
+    keyFn?: (item: unknown) => unknown,
 ): Node {
     const start = document.createComment('');
     const end = document.createComment('');
@@ -56,7 +56,7 @@ export function for_block(
         }
 
         // Keyed reconciliation — reuse DOM nodes for items with matching keys
-        const oldMap = new Map<any, KeyedEntry>();
+        const oldMap = new Map<unknown, KeyedEntry>();
         for (const entry of mapped) {
             oldMap.set(entry.key, entry);
         }

@@ -6,11 +6,11 @@ import type { BindTuple } from '../bindings/types';
 // ── $.prop.bind(propsObj, key, defaultValue?) — two-way bindable prop
 
 export interface PropFunction {
-    <T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T>;
-    bind<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T>;
+    <T>(propsObj: Record<string, unknown>, key: string, defaultValue?: T): DerivedSignal<T>;
+    bind<T>(propsObj: Record<string, unknown>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T>;
 }
 
-function resolveProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T> {
+function resolveProp<T>(propsObj: Record<string, unknown>, key: string, defaultValue?: T): DerivedSignal<T> {
     return derived(() => {
         const getter = propsObj[key];
         const val = typeof getter === 'function' ? getter() : getter;
@@ -20,14 +20,14 @@ function resolveProp<T>(propsObj: Record<string, any>, key: string, defaultValue
 
 let prop: PropFunction;
 
-prop = function prop<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): DerivedSignal<T> {
+prop = function prop<T>(propsObj: Record<string, unknown>, key: string, defaultValue?: T): DerivedSignal<T> {
     return resolveProp(propsObj, key, defaultValue);
 };
 
-prop.bind = function bindProp<T>(propsObj: Record<string, any>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T> {
+prop.bind = function bindProp<T>(propsObj: Record<string, BindTuple<T>>, key: string, defaultValue?: T): Signal<T> | DerivedSignal<T> {
     const bindKey = `bind:${key}`;
     if (bindKey in propsObj) {
-        const [getter, setter] = propsObj[bindKey] as BindTuple<T>;
+        const [getter, setter] = propsObj[bindKey];
         const d = derived(getter);
         d[SETTER] = setter;
         return d;

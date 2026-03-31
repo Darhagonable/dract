@@ -105,7 +105,7 @@ export function set<T>(signal: Signal<T> | T, value: T): T {
         return value;
     }
     // Auto-proxy object values being stored in a signal (for reassignable objects)
-    const stored = (typeof value === 'object' && value !== null) ? proxy(value) as T : value;
+    const stored = (typeof value === 'object' && value !== null) ? proxy(value) : value;
     if (Object.is(signal.v, stored)) return value;
     signal.v = stored;
     notify(signal);
@@ -124,7 +124,7 @@ function notifySubs(subs: Set<Subscriber>): void {
         if (sub.dirty) continue;
         sub.dirty = true;
 
-        const asDerived = sub as any;
+        const asDerived = sub as DerivedSignal;
         if (asDerived.subs && asDerived.subs.size > 0) {
             notifySubs(asDerived.subs);
         }

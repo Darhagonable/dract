@@ -10,7 +10,7 @@ export const Fragment = Symbol('Fragment');
 // ── JSX factory ────────────────────────────────────────────────────
 
 export function jsx(
-    tag: string | symbol | Function,
+    tag: string | typeof Fragment | Function,
     props?: Record<string, any> | null,
 ): Node {
     // Fragment — just return children in a fragment
@@ -31,7 +31,7 @@ export function jsx(
     }
 
     // Native element
-    const el = document.createElement(tag as string);
+    const el = document.createElement(tag);
 
     if (props) {
         for (const key of Object.keys(props)) {
@@ -113,6 +113,18 @@ function applyProp(el: Element, key: string, value: any): void {
 }
 
 function setAttribute(el: Element, name: string, value: any): void {
+    // Store raw (possibly non-string) value on options/selects as __value
+    if (name === 'value' && (el.tagName === 'OPTION' || el.tagName === 'SELECT')) {
+        (el as any).__value = value;
+        // For <option>, also set the DOM value attribute as string
+        if (value == null) {
+            el.removeAttribute(name);
+        } else {
+            el.setAttribute(name, String(value));
+        }
+        return;
+    }
+
     if (value == null || value === false) {
         el.removeAttribute(name);
     } else if (value === true) {

@@ -1,9 +1,9 @@
 import { effect } from '../reactivity/effect';
 
 export function if_block(
-    condFn: () => any,
-    trueFn: () => any,
-    falseFn?: () => any,
+    condFn: () => unknown,
+    trueFn: () => unknown,
+    falseFn?: () => unknown,
 ): Node {
     const start = document.createComment('');
     const end = document.createComment('');

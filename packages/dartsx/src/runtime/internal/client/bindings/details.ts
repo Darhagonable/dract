@@ -1,7 +1,6 @@
 import { effect } from '../reactivity/effect';
-import type { Getter, Setter } from './types';
 
-export function bindOpen(element: HTMLDetailsElement, get: Getter<boolean>, set: Setter<boolean>): void {
+export function bindOpen(element: HTMLDetailsElement, get: () => boolean | undefined, set: (open: boolean) => void) {
     element.addEventListener('toggle', () => {
         set(element.open);
     });

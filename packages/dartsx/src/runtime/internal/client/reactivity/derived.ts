@@ -1,18 +1,16 @@
-import { type Signal, type Subscriber, SIGNAL, get as signalGet, getSubscriber, setSubscriber } from './state';
+import { type Signal, type Subscriber, SIGNAL, getSubscriber, setSubscriber } from './state';
 
-export interface DerivedSignal<T = any> extends Signal<T> {
+export interface DerivedSignal<T = any> extends Signal<T>, Subscriber {
     /** The computation function */
     fn: () => T;
     /** Whether this derived has ever been evaluated */
     initialized: boolean;
-    /** Whether the cached value may be stale */
-    dirty: boolean;
 }
 
 // ── $.derived(fn) ──────────────────────────────────────────────────
 
 export function derived<T>(fn: () => T): DerivedSignal<T> {
-    const sig: DerivedSignal<T> & Subscriber = {
+    const sig: DerivedSignal<T> = {
         v: undefined as T,
         version: 0,
         subs: new Set(),
@@ -38,36 +36,35 @@ export function derived<T>(fn: () => T): DerivedSignal<T> {
 
 // ── Override get for derived signals ───────────────────────────────
 
-export function getDerived<T>(sig: DerivedSignal<T>): T {
+export function getDerived<T>(signal: DerivedSignal<T>): T {
     // If dirty, recalculate (pull)
-    if (sig.dirty || !sig.initialized) {
+    if (signal.dirty || !signal.initialized) {
         // Untrack old dependencies
-        const sub = sig as unknown as Subscriber;
-        for (const dep of sub.deps) {
-            dep.subs.delete(sub);
+        for (const dep of signal.deps) {
+            dep.subs.delete(signal);
         }
-        sub.deps.clear();
+        signal.deps.clear();
 
         // Evaluate with this derived as the current subscriber
-        const prev = setSubscriber(sub);
-        const newVal = sig.fn();
+        const prev = setSubscriber(signal);
+        const newVal = signal.fn();
         setSubscriber(prev);
 
         // Only bump version if value actually changed (skip downstream updates)
-        if (!sig.initialized || !Object.is(sig.v, newVal)) {
-            sig.v = newVal;
-            sig.version++;
+        if (!signal.initialized || !Object.is(signal.v, newVal)) {
+            signal.v = newVal;
+            signal.version++;
         }
-        sig.dirty = false;
-        sig.initialized = true;
+        signal.dirty = false;
+        signal.initialized = true;
     }
 
     // Track this read in the outer subscriber
     const outer = getSubscriber();
     if (outer) {
-        sig.subs.add(outer);
-        (outer).deps.add(sig);
+        signal.subs.add(outer);
+        outer.deps.add(signal);
     }
 
-    return sig.v;
+    return signal.v;
 }

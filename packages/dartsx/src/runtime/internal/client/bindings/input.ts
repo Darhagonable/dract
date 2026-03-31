@@ -1,9 +1,8 @@
 import { effect } from '../reactivity/effect';
-import type { Getter, Setter } from './types';
 
 // ── bind:value ─────────────────────────────────────────────────────
 
-export function bindValue(element: HTMLInputElement | HTMLTextAreaElement, get: Getter, set: Setter): void {
+export function bindValue(element: HTMLInputElement | HTMLTextAreaElement, get: () => unknown, set: (value: unknown) => void) {
     element.addEventListener('input', () => {
         const type = element.type;
         if (type === 'number' || type === 'range') {
@@ -15,13 +14,14 @@ export function bindValue(element: HTMLInputElement | HTMLTextAreaElement, get: 
     });
 
     effect(() => {
-        element.value = get() ?? '';
+        const val = get();
+        element.value = val != null ? String(val) : '';
     });
 }
 
 // ── bind:checked ───────────────────────────────────────────────────
 
-export function bindChecked(element: HTMLInputElement, get: Getter<boolean>, set: Setter<boolean>): void {
+export function bindChecked(element: HTMLInputElement, get: () => boolean | undefined, set: (checked: boolean) => void) {
     element.addEventListener('change', () => {
         set(element.checked);
     });
@@ -33,7 +33,7 @@ export function bindChecked(element: HTMLInputElement, get: Getter<boolean>, set
 
 // ── bind:indeterminate ─────────────────────────────────────────────
 
-export function bindIndeterminate(element: HTMLInputElement, get: Getter<boolean>, set: Setter<boolean>): void {
+export function bindIndeterminate(element: HTMLInputElement, get: () => boolean | undefined, set: (indeterminate: boolean) => void) {
     element.addEventListener('change', () => {
         set(element.indeterminate);
     });
@@ -45,12 +45,12 @@ export function bindIndeterminate(element: HTMLInputElement, get: Getter<boolean
 
 // ── bind:group ─────────────────────────────────────────────────────
 
-export function bindGroup(element: HTMLInputElement, get: Getter, set: Setter): void {
+export function bindGroup(element: HTMLInputElement, get: () => unknown, set: (value: unknown) => void) {
     element.addEventListener('change', () => {
         if (element.type === 'radio') {
             set(element.value);
         } else {
-            const arr: any[] = [...(get() || [])];
+            const arr: string[] = [...((get() || []) as string[])];
             if (element.checked) {
                 if (!arr.includes(element.value)) arr.push(element.value);
             } else {
@@ -73,7 +73,7 @@ export function bindGroup(element: HTMLInputElement, get: Getter, set: Setter): 
 
 // ── bind:files ─────────────────────────────────────────────────────
 
-export function bindFiles(element: HTMLInputElement, get: Getter<FileList | null>, set: Setter<FileList | null>): void {
+export function bindFiles(element: HTMLInputElement, get: () => FileList | null | undefined, set: (files: FileList | null) => void) {
     element.addEventListener('change', () => {
         set(element.files);
     });

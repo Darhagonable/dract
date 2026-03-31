@@ -1,4 +1,4 @@
-import { getCurrentComponent } from '../internal/client';
+import { teardown } from '../internal/client/reactivity/effect';
 import { getCurrentEffect } from './effect';
 
 /**
@@ -12,8 +12,5 @@ export function onCleanup(fn: () => void): void {
         effect.cleanups.push(fn);
         return;
     }
-    const ctx = getCurrentComponent();
-    if (ctx) {
-        ctx.cleanupCallbacks.push(fn);
-    }
+    teardown(fn);
 }
