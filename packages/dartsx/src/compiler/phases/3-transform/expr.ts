@@ -289,7 +289,7 @@ export function transformBodyStatement(
     // (deps must remain as Signal objects, not unwrapped via $.get())
     // and args at reactive positions for functions with reactive params.
     // For any exclusion-zone arg that is a member expression on a reactive root,
-    // wrap it in $.derived(() => ...) so the callee receives a DerivedSignal.
+    // wrap it in $.derived(() => ...) so the callee receives a Derived signal.
     const exclusionZones: { start: number; end: number }[] = [];
 
     function addExclusionArg(arg: ASTNode): void {

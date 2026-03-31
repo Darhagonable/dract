@@ -3,7 +3,7 @@ import {
     state,
     get,
     set,
-    type Signal,
+    type State,
     getFlushPromise,
 } from '../src/runtime/internal/client/reactivity/state';
 import {
@@ -45,7 +45,7 @@ describe('state', () => {
         let notified = false;
         const sub = {
             run() { notified = true; },
-            deps: new Set<Signal>(),
+            deps: new Set<State>(),
             dirty: false,
         };
         sig.subs.add(sub);
@@ -109,7 +109,7 @@ describe('tick', () => {
 
         const sub = {
             run() { effectRan = true; },
-            deps: new Set<Signal>(),
+            deps: new Set<State>(),
             dirty: false,
         };
         count.subs.add(sub);
@@ -378,7 +378,7 @@ describe('deep reactivity', () => {
     });
 
     it('reassignable object pattern: state(proxy(obj))', async () => {
-        const objSig = state(proxy({ name: 'alice' })) as Signal<{ name: string }>;
+        const objSig = state(proxy({ name: 'alice' })) as State<{ name: string }>;
         const values: string[] = [];
 
         effect(objSig, (val: any) => {

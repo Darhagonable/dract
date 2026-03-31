@@ -170,7 +170,7 @@ function appendChild(parent: Node, child: any): void {
             const val = child();
 
             // Remove old
-            for (const n of currentNodes) n.remove();
+            for (const n of currentNodes) n.parentNode?.removeChild(n);
             currentNodes = [];
 
             if (val == null || val === false || val === true) return;

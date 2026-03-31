@@ -1,5 +1,5 @@
-import { get, isSignal, SIGNAL, type Signal, type Subscriber } from '../internal/client/reactivity/state.js';
-import { STATE_SYMBOL, RAW, getProxySignal } from '../internal/client/reactivity/proxy.js';
+import { get, SIGNAL, type State, type Subscriber } from '../internal/client/reactivity/state.js';
+import { STATE_SYMBOL, RAW, getProxyState } from '../internal/client/reactivity/proxy.js';
 import { getCurrentComponent } from '../internal/client/index.js';
 
 // ── Effect context (so onCleanup knows which effect is running) ────
@@ -19,15 +19,15 @@ function runCleanups(ctx: EffectContext): void {
     ctx.cleanups = [];
 }
 
-/** Resolve a dep (Signal, DerivedSignal, or proxy) to a Signal for subscription */
-function resolveSignal(dep: any): Signal {
-    // Signal or DerivedSignal
+/** Resolve a dep (State, Derived, or proxy) to a State for subscription */
+function resolveSignal(dep: any): State {
+    // State or Derived
     if (dep && typeof dep === 'object' && SIGNAL in dep) {
         return dep;
     }
-    // Proxy → get its root signal
+    // Proxy → get its root state
     if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
-        const sig = getProxySignal(dep);
+        const sig = getProxyState(dep);
         if (sig) return sig;
     }
     throw new Error('effect: invalid dependency — expected a signal or proxy');

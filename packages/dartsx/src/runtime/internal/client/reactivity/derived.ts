@@ -1,6 +1,6 @@
-import { type Signal, type Subscriber, SIGNAL, getSubscriber, setSubscriber } from './state';
+import { type State, type Signal, type Subscriber, SIGNAL, getSubscriber, setSubscriber, isSignal } from './state';
 
-export interface DerivedSignal<T = any> extends Signal<T>, Subscriber {
+export interface Derived<T = any> extends State<T>, Subscriber {
     /** The computation function */
     fn: () => T;
     /** Whether this derived has ever been evaluated */
@@ -9,8 +9,12 @@ export interface DerivedSignal<T = any> extends Signal<T>, Subscriber {
 
 // ── $.derived(fn) ──────────────────────────────────────────────────
 
-export function derived<T>(fn: () => T): DerivedSignal<T> {
-    const sig: DerivedSignal<T> = {
+export function isDerived<T>(value: Signal<T> | T): value is Derived<T> {
+    return isSignal(value) && 'fn' in value;
+}
+
+export function derived<T>(fn: () => T): Derived<T> {
+    const sig: Derived<T> = {
         v: undefined as T,
         version: 0,
         subs: new Set(),
@@ -19,15 +23,10 @@ export function derived<T>(fn: () => T): DerivedSignal<T> {
         initialized: false,
         dirty: true,
         deps: new Set(),
-        // `run` is called when an upstream signal notifies us (push)
+        // `run` exists to satisfy the Subscriber interface.
+        // Derived signals are never scheduled — notifySubs handles propagation.
         run() {
-            // Just mark dirty — the actual re-evaluation is lazy (pull on get)
             sig.dirty = true;
-            // Propagate dirtiness to our own subscribers
-            const subs = [...sig.subs];
-            for (const sub of subs) {
-                sub.dirty = true;
-            }
         },
     };
 
@@ -36,7 +35,7 @@ export function derived<T>(fn: () => T): DerivedSignal<T> {
 
 // ── Override get for derived signals ───────────────────────────────
 
-export function getDerived<T>(signal: DerivedSignal<T>): T {
+export function getDerived<T>(signal: Derived<T>): T {
     // If dirty, recalculate (pull)
     if (signal.dirty || !signal.initialized) {
         // Untrack old dependencies

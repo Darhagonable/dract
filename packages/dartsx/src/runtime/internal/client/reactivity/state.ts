@@ -1,7 +1,7 @@
 // ── Reactive context tracking ──────────────────────────────────────
 
 import { proxy, STATE_SYMBOL } from './proxy';
-import { getDerived, type DerivedSignal } from './derived';
+import { getDerived, isDerived, type Derived } from './derived';
 import { scheduleEffect } from './scheduler';
 
 export { scheduleEffect, getFlushPromise } from './scheduler';
@@ -15,7 +15,7 @@ export const SIGNAL: unique symbol = Symbol('signal');
 /** Symbol to mark a setter on a derived used as a bind signal */
 export const SETTER: unique symbol = Symbol('setter');
 
-export interface Signal<T = any> {
+export interface State<T = any> {
     /** Current value */
     v: T;
     /** Version counter — bumped on every set */
@@ -28,11 +28,14 @@ export interface Signal<T = any> {
     [SETTER]?: (value: T) => void;
 }
 
+/** A Signal is either a State or a Derived */
+export type Signal<T = any> = State<T> | Derived<T>;
+
 export interface Subscriber {
     /** Callback to execute / re-evaluate */
     run(): void;
     /** Signals this subscriber reads from */
-    deps: Set<Signal>;
+    deps: Set<State>;
     /** For derived: marks whether the cached value may be stale */
     dirty: boolean;
 }
@@ -55,24 +58,26 @@ export function isSignal<T>(value: Signal<T> | T): value is Signal<T> {
     return !!value && typeof value === 'object' && SIGNAL in value;
 }
 
+export function isState<T>(value: Signal<T> | T): value is State<T> {
+    return isSignal(value) && !('fn' in value);
+}
+
 // ── $.state(initialValue) ──────────────────────────────────────────
 //
-// Primitives → Signal (use get/set to read/write)
+// Primitives → State (use get/set to read/write)
 // Objects    → Proxy  (property access is reactive)
 
 export function state<T extends object>(initialValue: T): T;
-export function state<T>(initialValue: T): Signal<T>;
-export function state<T>(initialValue: T): T | Signal<T> {
+export function state<T>(initialValue: T): State<T>;
+export function state<T>(initialValue: T): T | State<T> {
     if (typeof initialValue === 'object' && initialValue !== null) {
-        // Already proxied → wrap in Signal (reassignable object pattern)
+        // Already proxied → wrap in State (reassignable object pattern)
         if (STATE_SYMBOL in (initialValue)) {
-            const sig: Signal<T> = { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
-            return sig;
+            return { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
         }
         return proxy(initialValue);
     }
-    const sig: Signal<T> = { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
-    return sig;
+    return { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
 }
 
 // ── $.get(signal) ──────────────────────────────────────────────────
@@ -81,9 +86,9 @@ export function get<T>(signal: Signal<T> | T): T {
     // Passthrough for non-signal values
     if (!isSignal(signal)) return signal;
 
-    // DerivedSignal — use getDerived for lazy evaluation
-    if ('fn' in signal) {
-        return getDerived(signal as DerivedSignal<T>);
+    // Derived — use getDerived for lazy evaluation
+    if (isDerived(signal)) {
+        return getDerived(signal);
     }
     // If we're inside a reactive context, track this read.
     if (currentSubscriber) {
@@ -114,7 +119,7 @@ export function set<T>(signal: Signal<T> | T, value: T): T {
 
 // ── Notification ───────────────────────────────────────────────────
 
-export function notify(signal: Signal): void {
+export function notify(signal: State): void {
     signal.version++;
     notifySubs(signal.subs);
 }
@@ -124,11 +129,12 @@ function notifySubs(subs: Set<Subscriber>): void {
         if (sub.dirty) continue;
         sub.dirty = true;
 
-        const asDerived = sub as DerivedSignal;
-        if (asDerived.subs && asDerived.subs.size > 0) {
-            notifySubs(asDerived.subs);
+        if (isDerived(sub)) {
+            // Derived: just propagate dirty downstream (value is lazy — recomputed on read)
+            notifySubs(sub.subs);
+        } else {
+            // Effect: schedule for execution in next microtask
+            scheduleEffect(sub);
         }
-
-        scheduleEffect(sub);
     }
 }

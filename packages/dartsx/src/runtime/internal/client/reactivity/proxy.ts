@@ -1,4 +1,4 @@
-import { type Signal, SIGNAL, getSubscriber, notify } from './state';
+import { type State, SIGNAL, getSubscriber, notify } from './state';
 
 // ── Symbols ────────────────────────────────────────────────────────
 
@@ -13,20 +13,24 @@ export const STATE_SYMBOL = Symbol('state_proxy');
 const proxyCache = new WeakMap<object, any>();
 
 /** Maps each proxy → its root signal (fires on any mutation) */
-const proxySignals = new WeakMap<object, Signal>();
+const proxySignals = new WeakMap<object, State>();
 
 /** Get the root signal for a proxy (used by effect to subscribe to any change) */
-export function getProxySignal(p: any): Signal | undefined {
+export function getProxyState(p: any): State | undefined {
     return proxySignals.get(p);
+}
+
+export function isProxy(value: unknown): boolean {
+    return !!value && typeof value === 'object' && STATE_SYMBOL in value;
 }
 
 // ── Internal signal helpers ────────────────────────────────────────
 
-function source<T>(value: T): Signal<T> {
+function source<T>(value: T): State<T> {
     return { v: value, version: 0, subs: new Set(), [SIGNAL]: true };
 }
 
-function trackRead(signal: Signal): void {
+function trackRead(signal: State): void {
     const sub = getSubscriber();
     if (sub) {
         signal.subs.add(sub);
@@ -56,7 +60,7 @@ function shouldProxy(value: any): boolean {
 
 // ── Main entry ─────────────────────────────────────────────────────
 
-export function proxy<T>(value: T, _parentRoot?: Signal): T {
+export function proxy<T>(value: T, _parentRoot?: State): T {
     if (typeof value !== 'object' || value === null) return value;
     if (!shouldProxy(value)) return value;
     if (proxyCache.has(value)) return proxyCache.get(value);
@@ -80,8 +84,8 @@ export function proxy<T>(value: T, _parentRoot?: Signal): T {
 
 // ── Object / Array proxy (per-property signals) ────────────────────
 
-function proxyObject<T extends object>(target: T, parentRoot?: Signal): T {
-    const sources = new Map<string | symbol, Signal>();
+function proxyObject<T extends object>(target: T, parentRoot?: State): T {
+    const sources = new Map<string | symbol, State>();
     const version = source(0);
     const root = source(0);
 
@@ -154,8 +158,8 @@ function proxyObject<T extends object>(target: T, parentRoot?: Signal): T {
 
 // ── Map proxy (per-key signals + version) ──────────────────────────
 
-function proxyMap<K, V>(target: Map<K, V>, parentRoot?: Signal): Map<K, V> {
-    const sources = new Map<K, Signal<V | undefined>>();
+function proxyMap<K, V>(target: Map<K, V>, parentRoot?: State): Map<K, V> {
+    const sources = new Map<K, State<V | undefined>>();
     const version = source(0);
     const root = source(0);
 
@@ -164,7 +168,7 @@ function proxyMap<K, V>(target: Map<K, V>, parentRoot?: Signal): Map<K, V> {
         if (parentRoot) { parentRoot.v++; notify(parentRoot); }
     }
 
-    function getSource(key: K): Signal<V | undefined> {
+    function getSource(key: K): State<V | undefined> {
         let s = sources.get(key);
         if (!s) {
             s = source<V | undefined>(target.has(key) ? target.get(key)! : undefined);
@@ -263,7 +267,7 @@ function proxyMap<K, V>(target: Map<K, V>, parentRoot?: Signal): Map<K, V> {
 
 // ── Set proxy (version signal) ─────────────────────────────────────
 
-function proxySet<T>(target: Set<T>, parentRoot?: Signal): Set<T> {
+function proxySet<T>(target: Set<T>, parentRoot?: State): Set<T> {
     const version = source(0);
     const root = source(0);
 
@@ -340,7 +344,7 @@ const DATE_SETTERS = new Set([
     'setUTCSeconds', 'setYear',
 ]);
 
-function proxyDate(target: Date, parentRoot?: Signal): Date {
+function proxyDate(target: Date, parentRoot?: State): Date {
     const sig = source(0);
 
     function notifyRoots(): void {

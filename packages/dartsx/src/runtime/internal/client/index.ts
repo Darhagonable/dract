@@ -1,11 +1,11 @@
 // ── Re-exports from reactivity ─────────────────────────────────────
 
-export { state, get, set, notify, isSignal, SIGNAL, SETTER, type Signal, type Subscriber, setSubscriber, getSubscriber } from './reactivity/state';
+export { state, get, set, notify, isSignal, isState, SIGNAL, SETTER, type State, type Signal, type Subscriber, setSubscriber, getSubscriber } from './reactivity/state';
 export { scheduleEffect, getFlushPromise } from './reactivity/scheduler';
 export { prop } from './reactivity/prop';
-export { derived, getDerived, type DerivedSignal } from './reactivity/derived';
+export { derived, getDerived, isDerived, type Derived } from './reactivity/derived';
 export { effect, teardown } from './reactivity/effect';
-export { proxy, RAW, STATE_SYMBOL, getProxySignal } from './reactivity/proxy';
+export { proxy, RAW, STATE_SYMBOL, getProxyState, isProxy } from './reactivity/proxy';
 export type { BindTuple } from './bindings/types';
 export { type ComponentContext, getCurrentComponent, setCurrentComponent } from './context';
 
