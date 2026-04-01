@@ -99,13 +99,15 @@ export default function dartsx(): Plugin {
 		},
 		async transform(code, id) {
 			const isTsx = id.endsWith('.tsx');
+			const isJsx = id.endsWith('.jsx');
 			const isTs = id.endsWith('.ts') && !id.endsWith('.d.ts');
+			const isJs = id.endsWith('.js') && !id.endsWith('.d.ts');
 
-			// Compile .tsx files always, .ts files when they contain DarTsx syntax
-			// or when they participate in reactive-call propagation.
-			if (!isTsx && !isTs) return;
+			// Compile JSX-flavored files eagerly, and plain TS/JS modules when they
+			// contain DarTsx syntax or participate in reactive-call propagation.
+			if (!isTsx && !isTs && !isJsx && !isJs) return;
 
-			if (isTs && !reactiveCallRegistry.has(id) && !isDarTsxSource(code)) return;
+			if (!isTsx && !isJsx && !reactiveCallRegistry.has(id) && !isDarTsxSource(code)) return;
 
 			// Clear invalidation guard now that we're recompiling
 			pendingInvalidations.delete(id);

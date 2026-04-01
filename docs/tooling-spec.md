@@ -2,18 +2,18 @@
 
 ## 1. Scope
 
-DarTsx tooling currently ships as a TypeScript-plugin-first stack:
+DarTsx tooling currently ships as a VS Code-extension-first stack:
 
-- `packages/typescript-plugin` provides editor intelligence inside DarTsx source and in TypeScript files that import DarTsx modules.
-- `packages/vscode-plugin` registers the TypeScript plugin and injects DarTsx syntax highlighting into TypeScript and TSX editors.
+- `packages/vscode-plugin` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
+- `packages/typescript-plugin` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
 - `packages/vite-plugin` compiles DarTsx source for dev/build and propagates cross-file reactivity metadata.
 - `packages/dartsx` remains the source of truth for compiler and runtime behavior.
 
-There is no standalone DarTsx language server in the current architecture. Editor features are delivered through tsserver plus the DarTsx TypeScript plugin.
+There is no standalone DarTsx language server in the current architecture. In VS Code, JavaScript and TypeScript language features are both powered by the built-in JS/TS service, so the extension works in JS-only projects without requiring a user-managed TypeScript setup.
 
 ## 2. Syntax Surface Area
 
-DarTsx source can live in `.tsx` files and, for non-JSX modules, `.ts` files that use DarTsx declarations.
+DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts` and `.js` files that use DarTsx declarations.
 
 ### Keywords
 | Syntax | Example | What plain TS sees |
@@ -51,8 +51,8 @@ DarTsx source can live in `.tsx` files and, for non-JSX modules, `.ts` files tha
 
 ### 3.1 Required Behavior
 
-1. Opening DarTsx source must not crash tsserver or the VS Code extension.
-2. Non-DarTsx `.ts` and `.tsx` files must keep normal TypeScript behavior.
+1. Opening DarTsx source must not crash the VS Code extension or the underlying JS/TS language service.
+2. Non-DarTsx `.js`, `.jsx`, `.ts`, and `.tsx` files must keep their normal editor behavior.
 3. Hover, go-to-definition, completions, and diagnostics must remain usable inside DarTsx source.
 4. DarTsx-specific syntax must not surface obvious false-positive TypeScript diagnostics.
 5. Cross-file imports from DarTsx modules must preserve useful type information for consumers.
@@ -71,13 +71,14 @@ DarTsx source can live in `.tsx` files and, for non-JSX modules, `.ts` files tha
 ```
 ┌────────────────────────────────────────────────────┐
 │ VS Code Extension (packages/vscode-plugin)        │
-│ - Registers the TypeScript server plugin          │
-│ - Injects TextMate grammar into TS and TSX        │
+│ - User-facing DarTsx support in JS/TS/JSX/TSX     │
+│ - Injects TextMate grammar into supported editors │
+│ - Hooks into VS Code's built-in JS/TS service     │
 │ - Shows lightweight editor status UI              │
 └───────────────────────────┬────────────────────────┘
                             │
 ┌───────────────────────────▼────────────────────────┐
-│ TypeScript Server + DarTsx TS Plugin              │
+│ VS Code JS/TS Language Service                     │
 │ (packages/typescript-plugin)                      │
 │ - Detects DarTsx source by content                │
 │ - Builds Volar virtual code from DarTsx source    │
@@ -102,13 +103,14 @@ DarTsx source can live in `.tsx` files and, for non-JSX modules, `.ts` files tha
 
 ### 4.2 Why This Shape
 
-DarTsx uses TypeScript-owned file extensions. That makes a Svelte-style split language-server architecture less attractive because tsserver already owns `.ts` and `.tsx` files and users still expect standard TS behavior in mixed files.
+DarTsx uses JavaScript- and TypeScript-owned file extensions. That makes a Svelte-style split language-server architecture less attractive because VS Code already routes `.js`, `.jsx`, `.ts`, and `.tsx` through its built-in JS/TS language service and users still expect normal JS/TS behavior in mixed files.
 
-The current design keeps a single TypeScript service in charge and layers DarTsx support into it:
+The current design keeps a single VS Code language-service path in charge and layers DarTsx support into it:
 
 - Volar virtual code handles source mapping and transformed service code.
-- The DarTsx plugin only activates for files that actually contain DarTsx syntax.
+- The DarTsx integration only activates for files that actually contain DarTsx syntax.
 - Regular TypeScript files continue through the normal TS pipeline unchanged.
+- Regular JavaScript files continue through the normal JS pipeline unchanged.
 - The build stack stays separate and uses the real compiler instead of the editor-only lowering.
 
 ## 5. Editor Tooling Design
@@ -117,11 +119,11 @@ The current design keeps a single TypeScript service in charge and layers DarTsx
 
 DarTsx detection is content-based. The editor plugin treats a file as DarTsx only when it sees DarTsx-specific declarations such as `component`, `state`, or `derived` in statement positions.
 
-This selective activation matters because the extension injects into both TypeScript and TSX editors, but regular TS files must not be reinterpreted as DarTsx.
+This selective activation matters because the extension injects into JavaScript, JSX, TypeScript, and TSX editors, but regular JS/TS files must not be reinterpreted as DarTsx.
 
 ### 5.2 Virtual Code
 
-The TypeScript plugin uses a Volar `LanguagePlugin` to create a virtual TS or TSX view of DarTsx source.
+Internally, the VS Code integration uses a Volar `LanguagePlugin` to create a virtual JS, JSX, TS, or TSX view of DarTsx source.
 
 Current lowering rules include:
 
@@ -161,7 +163,7 @@ This is intentionally a filter layer, not a second semantic checker.
 
 ### 5.5 Syntax Highlighting
 
-The VS Code extension provides a TextMate injection grammar that targets both `source.ts` and `source.tsx`.
+The VS Code extension provides a TextMate injection grammar that targets JavaScript, JSX, TypeScript, and TSX scopes.
 
 It currently highlights:
 
@@ -181,8 +183,8 @@ The Vite plugin is responsible for real compile-time behavior in dev and build f
 
 Its current responsibilities are:
 
-- compile DarTsx `.tsx` modules
-- compile DarTsx-flavored `.ts` modules when they contain DarTsx syntax
+- compile DarTsx `.tsx` and `.jsx` modules
+- compile DarTsx-flavored `.ts` and `.js` modules when they contain DarTsx syntax
 - inspect imported DarTsx modules to discover reactive exports
 - propagate reactive call information across modules
 - invalidate affected modules when reactive call-site information changes
@@ -191,7 +193,7 @@ Its current responsibilities are:
 
 There are two related but distinct transforms in the repo:
 
-- the editor transform in `packages/typescript-plugin` exists to make tsserver understand DarTsx source
+- the editor transform in `packages/typescript-plugin` exists to make VS Code's built-in JS/TS language service understand DarTsx source
 - the compiler in `packages/dartsx` exists to generate runtime code
 
 They intentionally solve different problems. The editor transform aims for type-service compatibility and source mapping. The compiler aims for correct emitted runtime behavior.
@@ -213,11 +215,11 @@ This is what allows examples like shared state modules and helper functions in s
 ### 7.1 Working Today
 
 - DarTsx-aware hover labels for components, state, derived, props, and bindable props
-- go-to-definition through the TS plugin path
+- go-to-definition through the VS Code extension's JS/TS language-service integration
 - diagnostic suppression for known DarTsx false positives
 - renamed props and bindable renamed props across editor tooling, compiler output, runtime tests, and playground examples
 - syntax coloring for DarTsx keywords in TypeScript and TSX, including multiline bind parameter cases
-- Vite compilation for DarTsx `.tsx` and DarTsx-flavored `.ts`
+- Vite compilation for DarTsx `.tsx`, `.jsx`, and DarTsx-flavored `.ts` or `.js`
 - cross-file reactive export/import handling in build flows
 
 ### 7.2 Deliberately Not Present
@@ -238,13 +240,13 @@ When the tooling architecture changes, these validation paths should be kept cur
 
 ## 9. Known Constraints
 
-1. DarTsx still lives inside `.ts` and `.tsx`, so detection heuristics must remain conservative.
+1. DarTsx still lives inside `.js`, `.jsx`, `.ts`, and `.tsx`, so detection heuristics must remain conservative.
 2. TextMate grammar rules are approximate and should not be treated as the source of truth for semantics.
-3. Hover rewriting depends on definition lookup and transformed TS quick info; edge cases should be covered with tests when new syntax is added.
+3. Hover rewriting depends on definition lookup and transformed JS/TS quick info; edge cases should be covered with tests when new syntax is added.
 4. Editor lowering and runtime compilation are separate implementations, so new language features often require changes in both places.
 
 ## 10. Near-Term Maintenance Priorities
 
 1. Keep the tooling docs aligned with the shipped architecture instead of speculative designs.
-2. Add focused regression coverage whenever DarTsx syntax is introduced or rewritten in the TS plugin or compiler.
+2. Add focused regression coverage whenever DarTsx syntax is introduced or rewritten in the VS Code integration layer or compiler.
 3. Continue removing dead compatibility code rather than preserving unused architectural branches.

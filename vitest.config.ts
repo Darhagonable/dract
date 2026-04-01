@@ -25,6 +25,13 @@ export default defineConfig({
 					include: ['packages/typescript-plugin/tests/*.test.ts'],
 				},
 			},
+			{
+				extends: true,
+				test: {
+					name: 'vite-plugin',
+					include: ['packages/vite-plugin/tests/*.test.ts'],
+				},
+			},
 		],
 	},
 });

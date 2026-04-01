@@ -10,6 +10,8 @@
 	},
 	"categories": ["Programming Languages"],
 	"activationEvents": [
+		"onLanguage:javascript",
+		"onLanguage:javascriptreact",
 		"onLanguage:typescript",
 		"onLanguage:typescriptreact"
 	],
@@ -23,9 +25,9 @@
 		],
 		"grammars": [
 			{
-				"scopeName": "source.dartsx.injection",
-				"path": "./syntaxes/dartsx.injection.tmLanguage.json",
-				"injectTo": ["source.ts", "source.tsx"]
+				"scopeName": "source.dartsx.render.injection",
+				"path": "./syntaxes/dartsx.render.injection.tmLanguage.json",
+				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"]
 			}
 		]
 	},

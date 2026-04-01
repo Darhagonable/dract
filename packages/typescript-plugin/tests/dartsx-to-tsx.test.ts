@@ -9,6 +9,12 @@ describe('isDarTsxFile', () => {
 		expect(isDarTsxFile('async component Bar() {}')).toBe(true);
 	});
 
+	it('detects DarTsx-only syntax inside regular function components', () => {
+		expect(isDarTsxFile('export default function App() { return <input bind:value={name} /> }')).toBe(true);
+		expect(isDarTsxFile('function App() { return <Badge bind:display-name={name} /> }')).toBe(true);
+		expect(isDarTsxFile('function App() { render (<div />) }')).toBe(true);
+	});
+
 	it('rejects regular TSX files', () => {
 		expect(isDarTsxFile('function App() { return <div/> }')).toBe(false);
 		expect(isDarTsxFile('const x = 1;')).toBe(false);
@@ -64,6 +70,12 @@ describe('dartsxToTsx', () => {
 	it('transforms bind:checked to __bind_checked', () => {
 		const { code } = dartsxToTsx('<input bind:checked={active} />');
 		expect(code).toContain('__bind_checked={active}');
+	});
+
+	it('transforms hyphenated bind attributes', () => {
+		const { code } = dartsxToTsx('<Badge bind:display-name={profile.displayName} />');
+		expect(code).toContain('__bind_display-name={profile.displayName}');
+		expect(code).not.toContain('bind:display-name');
 	});
 
 	it('transforms bind:{x} shorthand', () => {

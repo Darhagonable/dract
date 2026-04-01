@@ -1,0 +1,61 @@
+{
+	"scopeName": "source.dartsx.render.injection",
+	"injectionSelector": "L:source.js, L:source.js.jsx, L:source.jsx, L:source.ts, L:source.tsx",
+	"patterns": [
+		{ "include": "#dartsx-function-declaration" },
+		{ "include": "#dartsx-component-header" },
+		{ "include": "#dartsx-render-block" }
+	],
+	"repository": {
+		"dartsx-function-declaration": {
+			"match": "\\b(function)(\\s+)([A-Za-z_$][\\w$]*)\\s*(?=\\()",
+			"captures": {
+				"1": { "name": "storage.type.function.tsx" },
+				"3": { "name": "entity.name.function.tsx" }
+			}
+		},
+		"dartsx-component-header": {
+			"begin": "\\b(component)\\s+([A-Za-z_$][\\w$]*)\\s*(\\()",
+			"beginCaptures": {
+				"1": { "name": "storage.type.component.dartsx" },
+				"2": { "name": "entity.name.function.component.dartsx" },
+				"3": { "name": "punctuation.definition.parameters.begin.tsx" }
+			},
+			"end": "(\\))\\s*(?=\\{)",
+			"endCaptures": {
+				"1": { "name": "punctuation.definition.parameters.end.tsx" }
+			},
+			"patterns": [
+				{
+					"match": "(^\\s*|[,(]\\s*)(bind)(?=\\s+(?:['\"]|[A-Za-z_$]))",
+					"captures": {
+						"2": { "name": "storage.modifier.bind.dartsx" }
+					}
+				},
+				{
+					"match": "(['\"][^'\"]+['\"])(\\s+as\\s+)([A-Za-z_$][\\w$]*)",
+					"captures": {
+						"1": { "name": "string.quoted.dartsx" },
+						"2": { "name": "keyword.control.as.dartsx" },
+						"3": { "name": "variable.parameter.bind.dartsx" }
+					}
+				}
+			]
+		},
+		"dartsx-render-block": {
+			"begin": "\\b(render)\\s*(\\()",
+			"beginCaptures": {
+				"1": { "name": "keyword.control.render.dartsx" },
+				"2": { "name": "meta.brace.round.js.jsx" }
+			},
+			"end": "^(\\s*)(\\))",
+			"endCaptures": {
+				"2": { "name": "meta.brace.round.js.jsx" }
+			},
+			"contentName": "meta.embedded.block.dartsx",
+			"patterns": [
+				{ "include": "source.js.jsx" }
+			]
+		}
+	}
+}

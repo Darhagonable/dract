@@ -29,15 +29,25 @@ class DarTsxVirtualCode implements VirtualCode {
 	embeddedCodes: VirtualCode[] = [];
 	mappings: CodeMapping[] = [];
 	snapshot!: IScriptSnapshot;
-	isTsx = false;
+	serviceExtension: '.js' | '.jsx' | '.ts' | '.tsx' = '.ts';
+	scriptKind = 3;
 
-	constructor(snapshot: IScriptSnapshot) {
-		this.update(snapshot);
+	constructor(fileName: string, snapshot: IScriptSnapshot) {
+		this.update(fileName, snapshot);
 	}
 
-	update(snapshot: IScriptSnapshot): void {
+	update(fileName: string, snapshot: IScriptSnapshot): void {
 		const source = snapshot.getText(0, snapshot.getLength());
-		this.isTsx = /\brender\s*\(/.test(source) || /<\w/.test(source);
+		const hasJsxSyntax = /\brender\s*\(/.test(source) || /<\w/.test(source);
+		const isJavaScriptFile = fileName.endsWith('.js') || fileName.endsWith('.jsx');
+
+		if (isJavaScriptFile) {
+			this.serviceExtension = hasJsxSyntax || fileName.endsWith('.jsx') ? '.jsx' : '.js';
+			this.scriptKind = this.serviceExtension === '.jsx' ? 2 : 1;
+		} else {
+			this.serviceExtension = hasJsxSyntax || fileName.endsWith('.tsx') ? '.tsx' : '.ts';
+			this.scriptKind = this.serviceExtension === '.tsx' ? 4 : 3;
+		}
 
 		const { code, ms } = dartsxToTsx(source);
 
@@ -290,7 +300,7 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 					? (scriptId as any).fsPath.replace(/\\/g, '/')
 					: String(scriptId);
 
-			if (!fileName.endsWith('.tsx') && !fileName.endsWith('.ts')) return undefined;
+			if (!fileName.endsWith('.tsx') && !fileName.endsWith('.ts') && !fileName.endsWith('.jsx') && !fileName.endsWith('.js')) return undefined;
 			// Skip .d.ts files
 			if (fileName.endsWith('.d.ts')) return undefined;
 
@@ -316,11 +326,13 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 		createVirtualCode(_uri, languageId, snapshot) {
 			if (languageId !== 'dartsx') return undefined;
 
-			return new DarTsxVirtualCode(snapshot);
+			const fileName = typeof _uri === 'string' ? _uri : String(_uri);
+			return new DarTsxVirtualCode(fileName, snapshot);
 		},
 
 		updateVirtualCode(_uri, virtualCode, snapshot) {
-			virtualCode.update(snapshot);
+			const fileName = typeof _uri === 'string' ? _uri : String(_uri);
+			virtualCode.update(fileName, snapshot);
 			return virtualCode;
 		},
 
@@ -329,11 +341,11 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 			getServiceScript(root) {
 				for (const code of forEachEmbeddedCode(root)) {
 					if (code.languageId === 'dartsx') {
-						const isTsx = (root as DarTsxVirtualCode).isTsx;
+						const virtualCode = root as DarTsxVirtualCode;
 						return {
 							code,
-							extension: isTsx ? '.tsx' : '.ts',
-							scriptKind: isTsx ? 4 : 3, // TSX=4, TS=3
+							extension: virtualCode.serviceExtension,
+							scriptKind: virtualCode.scriptKind,
 						};
 					}
 				}

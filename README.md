@@ -17,3 +17,13 @@ using signals with state and derived keywords.
 effects with only explicit dependencies.
 
 inspired by React, SolidJS, Svelte, RippleTS, Vue.
+
+## VS Code Support
+
+The VS Code extension is the user-facing DarTsx integration. If it is installed, DarTsx syntax is handled in `.js`, `.jsx`, `.ts`, and `.tsx` files.
+
+This does not require the user to be in a TypeScript project. VS Code already uses the same built-in JavaScript/TypeScript language service for JavaScript files, and the DarTsx extension plugs into that service internally.
+
+The repo includes two sample apps:
+
+- `playground` for the TypeScript/TSX path

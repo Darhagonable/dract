@@ -1,6 +1,6 @@
 {
 	"scopeName": "source.dartsx.injection",
-	"injectionSelector": "L:source.tsx -comment -string",
+	"injectionSelector": "L:source.ts -comment -string -meta.tag -meta.tag.attributes -meta.jsx.children -meta.embedded.expression, L:source.tsx -comment -string -meta.tag -meta.tag.attributes -meta.jsx.children -meta.embedded.expression, L:source.js -comment -string -meta.tag -meta.tag.attributes -meta.jsx.children -meta.embedded.expression, L:source.js.jsx -comment -string -meta.tag -meta.tag.attributes -meta.jsx.children -meta.embedded.expression, L:source.jsx -comment -string -meta.tag -meta.tag.attributes -meta.jsx.children -meta.embedded.expression",
 	"patterns": [
 		{ "include": "#dartsx-component" },
 		{ "include": "#dartsx-state" },
@@ -9,9 +9,7 @@
 		{ "include": "#dartsx-bind-keyword" },
 		{ "include": "#dartsx-bind-renamed-param" },
 		{ "include": "#dartsx-bind-param" },
-		{ "include": "#dartsx-bind-attr" },
 		{ "include": "#dartsx-type-annotations" },
-		{ "include": "#dartsx-jsx-tag" },
 		{ "include": "#dartsx-function" }
 	],
 	"repository": {
@@ -64,25 +62,18 @@
 				"5": { "name": "variable.parameter.bind.dartsx" }
 			}
 		},
-		"dartsx-bind-attr": {
-			"match": "(bind):(\\w+)",
-			"captures": {
-				"1": { "name": "storage.modifier.bind.dartsx" },
-				"2": { "name": "entity.other.attribute-name.binding.dartsx" }
-			}
-		},
 		"dartsx-type-annotations": {
 			"patterns": [
 				{
-					"match": "(?<=:\\s*)(string|number|boolean|void|null|undefined|never|any|unknown|object|symbol|bigint)\\b",
+					"match": "(?<=:\\s*)(string|number|boolean|void|null|undefined|never|any|unknown|object|symbol|bigint)\\b(?=\\s*[,)=><{}\\[\\]])",
 					"name": "support.type.primitive.tsx"
 				},
 				{
-					"match": "(?<=:\\s*)([A-Z]\\w*)",
+					"match": "(?<=:\\s*)([A-Z]\\w*)(?=\\s*[,)=><{}\\[\\]])",
 					"name": "entity.name.type.tsx"
 				},
 				{
-					"match": "(?<=\\w)\\s*(:)\\s*",
+					"match": "(?<=\\w)\\s*(:)(?=\\s*(?:string|number|boolean|void|null|undefined|never|any|unknown|object|symbol|bigint|[A-Z]\\w*|\\{|\\[|\\())",
 					"captures": {
 						"1": { "name": "punctuation.type.annotation.tsx keyword.operator.type.annotation.tsx" }
 					}

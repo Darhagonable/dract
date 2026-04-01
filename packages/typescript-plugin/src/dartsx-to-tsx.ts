@@ -34,7 +34,9 @@ export function isDarTsxFile(content: string): boolean {
 	const sample = content.slice(0, 4096);
 	return /\bcomponent\s+\w+\s*\(/.test(sample)
 		|| /\bstate\s+\w+\s*=/.test(sample)
-		|| /\bderived\s+\w+\s*=/.test(sample);
+		|| /\bderived\s+\w+\s*=/.test(sample)
+		|| /\brender\s*\(/.test(sample)
+		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
 }
 
 /**
@@ -156,7 +158,7 @@ function transformBindShorthand(ms: MagicString, source: string): void {
 // ── bind:prop={x} → __bind_prop={x} ───────────────────────────────
 
 function transformBindAttributes(ms: MagicString, source: string): void {
-	const re = /bind:(\w+)(\s*=)/g;
+	const re = /bind:([a-zA-Z][\w-]*)(\s*=)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		const bindStart = match.index;
