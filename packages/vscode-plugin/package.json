@@ -1,11 +1,43 @@
 {
-	"name": "dartsx-vscode-plugin",
+	"name": "dartsx-vscode",
+	"displayName": "DarTsx",
+	"description": "DarTsx language support — syntax highlighting, diagnostics, completions, and more.",
 	"version": "0.0.1",
 	"private": true,
+	"publisher": "dartsx",
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": ["Programming Languages"],
+	"activationEvents": [
+		"onLanguage:typescript",
+		"onLanguage:typescriptreact"
+	],
+	"main": "./dist/index.js",
+	"contributes": {
+		"typescriptServerPlugins": [
+			{
+				"name": "dartsx-typescript-plugin",
+				"enableForWorkspaceTypeScriptVersions": true
+			}
+		],
+		"grammars": [
+			{
+				"scopeName": "source.dartsx.injection",
+				"path": "./syntaxes/dartsx.injection.tmLanguage.json",
+				"injectTo": ["source.ts", "source.tsx"]
+			}
+		]
+	},
 	"scripts": {
-		"build": "tsc -b"
+		"build": "tsc -b",
+		"package": "vsce package --no-dependencies"
+	},
+	"dependencies": {
+		"dartsx-typescript-plugin": "workspace:*"
 	},
 	"devDependencies": {
+		"@types/vscode": "^1.85.0",
 		"typescript": "^5.8.2"
 	}
 }

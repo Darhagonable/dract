@@ -1,0 +1,140 @@
+{
+	"scopeName": "source.dartsx.injection",
+	"injectionSelector": "L:source.tsx -comment -string",
+	"patterns": [
+		{ "include": "#dartsx-component" },
+		{ "include": "#dartsx-state" },
+		{ "include": "#dartsx-derived" },
+		{ "include": "#dartsx-render" },
+		{ "include": "#dartsx-bind-keyword" },
+		{ "include": "#dartsx-bind-renamed-param" },
+		{ "include": "#dartsx-bind-param" },
+		{ "include": "#dartsx-bind-attr" },
+		{ "include": "#dartsx-type-annotations" },
+		{ "include": "#dartsx-jsx-tag" },
+		{ "include": "#dartsx-function" }
+	],
+	"repository": {
+		"dartsx-component": {
+			"match": "\\b(component)\\s+(\\w+)\\s*(?=\\()",
+			"captures": {
+				"1": { "name": "storage.type.component.dartsx" },
+				"2": { "name": "entity.name.function.component.dartsx" }
+			}
+		},
+		"dartsx-state": {
+			"match": "^\\s*(state)\\s+(\\w+)\\s*(?==)",
+			"captures": {
+				"1": { "name": "storage.type.state.dartsx" },
+				"2": { "name": "variable.other.state.dartsx" }
+			}
+		},
+		"dartsx-derived": {
+			"match": "^\\s*(derived)\\s+(\\w+)\\s*(?==)",
+			"captures": {
+				"1": { "name": "storage.type.derived.dartsx" },
+				"2": { "name": "variable.other.derived.dartsx" }
+			}
+		},
+		"dartsx-render": {
+			"match": "^\\s*(render)\\s*(?=\\()",
+			"captures": {
+				"1": { "name": "keyword.control.render.dartsx" }
+			}
+		},
+		"dartsx-bind-keyword": {
+			"match": "(^\\s*|[,(]\\s*)(bind)(?=\\s+(?:['\"]|\\w))",
+			"captures": {
+				"2": { "name": "storage.modifier.bind.dartsx" }
+			}
+		},
+		"dartsx-bind-param": {
+			"match": "(^\\s*|[,(]\\s*)(bind)\\s+(\\w+)",
+			"captures": {
+				"2": { "name": "storage.modifier.bind.dartsx" },
+				"3": { "name": "variable.parameter.bind.dartsx" }
+			}
+		},
+		"dartsx-bind-renamed-param": {
+			"match": "(^\\s*|[,(]\\s*)(bind)\\s+(['\"][^'\"]+['\"])(\\s+as\\s+)(\\w+)",
+			"captures": {
+				"2": { "name": "storage.modifier.bind.dartsx" },
+				"3": { "name": "string.quoted.dartsx" },
+				"4": { "name": "keyword.control.as.dartsx" },
+				"5": { "name": "variable.parameter.bind.dartsx" }
+			}
+		},
+		"dartsx-bind-attr": {
+			"match": "(bind):(\\w+)",
+			"captures": {
+				"1": { "name": "storage.modifier.bind.dartsx" },
+				"2": { "name": "entity.other.attribute-name.binding.dartsx" }
+			}
+		},
+		"dartsx-type-annotations": {
+			"patterns": [
+				{
+					"match": "(?<=:\\s*)(string|number|boolean|void|null|undefined|never|any|unknown|object|symbol|bigint)\\b",
+					"name": "support.type.primitive.tsx"
+				},
+				{
+					"match": "(?<=:\\s*)([A-Z]\\w*)",
+					"name": "entity.name.type.tsx"
+				},
+				{
+					"match": "(?<=\\w)\\s*(:)\\s*",
+					"captures": {
+						"1": { "name": "punctuation.type.annotation.tsx keyword.operator.type.annotation.tsx" }
+					}
+				},
+				{
+					"match": "(\\[\\])",
+					"name": "meta.type.parameters.tsx"
+				},
+				{
+					"match": "\\?(?=:)",
+					"name": "keyword.operator.optional.tsx"
+				}
+			]
+		},
+		"dartsx-jsx-tag": {
+			"patterns": [
+				{
+					"match": "(<)(/?)([a-z][a-z0-9]*)",
+					"captures": {
+						"1": { "name": "punctuation.definition.tag.begin.tsx" },
+						"2": { "name": "punctuation.definition.tag.begin.tsx" },
+						"3": { "name": "entity.name.tag.tsx" }
+					}
+				},
+				{
+					"match": "(<)(/?)(([A-Z][a-zA-Z0-9]*))",
+					"captures": {
+						"1": { "name": "punctuation.definition.tag.begin.tsx" },
+						"2": { "name": "punctuation.definition.tag.begin.tsx" },
+						"3": { "name": "support.class.component.tsx" }
+					}
+				},
+				{
+					"match": "(/?>)",
+					"name": "punctuation.definition.tag.end.tsx"
+				},
+				{
+					"match": "\\b(class|className|id|style|type|href|src|alt|placeholder|disabled|checked|value|name|for|tabindex|role)(?=\\s*=)",
+					"name": "entity.other.attribute-name.tsx"
+				},
+				{
+					"match": "\\b(on[a-z]+)(?=\\s*=)",
+					"name": "entity.other.attribute-name.tsx"
+				}
+			]
+		},
+		"dartsx-function": {
+			"match": "\\b(function)\\s+(\\w+)\\s*(?=\\()",
+			"captures": {
+				"1": { "name": "storage.type.function.tsx" },
+				"2": { "name": "entity.name.function.tsx" }
+			}
+		}
+	}
+}

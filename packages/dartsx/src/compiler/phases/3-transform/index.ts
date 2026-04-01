@@ -5,17 +5,17 @@
  * for DOM creation with fine-grained reactivity. No templates, no DOM navigation.
  */
 import type {
-    AnalysisResult,
-    ComponentIR,
-    JSXNodeIR,
-    JSXElementIR,
-    JSXFragmentIR,
-    JSXIfBlockIR,
-    JSXForBlockIR,
-    JSXSwitchBlockIR,
-    JSXTryBlockIR,
-    JSXAttrIR,
-    JSXExpressionIR,
+	AnalysisResult,
+	ComponentIR,
+	JSXNodeIR,
+	JSXElementIR,
+	JSXFragmentIR,
+	JSXIfBlockIR,
+	JSXForBlockIR,
+	JSXSwitchBlockIR,
+	JSXTryBlockIR,
+	JSXAttrIR,
+	JSXExpressionIR,
 } from '../2-analyze';
 import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from './expr';
 
@@ -25,381 +25,386 @@ let currentProxyVars: Set<string> | undefined;
 // ── Main entry ─────────────────────────────────────────────────────
 
 export function transform(analysis: AnalysisResult): string {
-    const lines: string[] = [];
+	const lines: string[] = [];
 
-    const needsRuntime =
-        analysis.components.length > 0 ||
-        analysis.moduleStateVars.length > 0 ||
-        analysis.moduleDerivedVars.length > 0 ||
-        analysis.moduleFunctions.length > 0;
-    if (needsRuntime) {
-        lines.push("import $ from 'dartsx/internal/client';");
-    }
+	const needsRuntime =
+		analysis.components.length > 0 ||
+		analysis.moduleStateVars.length > 0 ||
+		analysis.moduleDerivedVars.length > 0 ||
+		analysis.moduleFunctions.length > 0;
+	if (needsRuntime) {
+		lines.push("import $ from 'dartsx/internal/client';");
+	}
 
-    for (const imp of analysis.userImports) {
-        lines.push(imp);
-    }
-    if (lines.length > 0) lines.push('');
+	for (const imp of analysis.userImports) {
+		lines.push(imp);
+	}
+	if (lines.length > 0) lines.push('');
 
-    for (const s of analysis.moduleStateVars) {
-        const prefix = s.exported ? 'export ' : '';
-        lines.push(`${prefix}let ${s.name} = $.state(${s.initExpr});`);
-    }
+	for (const s of analysis.moduleStateVars) {
+		const prefix = s.exported ? 'export ' : '';
+		lines.push(`${prefix}let ${s.name} = $.state(${s.initExpr});`);
+	}
 
-    for (const d of analysis.moduleDerivedVars) {
-        const prefix = d.exported ? 'export ' : '';
-        const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars);
-        lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrappedExpr});`);
-    }
+	for (const d of analysis.moduleDerivedVars) {
+		const prefix = d.exported ? 'export ' : '';
+		const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars);
+		lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrappedExpr});`);
+	}
 
-    if (analysis.moduleStateVars.length > 0 || analysis.moduleDerivedVars.length > 0) {
-        lines.push('');
-    }
+	if (analysis.moduleStateVars.length > 0 || analysis.moduleDerivedVars.length > 0) {
+		lines.push('');
+	}
 
-    for (const fn of analysis.moduleFunctions) {
-        const mergedReactive = new Set(analysis.moduleReactiveVars);
-        for (const p of fn.reactiveParams) mergedReactive.add(p);
-        lines.push(fn.signature);
-        for (const stmt of fn.bodyStatements) {
-            lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars)}`);
-        }
-        lines.push('}');
-    }
-    if (analysis.moduleFunctions.length > 0) lines.push('');
+	for (const fn of analysis.moduleFunctions) {
+		const mergedReactive = new Set(analysis.moduleReactiveVars);
+		for (const p of fn.reactiveParams) mergedReactive.add(p);
+		lines.push(fn.signature);
+		for (const stmt of fn.bodyStatements) {
+			lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars)}`);
+		}
+		lines.push('}');
+	}
+	if (analysis.moduleFunctions.length > 0) lines.push('');
 
-    for (const stmt of analysis.moduleStatements) {
-        lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars));
-    }
-    if (analysis.moduleStatements.length > 0) lines.push('');
+	for (const stmt of analysis.moduleStatements) {
+		lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars));
+	}
+	if (analysis.moduleStatements.length > 0) lines.push('');
 
-    for (const comp of analysis.components) {
-        lines.push(transformComponent(comp, analysis.reactiveCallTargets));
-        lines.push('');
-    }
+	for (const comp of analysis.components) {
+		lines.push(transformComponent(comp, analysis.reactiveCallTargets));
+		lines.push('');
+	}
 
-    return lines.join('\n');
+	return lines.join('\n');
 }
 
 // ── Component code generation ──────────────────────────────────────
 
 function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string, Set<number>>): string {
-    const lines: string[] = [];
-    const hasProps = comp.params.length > 0;
-    currentProxyVars = comp.proxyVars.size > 0 ? comp.proxyVars : undefined;
+	const lines: string[] = [];
+	const hasProps = comp.params.length > 0;
+	currentProxyVars = comp.proxyVars.size > 0 ? comp.proxyVars : undefined;
 
-    const exportPrefix = comp.meta.isExport
-        ? comp.meta.isDefault
-            ? 'export default '
-            : 'export '
-        : '';
-    const asyncPrefix = comp.meta.isAsync ? 'async ' : '';
-    const propsParam = hasProps ? '$$props' : '';
-    lines.push(`${exportPrefix}${asyncPrefix}function ${comp.meta.name}(${propsParam}) {`);
+	const exportPrefix = comp.meta.isExport
+		? comp.meta.isDefault
+			? 'export default '
+			: 'export '
+		: '';
+	const asyncPrefix = comp.meta.isAsync ? 'async ' : '';
+	const propsParam = hasProps ? '$$props' : '';
+	lines.push(`${exportPrefix}${asyncPrefix}function ${comp.meta.name}(${propsParam}) {`);
 
-    for (const s of comp.stateVars) {
-        lines.push(`    let ${s.name} = $.state(${s.initExpr});`);
-    }
+	for (const s of comp.stateVars) {
+		lines.push(`    let ${s.name} = $.state(${s.initExpr});`);
+	}
 
-    for (const d of comp.derivedVars) {
-        const wrappedExpr = wrapReadsInGet(d.expr, comp.reactiveVars, currentProxyVars);
-        lines.push(`    const ${d.name} = $.derived(() => ${wrappedExpr});`);
-    }
+	for (const d of comp.derivedVars) {
+		const wrappedExpr = wrapReadsInGet(d.expr, comp.reactiveVars, currentProxyVars);
+		lines.push(`    const ${d.name} = $.derived(() => ${wrappedExpr});`);
+	}
 
-    if (hasProps) {
-        for (const p of comp.params) {
-            if (p.isRest) {
-                lines.push(`    let ${p.name} = $$props;`);
-            } else if (p.isBind) {
-                const propKey = p.externalName || p.name;
-                const args = p.defaultValue
-                    ? `$$props, '${propKey}', ${p.defaultValue}`
-                    : `$$props, '${propKey}'`;
-                lines.push(`    let ${p.name} = $.prop.bind(${args});`);
-            } else {
-                const propKey = p.externalName || p.name;
-                const args = p.defaultValue
-                    ? `$$props, '${propKey}', ${p.defaultValue}`
-                    : `$$props, '${propKey}'`;
-                lines.push(`    const ${p.name} = $.prop(${args});`);
-            }
-        }
-    }
+	if (hasProps) {
+		for (const p of comp.params) {
+			if (p.isRest) {
+				lines.push(`    let ${p.name} = $$props;`);
+			} else if (p.isBind) {
+				const propKey = p.externalName || p.name;
+				const args = p.defaultValue
+					? `$$props, '${propKey}', ${p.defaultValue}`
+					: `$$props, '${propKey}'`;
+				lines.push(`    let ${p.name} = $.prop.bind(${args});`);
+			} else {
+				const propKey = p.externalName || p.name;
+				const args = p.defaultValue
+					? `$$props, '${propKey}', ${p.defaultValue}`
+					: `$$props, '${propKey}'`;
+				lines.push(`    const ${p.name} = $.prop(${args});`);
+			}
+		}
+	}
 
-    if (comp.stateVars.length || comp.derivedVars.length || hasProps) {
-        lines.push('');
-    }
+	if (comp.stateVars.length || comp.derivedVars.length || hasProps) {
+		lines.push('');
+	}
 
-    for (const stmt of comp.bodyStatements) {
-        lines.push(`    ${transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets, currentProxyVars)}`);
-    }
+	for (const stmt of comp.bodyStatements) {
+		lines.push(`    ${transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets, currentProxyVars)}`);
+	}
 
-    const jsxCode = emitJSXNode(comp.jsx, comp.reactiveVars, '    ');
-    lines.push(`    return ${jsxCode};`);
-    lines.push('}');
+	const jsxCode = emitJSXNode(comp.jsx, comp.reactiveVars, '    ');
+	lines.push(`    return ${jsxCode};`);
+	lines.push('}');
 
-    return lines.join('\n');
+	return lines.join('\n');
 }
 
 // ── JSX node emission ──────────────────────────────────────────────
 
 function emitJSXNode(node: JSXNodeIR, reactiveVars: Set<string>, indent: string): string {
-    switch (node.type) {
-        case 'element':
-            return emitElement(node, reactiveVars, indent);
-        case 'fragment':
-            return emitFragment(node, reactiveVars, indent);
-        case 'text': {
-            const text = normalizeJSXText(node.value, true, true);
-            if (text.length === 0) return 'null';
-            return JSON.stringify(text);
-        }
-        case 'expression':
-            return emitChildExpression(node, reactiveVars);
-        case 'if_block':
-            return emitIfBlock(node, reactiveVars, indent);
-        case 'for_block':
-            return emitForBlock(node, reactiveVars, indent);
-        case 'switch_block':
-            return emitSwitchBlock(node, reactiveVars, indent);
-        case 'try_block':
-            return emitTryBlock(node, reactiveVars, indent);
-        default:
-            return 'null';
-    }
+	switch (node.type) {
+		case 'element':
+			return emitElement(node, reactiveVars, indent);
+		case 'fragment':
+			return emitFragment(node, reactiveVars, indent);
+		case 'text': {
+			const text = normalizeJSXText(node.value, true, true);
+			if (text.length === 0) return 'null';
+			return JSON.stringify(text);
+		}
+		case 'expression':
+			return emitChildExpression(node, reactiveVars);
+		case 'if_block':
+			return emitIfBlock(node, reactiveVars, indent);
+		case 'for_block':
+			return emitForBlock(node, reactiveVars, indent);
+		case 'switch_block':
+			return emitSwitchBlock(node, reactiveVars, indent);
+		case 'try_block':
+			return emitTryBlock(node, reactiveVars, indent);
+		default:
+			return 'null';
+	}
 }
 
 function emitFragment(node: JSXFragmentIR, reactiveVars: Set<string>, indent: string): string {
-    const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
-    if (childStrs.length === 0) return 'null';
-    if (childStrs.length === 1) return childStrs[0];
-    return `$.jsx($.Fragment, { children: [${childStrs.join(', ')}] })`;
+	const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
+	if (childStrs.length === 0) return 'null';
+	if (childStrs.length === 1) return childStrs[0];
+	return `$.jsx($.Fragment, { children: [${childStrs.join(', ')}] })`;
 }
 
 function emitElement(node: JSXElementIR, reactiveVars: Set<string>, indent: string): string {
-    if (node.isComponent) return emitComponentCall(node, reactiveVars, indent);
+	if (node.isComponent) return emitComponentCall(node, reactiveVars, indent);
 
-    const propEntries: string[] = [];
+	const propEntries: string[] = [];
 
-    for (const attr of node.attributes) {
-        emitAttr(attr, propEntries, reactiveVars, false);
-    }
+	for (const attr of node.attributes) {
+		emitAttr(attr, propEntries, reactiveVars, false);
+	}
 
-    if (!node.selfClosing) {
-        const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
-        if (childStrs.length > 0) {
-            propEntries.push(`children: [${childStrs.join(', ')}]`);
-        }
-    }
+	if (!node.selfClosing) {
+		const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
+		if (childStrs.length > 0) {
+			propEntries.push(`children: [${childStrs.join(', ')}]`);
+		}
+	}
 
-    if (propEntries.length === 0) {
-        return `$.jsx("${node.tag}")`;
-    }
-    return `$.jsx("${node.tag}", { ${propEntries.join(', ')} })`;
+	if (propEntries.length === 0) {
+		return `$.jsx("${node.tag}")`;
+	}
+	return `$.jsx("${node.tag}", { ${propEntries.join(', ')} })`;
 }
 
 function emitComponentCall(node: JSXElementIR, reactiveVars: Set<string>, indent: string): string {
-    const propEntries: string[] = [];
+	const propEntries: string[] = [];
 
-    for (const attr of node.attributes) {
-        emitAttr(attr, propEntries, reactiveVars, true);
-    }
+	for (const attr of node.attributes) {
+		emitAttr(attr, propEntries, reactiveVars, true);
+	}
 
-    if (!node.selfClosing) {
-        const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
-        if (childStrs.length > 0) {
-            propEntries.push(`children: [${childStrs.join(', ')}]`);
-        }
-    }
+	if (!node.selfClosing) {
+		const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
+		if (childStrs.length > 0) {
+			propEntries.push(`children: [${childStrs.join(', ')}]`);
+		}
+	}
 
-    if (propEntries.length === 0) {
-        return `${node.tag}()`;
-    }
-    return `${node.tag}({ ${propEntries.join(', ')} })`;
+	if (propEntries.length === 0) {
+		return `${node.tag}()`;
+	}
+	return `${node.tag}({ ${propEntries.join(', ')} })`;
 }
 
 // ── Attribute emission ─────────────────────────────────────────────
 
 function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>, isComponent: boolean): void {
-    switch (attr.kind) {
-        case 'static': {
-            const val = attr.value === 'true' ? 'true' : JSON.stringify(attr.value || '');
-            entries.push(isComponent ? `${attr.name}: () => ${val}` : `${attr.name}: ${val}`);
-            break;
-        }
-        case 'dynamic': {
-            const wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars);
-            if (isComponent) {
-                entries.push(`${attr.name}: () => ${wrapped}`);
-            } else if (wrapped !== (attr.value || '') || containsReactiveVar(attr.value || '', reactiveVars)) {
-                entries.push(`${attr.name}: () => ${wrapped}`);
-            } else {
-                entries.push(`${attr.name}: ${attr.value}`);
-            }
-            break;
-        }
-        case 'event': {
-            const handler = transformEventHandler(attr.value || '', reactiveVars, currentProxyVars);
-            entries.push(`${attr.name}: ${handler}`);
-            break;
-        }
-        case 'bind': {
-            if (attr.bindProperty) {
-                if (attr.bindGetter !== undefined && attr.bindSetter !== undefined) {
-                    // Function binding: bind:value={getter, setter}
-                    const getter = wrapReadsInGet(attr.bindGetter, reactiveVars, currentProxyVars);
-                    const setter = transformEventHandler(attr.bindSetter, reactiveVars, currentProxyVars);
-                    entries.push(`"bind:${attr.bindProperty}": [${getter}, ${setter}]`);
-                } else if (attr.value) {
-                    const val = attr.value;
-                    const getter = wrapReadsInGet(val, reactiveVars, currentProxyVars);
-                    const setter = transformEventHandler(`(v) => ${val} = v`, reactiveVars, currentProxyVars);
-                    entries.push(`"bind:${attr.bindProperty}": [() => ${getter}, ${setter}]`);
-                }
-            }
-            break;
-        }
-        case 'spread': {
-            entries.push(`...${attr.value}`);
-            break;
-        }
-    }
+	const key = formatObjectKey(attr.name);
+	switch (attr.kind) {
+		case 'static': {
+			const val = attr.value === 'true' ? 'true' : JSON.stringify(attr.value || '');
+			entries.push(isComponent ? `${key}: () => ${val}` : `${key}: ${val}`);
+			break;
+		}
+		case 'dynamic': {
+			const wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars);
+			if (isComponent) {
+				entries.push(`${key}: () => ${wrapped}`);
+			} else if (wrapped !== (attr.value || '') || containsReactiveVar(attr.value || '', reactiveVars)) {
+				entries.push(`${key}: () => ${wrapped}`);
+			} else {
+				entries.push(`${key}: ${attr.value}`);
+			}
+			break;
+		}
+		case 'event': {
+			const handler = transformEventHandler(attr.value || '', reactiveVars, currentProxyVars);
+			entries.push(`${key}: ${handler}`);
+			break;
+		}
+		case 'bind': {
+			if (attr.bindProperty) {
+				if (attr.bindGetter !== undefined && attr.bindSetter !== undefined) {
+					// Function binding: bind:value={getter, setter}
+					const getter = wrapReadsInGet(attr.bindGetter, reactiveVars, currentProxyVars);
+					const setter = transformEventHandler(attr.bindSetter, reactiveVars, currentProxyVars);
+					entries.push(`${formatObjectKey(`bind:${attr.bindProperty}`)}: [${getter}, ${setter}]`);
+				} else if (attr.value) {
+					const val = attr.value;
+					const getter = wrapReadsInGet(val, reactiveVars, currentProxyVars);
+					const setter = transformEventHandler(`(v) => ${val} = v`, reactiveVars, currentProxyVars);
+					entries.push(`${formatObjectKey(`bind:${attr.bindProperty}`)}: [() => ${getter}, ${setter}]`);
+				}
+			}
+			break;
+		}
+		case 'spread': {
+			entries.push(`...${attr.value}`);
+			break;
+		}
+	}
 }
 
 // ── Children ───────────────────────────────────────────────────────
 
 function emitChildrenArray(children: JSXNodeIR[], reactiveVars: Set<string>, indent: string): string[] {
-    const result: string[] = [];
+	const result: string[] = [];
 
-    for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        const isFirst = i === 0;
-        const isLast = i === children.length - 1;
+	for (let i = 0; i < children.length; i++) {
+		const child = children[i];
+		const isFirst = i === 0;
+		const isLast = i === children.length - 1;
 
-        if (child.type === 'text') {
-            const text = normalizeJSXText(child.value, isFirst, isLast);
-            if (text.length === 0) continue;
-            // Drop whitespace-only text nodes between non-text siblings (just formatting)
-            if (text.trim().length === 0 && !isFirst && !isLast) {
-                const prev = children[i - 1];
-                const next = children[i + 1];
-                if (prev.type !== 'text' && prev.type !== 'expression' &&
-                    next.type !== 'text' && next.type !== 'expression') {
-                    continue;
-                }
-            }
-            result.push(JSON.stringify(text));
-            continue;
-        }
+		if (child.type === 'text') {
+			const text = normalizeJSXText(child.value, isFirst, isLast);
+			if (text.length === 0) continue;
+			// Drop whitespace-only text nodes between non-text siblings (just formatting)
+			if (text.trim().length === 0 && !isFirst && !isLast) {
+				const prev = children[i - 1];
+				const next = children[i + 1];
+				if (prev.type !== 'text' && prev.type !== 'expression' &&
+					next.type !== 'text' && next.type !== 'expression') {
+					continue;
+				}
+			}
+			result.push(JSON.stringify(text));
+			continue;
+		}
 
-        if (child.type === 'expression') {
-            result.push(emitChildExpression(child, reactiveVars));
-            continue;
-        }
+		if (child.type === 'expression') {
+			result.push(emitChildExpression(child, reactiveVars));
+			continue;
+		}
 
-        result.push(emitJSXNode(child, reactiveVars, indent));
-    }
+		result.push(emitJSXNode(child, reactiveVars, indent));
+	}
 
-    return result;
+	return result;
 }
 
 function emitChildExpression(node: JSXExpressionIR, reactiveVars: Set<string>): string {
-    const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars);
-    if (wrapped !== node.raw || containsReactiveVar(node.raw, reactiveVars)) {
-        return `() => ${wrapped}`;
-    }
-    return node.raw;
+	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars);
+	if (wrapped !== node.raw || containsReactiveVar(node.raw, reactiveVars)) {
+		return `() => ${wrapped}`;
+	}
+	return node.raw;
 }
 
 // ── Control flow ───────────────────────────────────────────────────
 
 function emitIfBlock(node: JSXIfBlockIR, reactiveVars: Set<string>, indent: string): string {
-    const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentProxyVars);
-    const trueBody = emitBranchReturn(node.trueBranch, reactiveVars, indent);
+	const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentProxyVars);
+	const trueBody = emitBranchReturn(node.trueBranch, reactiveVars, indent);
 
-    let result = `$.if(() => ${condExpr}, () => ${trueBody}`;
-    if (node.falseBranch) {
-        const falseBody = emitBranchReturn(node.falseBranch, reactiveVars, indent);
-        result += `, () => ${falseBody}`;
-    }
-    result += ')';
-    return result;
+	let result = `$.if(() => ${condExpr}, () => ${trueBody}`;
+	if (node.falseBranch) {
+		const falseBody = emitBranchReturn(node.falseBranch, reactiveVars, indent);
+		result += `, () => ${falseBody}`;
+	}
+	result += ')';
+	return result;
 }
 
 function emitForBlock(node: JSXForBlockIR, reactiveVars: Set<string>, indent: string): string {
-    const collExpr = node.collection.trimStart().startsWith('{')
-        ? transformBodyStatement(node.collection, reactiveVars, undefined, currentProxyVars)
-        : wrapReadsInGet(node.collection, reactiveVars, currentProxyVars);
-    const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
-    const bodyExpr = emitBranchReturn(node.body, reactiveVars, indent);
+	const collExpr = node.collection.trimStart().startsWith('{')
+		? transformBodyStatement(node.collection, reactiveVars, undefined, currentProxyVars)
+		: wrapReadsInGet(node.collection, reactiveVars, currentProxyVars);
+	const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
+	const bodyExpr = emitBranchReturn(node.body, reactiveVars, indent);
 
-    let result = `$.for(() => ${collExpr}, (${params}) => ${bodyExpr}`;
-    if (node.keyExpr) {
-        const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentProxyVars);
-        result += `, (${node.itemName}) => ${keyExpr}`;
-    }
-    result += ')';
-    return result;
+	let result = `$.for(() => ${collExpr}, (${params}) => ${bodyExpr}`;
+	if (node.keyExpr) {
+		const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentProxyVars);
+		result += `, (${node.itemName}) => ${keyExpr}`;
+	}
+	result += ')';
+	return result;
 }
 
 function emitSwitchBlock(node: JSXSwitchBlockIR, reactiveVars: Set<string>, indent: string): string {
-    const discExpr = wrapReadsInGet(node.discriminant, reactiveVars, currentProxyVars);
+	const discExpr = wrapReadsInGet(node.discriminant, reactiveVars, currentProxyVars);
 
-    const caseStrs: string[] = [];
-    for (const c of node.cases) {
-        const valuesStr = c.values === null ? 'null' : `[${c.values.join(', ')}]`;
-        const bodyExpr = emitBranchReturn(c.body, reactiveVars, indent);
-        caseStrs.push(`{ values: ${valuesStr}, fn: () => ${bodyExpr} }`);
-    }
+	const caseStrs: string[] = [];
+	for (const c of node.cases) {
+		const valuesStr = c.values === null ? 'null' : `[${c.values.join(', ')}]`;
+		const bodyExpr = emitBranchReturn(c.body, reactiveVars, indent);
+		caseStrs.push(`{ values: ${valuesStr}, fn: () => ${bodyExpr} }`);
+	}
 
-    return `$.switch(() => ${discExpr}, [${caseStrs.join(', ')}])`;
+	return `$.switch(() => ${discExpr}, [${caseStrs.join(', ')}])`;
 }
 
 function emitTryBlock(node: JSXTryBlockIR, reactiveVars: Set<string>, indent: string): string {
-    const tryBody = emitBranchReturn(node.tryBranch, reactiveVars, indent);
+	const tryBody = emitBranchReturn(node.tryBranch, reactiveVars, indent);
 
-    let result = `$.try(() => ${tryBody}`;
+	let result = `$.try(() => ${tryBody}`;
 
-    if (node.catchBranch) {
-        const param = node.catchParam || 'e';
-        const catchBody = emitBranchReturn(node.catchBranch, reactiveVars, indent);
-        result += `, (${param}) => ${catchBody}`;
-    } else if (node.pendingBranch) {
-        result += ', undefined';
-    }
+	if (node.catchBranch) {
+		const param = node.catchParam || 'e';
+		const catchBody = emitBranchReturn(node.catchBranch, reactiveVars, indent);
+		result += `, (${param}) => ${catchBody}`;
+	} else if (node.pendingBranch) {
+		result += ', undefined';
+	}
 
-    if (node.pendingBranch) {
-        const pendBody = emitBranchReturn(node.pendingBranch, reactiveVars, indent);
-        result += `, () => ${pendBody}`;
-    }
+	if (node.pendingBranch) {
+		const pendBody = emitBranchReturn(node.pendingBranch, reactiveVars, indent);
+		result += `, () => ${pendBody}`;
+	}
 
-    result += ')';
-    return result;
+	result += ')';
+	return result;
 }
 
 // ── Branch helpers ─────────────────────────────────────────────────
 
 function emitBranchReturn(children: JSXNodeIR[], reactiveVars: Set<string>, indent: string): string {
-    const childStrs = emitChildrenArray(children, reactiveVars, indent);
-    if (childStrs.length === 0) return 'null';
-    if (childStrs.length === 1) return childStrs[0];
-    return `$.jsx($.Fragment, { children: [${childStrs.join(', ')}] })`;
+	const childStrs = emitChildrenArray(children, reactiveVars, indent);
+	if (childStrs.length === 0) return 'null';
+	if (childStrs.length === 1) return childStrs[0];
+	return `$.jsx($.Fragment, { children: [${childStrs.join(', ')}] })`;
 }
 
 // ── Utilities ──────────────────────────────────────────────────────
 
 /** Check if an expression contains any reactive variable as a word boundary match */
 function containsReactiveVar(expr: string, reactiveVars: Set<string>): boolean {
-    for (const v of reactiveVars) {
-        // Use word boundary check to avoid matching substrings
-        const re = new RegExp(`\\b${v}\\b`);
-        if (re.test(expr)) return true;
-    }
-    return false;
+	for (const v of reactiveVars) {
+		// Use word boundary check to avoid matching substrings
+		const re = new RegExp(`\\b${v}\\b`);
+		if (re.test(expr)) return true;
+	}
+	return false;
+}
+
+function formatObjectKey(key: string): string {
+	return /^[$A-Z_a-z][$\w]*$/.test(key) ? key : JSON.stringify(key);
 }
 
 function normalizeJSXText(text: string, isFirst: boolean, isLast: boolean): string {
-    let result = text.replace(/\s*\n\s*/g, ' ');
-    if (isFirst) result = result.replace(/^\s+/, '');
-    if (isLast) result = result.replace(/\s+$/, '');
-    return result;
+	let result = text.replace(/\s*\n\s*/g, ' ');
+	if (isFirst) result = result.replace(/^\s+/, '');
+	if (isLast) result = result.replace(/\s+$/, '');
+	return result;
 }

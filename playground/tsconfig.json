@@ -2,9 +2,13 @@
 	"extends": "../tsconfig.json",
 	"compilerOptions": {
 		"jsx": "preserve",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"declaration": false,
 		"declarationMap": false,
-		"sourceMap": false
+		"sourceMap": false,
+		"plugins": [
+			{ "name": "dartsx-typescript-plugin" }
+		]
 	},
-	"include": ["src"]
+	"include": ["src", "../packages/dartsx/src/runtime/external/jsx.d.ts"]
 }

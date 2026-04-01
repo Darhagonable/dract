@@ -2,16 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { compile } from '../src/compiler';
 
 function normalizeWhitespace(code: string): string {
-  return code
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0)
-    .join('\n');
+	return code
+		.split('\n')
+		.map((line) => line.trimEnd())
+		.filter((line) => line.length > 0)
+		.join('\n');
 }
 
 describe('compiler', () => {
-  it('compiles a basic component with state, derived, events, and binding', () => {
-    const source = `component HelloWorld() {
+	it('compiles a basic component with state, derived, events, and binding', () => {
+		const source = `component HelloWorld() {
   state name = "world"
   state count = 0
   derived doubled = count * 2
@@ -26,174 +26,174 @@ describe('compiler', () => {
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
 
-    // Should have runtime import
-    expect(code).toContain("import $ from 'dartsx/internal/client';");
+		// Should have runtime import
+		expect(code).toContain("import $ from 'dartsx/internal/client';");
 
-    // Should have function declaration (no $$anchor)
-    expect(code).toContain('function HelloWorld()');
+		// Should have function declaration (no $$anchor)
+		expect(code).toContain('function HelloWorld()');
 
-    // Should have state declarations
-    expect(code).toContain('let name = $.state("world");');
-    expect(code).toContain('let count = $.state(0);');
+		// Should have state declarations
+		expect(code).toContain('let name = $.state("world");');
+		expect(code).toContain('let count = $.state(0);');
 
-    // Should have derived declaration with $.get() wrapping
-    expect(code).toContain('const doubled = $.derived(() => $.get(count) * 2);');
+		// Should have derived declaration with $.get() wrapping
+		expect(code).toContain('const doubled = $.derived(() => $.get(count) * 2);');
 
-    // Should return a fragment with jsx() children
-    expect(code).toContain('return $.jsx($.Fragment');
-    expect(code).toContain('$.jsx("h1"');
-    expect(code).toContain('$.jsx("input"');
-    expect(code).toContain('$.jsx("button"');
-    expect(code).toContain('$.jsx("p"');
+		// Should return a fragment with jsx() children
+		expect(code).toContain('return $.jsx($.Fragment');
+		expect(code).toContain('$.jsx("h1"');
+		expect(code).toContain('$.jsx("input"');
+		expect(code).toContain('$.jsx("button"');
+		expect(code).toContain('$.jsx("p"');
 
-    // Reactive children wrapped in getters
-    expect(code).toContain('() => $.get(name)');
-    expect(code).toContain('() => $.get(count)');
-    expect(code).toContain('() => $.get(doubled)');
+		// Reactive children wrapped in getters
+		expect(code).toContain('() => $.get(name)');
+		expect(code).toContain('() => $.get(count)');
+		expect(code).toContain('() => $.get(doubled)');
 
-    // Should have bind:value with accessor
-    expect(code).toContain('"bind:value": [() => $.get(name), (v) => $.set(name, v)]');
+		// Should have bind:value with accessor
+		expect(code).toContain('"bind:value": [() => $.get(name), (v) => $.set(name, v)]');
 
-    // Should have click event with transformed assignment
-    expect(code).toContain('onclick: () => $.set(count, $.get(count) + 1)');
-  });
+		// Should have click event with transformed assignment
+		expect(code).toContain('onclick: () => $.set(count, $.get(count) + 1)');
+	});
 
-  it('compiles export default component', () => {
-    const source = `export default component Greeting(name: string = "World") {
+	it('compiles export default component', () => {
+		const source = `export default component Greeting(name: string = "World") {
   render (
     <h1>Hello, {name}</h1>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('export default function Greeting($$props)');
-    expect(result.code).toContain("$.prop($$props, 'name', \"World\")");
-  });
+		const result = compile(source);
+		expect(result.code).toContain('export default function Greeting($$props)');
+		expect(result.code).toContain("$.prop($$props, 'name', \"World\")");
+	});
 
-  it('compiles export component', () => {
-    const source = `export component Counter() {
+	it('compiles export component', () => {
+		const source = `export component Counter() {
   state count = 0
   render (
     <button onclick={count++}>{count}</button>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('export function Counter()');
-    expect(result.code).toContain('let count = $.state(0)');
-    expect(result.code).toContain('$.set(count, $.get(count) + 1)');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('export function Counter()');
+		expect(result.code).toContain('let count = $.state(0)');
+		expect(result.code).toContain('$.set(count, $.get(count) + 1)');
+	});
 
-  it('handles count++ in event handler', () => {
-    const source = `component X() {
+	it('handles count++ in event handler', () => {
+		const source = `component X() {
   state count = 0
   render (
     <button onclick={count++}>go</button>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('$.set(count, $.get(count) + 1)');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('$.set(count, $.get(count) + 1)');
+	});
 
-  it('handles count-- in event handler', () => {
-    const source = `component X() {
+	it('handles count-- in event handler', () => {
+		const source = `component X() {
   state count = 10
   render (
     <button onclick={count--}>go</button>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('$.set(count, $.get(count) - 1)');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('$.set(count, $.get(count) - 1)');
+	});
 
-  it('handles assignment in event handler', () => {
-    const source = `component X() {
+	it('handles assignment in event handler', () => {
+		const source = `component X() {
   state isOpen = false
   render (
     <button onclick={isOpen = true}>open</button>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('$.set(isOpen, true)');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('$.set(isOpen, true)');
+	});
 
-  it('handles bind:{name} shorthand', () => {
-    const source = `component X() {
+	it('handles bind:{name} shorthand', () => {
+		const source = `component X() {
   state value = ""
   render (
     <input bind:{value} />
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('"bind:value": [() => $.get(value), (v) => $.set(value, v)]');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('"bind:value": [() => $.get(value), (v) => $.set(value, v)]');
+	});
 
-  it('passes bind:prop as [getter, setter] tuple on components', () => {
-    const source = `component Parent() {
+	it('passes bind:prop as [getter, setter] tuple on components', () => {
+		const source = `component Parent() {
   state name = "hello"
   render (
     <Child bind:name={name} />
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('Child({ "bind:name": [() => $.get(name), (v) => $.set(name, v)] })');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('Child({ "bind:name": [() => $.get(name), (v) => $.set(name, v)] })');
+	});
 
-  it('emits accessor for bind:value on proxy member expression', () => {
-    const source = `component Form() {
+	it('emits accessor for bind:value on proxy member expression', () => {
+		const source = `component Form() {
   state form = { name: "", email: "" }
   render (
     <input bind:value={form.name} />
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    // Should emit direct proxy access, not $.get() wrapped
-    expect(code).toContain('"bind:value": [() => form.name, (v) => form.name = v]');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		// Should emit direct proxy access, not $.get() wrapped
+		expect(code).toContain('"bind:value": [() => form.name, (v) => form.name = v]');
+	});
 
-  it('emits [getter, setter] for component bind with member expression', () => {
-    const source = `component Parent() {
+	it('emits [getter, setter] for component bind with member expression', () => {
+		const source = `component Parent() {
   state form = { name: "" }
   render (
     <Child bind:name={form.name} />
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    // Member expression: should emit tuple with direct proxy access
-    expect(code).toContain('"bind:name": [() => form.name, (v) => form.name = v]');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		// Member expression: should emit tuple with direct proxy access
+		expect(code).toContain('"bind:name": [() => form.name, (v) => form.name = v]');
+	});
 
-  it('supports bind keyword in component param declarations', () => {
-    const source = `component Keypad(readonlyProp, bind value) {
+	it('supports bind keyword in component param declarations', () => {
+		const source = `component Keypad(readonlyProp, bind value) {
   render (
     <p>{value}</p>
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    // bind param should compile to $.prop.bind()
-    expect(code).toContain("const readonlyProp = $.prop($$props, 'readonlyProp')");
-    expect(code).toContain("let value = $.prop.bind($$props, 'value')");
-    // Should NOT contain __bind__ prefix in output
-    expect(code).not.toContain('__bind__');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		// bind param should compile to $.prop.bind()
+		expect(code).toContain("const readonlyProp = $.prop($$props, 'readonlyProp')");
+		expect(code).toContain("let value = $.prop.bind($$props, 'value')");
+		// Should NOT contain __bind__ prefix in output
+		expect(code).not.toContain('__bind__');
+	});
 
-  it('supports function binding with custom getter/setter', () => {
-    const source = `component Form() {
+	it('supports function binding with custom getter/setter', () => {
+		const source = `component Form() {
   state value = "hello"
   render (
     <input bind:value={
@@ -203,39 +203,39 @@ describe('compiler', () => {
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('"bind:value": [() => $.get(value), (v) => $.set(value, v.toLowerCase())]');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('"bind:value": [() => $.get(value), (v) => $.set(value, v.toLowerCase())]');
+	});
 
-  it('supports readonly function binding with null getter', () => {
-    const source = `component Layout() {
+	it('supports readonly function binding with null getter', () => {
+		const source = `component Layout() {
   state width = 0
   render (
     <div bind:clientWidth={null, (v) => width = v}>content</div>
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('"bind:clientWidth": [null, (v) => $.set(width, v)]');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('"bind:clientWidth": [null, (v) => $.set(width, v)]');
+	});
 
-  it('supports bind keyword with default value in param', () => {
-    const source = `component Keypad(bind value = "fallback") {
+	it('supports bind keyword with default value in param', () => {
+		const source = `component Keypad(bind value = "fallback") {
   render (
     <p>{value}</p>
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain("let value = $.prop.bind($$props, 'value', \"fallback\")");
-    expect(code).not.toContain('__bind__');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain("let value = $.prop.bind($$props, 'value', \"fallback\")");
+		expect(code).not.toContain('__bind__');
+	});
 
-  it('compiles renamed props (string parameters)', () => {
-    const source = `component RenamedProps(
+	it('compiles renamed props (string parameters)', () => {
+		const source = `component RenamedProps(
   'required-renamed' as foo: number,
   'optional-with-default' as baz: number = 3,
 ) {
@@ -244,18 +244,32 @@ describe('compiler', () => {
   )
 }`;
 
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    // External name is used as the prop key, local name for the variable
-    expect(code).toContain("const foo = $.prop($$props, 'required-renamed')");
-    expect(code).toContain("const baz = $.prop($$props, 'optional-with-default', 3)");
-    // Local names should be used in the JSX output
-    expect(code).toContain('$.get(foo)');
-    expect(code).toContain('$.get(baz)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		// External name is used as the prop key, local name for the variable
+		expect(code).toContain("const foo = $.prop($$props, 'required-renamed')");
+		expect(code).toContain("const baz = $.prop($$props, 'optional-with-default', 3)");
+		// Local names should be used in the JSX output
+		expect(code).toContain('$.get(foo)');
+		expect(code).toContain('$.get(baz)');
+	});
 
-  it('preserves static attributes in jsx props', () => {
-    const source = `component X() {
+	it('quotes renamed prop keys at component call sites', () => {
+		const source = `component Greeting('first-name' as firstName: string) {
+  render (<h1>{firstName}</h1>)
+}
+
+component App() {
+  render (<Greeting first-name="Alice" />)
+}`;
+
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('Greeting({ "first-name": () => "Alice" })');
+	});
+
+	it('preserves static attributes in jsx props', () => {
+		const source = `component X() {
   render (
     <div class="card">
       <p>hello</p>
@@ -263,25 +277,25 @@ describe('compiler', () => {
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('class: "card"');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('class: "card"');
+	});
 
-  it('handles self-closing elements', () => {
-    const source = `component X() {
+	it('handles self-closing elements', () => {
+		const source = `component X() {
   render (
     <input type="text" />
     <br />
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('$.jsx("input", { type: "text" })');
-    expect(result.code).toContain('$.jsx("br")');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('$.jsx("input", { type: "text" })');
+		expect(result.code).toContain('$.jsx("br")');
+	});
 
-  it('emits jsx for duplicate element types', () => {
-    const source = `component X() {
+	it('emits jsx for duplicate element types', () => {
+		const source = `component X() {
   state a = "one"
   state b = "two"
   render (
@@ -290,108 +304,108 @@ describe('compiler', () => {
   )
 }`;
 
-    const result = compile(source);
-    // Both <p> elements are separate $.jsx() calls
-    const matches = result.code.match(/\$\.jsx\("p"/g);
-    expect(matches).not.toBeNull();
-    expect(matches!.length).toBe(2);
-    expect(result.code).toContain('() => $.get(a)');
-    expect(result.code).toContain('() => $.get(b)');
-  });
+		const result = compile(source);
+		// Both <p> elements are separate $.jsx() calls
+		const matches = result.code.match(/\$\.jsx\("p"/g);
+		expect(matches).not.toBeNull();
+		expect(matches!.length).toBe(2);
+		expect(result.code).toContain('() => $.get(a)');
+		expect(result.code).toContain('() => $.get(b)');
+	});
 
-  it('does not wrap member expression properties', () => {
-    const source = `component X() {
+	it('does not wrap member expression properties', () => {
+		const source = `component X() {
   state count = 0
   render (
     <p>{obj.count}</p>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('obj.count');
-    expect(result.code).not.toContain('obj.$.get(count)');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('obj.count');
+		expect(result.code).not.toContain('obj.$.get(count)');
+	});
 
-  it('wraps computed member expression keys', () => {
-    const source = `component X() {
+	it('wraps computed member expression keys', () => {
+		const source = `component X() {
   state idx = 0
   render (
     <p>{items[idx]}</p>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('$.get(idx)');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('$.get(idx)');
+	});
 
-  it('wraps reactive var used as method receiver', () => {
-    const source = `component X() {
+	it('wraps reactive var used as method receiver', () => {
+		const source = `component X() {
   state count = 0
   render (
     <p>{count.toString()}</p>
   )
 }`;
 
-    const result = compile(source);
-    expect(result.code).toContain('$.get(count).toString()');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('$.get(count).toString()');
+	});
 
-  // ── Component instantiation tests ────────────────────────────────
+	// ── Component instantiation tests ────────────────────────────────
 
-  it('compiles component call at root level (no props)', () => {
-    const source = `component App() {
+	it('compiles component call at root level (no props)', () => {
+		const source = `component App() {
   render (
     <Child />
   )
 }`;
-    const result = compile(source);
-    expect(result.code).toContain('return Child()');
-  });
+		const result = compile(source);
+		expect(result.code).toContain('return Child()');
+	});
 
-  it('compiles component call with static and dynamic props', () => {
-    const source = `component App() {
+	it('compiles component call with static and dynamic props', () => {
+		const source = `component App() {
   state count = 0
   render (
     <Greeting name="Alice" count={count} />
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('Greeting({ name: () => "Alice", count: () => $.get(count) })');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('Greeting({ name: () => "Alice", count: () => $.get(count) })');
+	});
 
-  it('compiles component mixed with elements at root', () => {
-    const source = `component App() {
+	it('compiles component mixed with elements at root', () => {
+		const source = `component App() {
   render (
     <h1>Title</h1>
     <Child />
     <p>Footer</p>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('return $.jsx($.Fragment');
-    expect(code).toContain('$.jsx("h1"');
-    expect(code).toContain('Child()');
-    expect(code).toContain('$.jsx("p"');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('return $.jsx($.Fragment');
+		expect(code).toContain('$.jsx("h1"');
+		expect(code).toContain('Child()');
+		expect(code).toContain('$.jsx("p"');
+	});
 
-  it('compiles component child inside a native element', () => {
-    const source = `component App() {
+	it('compiles component child inside a native element', () => {
+		const source = `component App() {
   render (
     <div>
       <Child />
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.jsx("div"');
-    expect(code).toContain('Child()');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.jsx("div"');
+		expect(code).toContain('Child()');
+	});
 
-  it('compiles component between native elements', () => {
-    const source = `component App() {
+	it('compiles component between native elements', () => {
+		const source = `component App() {
   render (
     <div>
       <h1>Title</h1>
@@ -400,30 +414,30 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.jsx("div"');
-    expect(code).toContain('$.jsx("h1"');
-    expect(code).toContain('Child()');
-    expect(code).toContain('$.jsx("p"');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.jsx("div"');
+		expect(code).toContain('$.jsx("h1"');
+		expect(code).toContain('Child()');
+		expect(code).toContain('$.jsx("p"');
+	});
 
-  it('compiles props as getters and wraps reads in $.prop()', () => {
-    const source = `export default component Greeting(name: string = "World") {
+	it('compiles props as getters and wraps reads in $.prop()', () => {
+		const source = `export default component Greeting(name: string = "World") {
   render (
     <h1>Hello, {name}</h1>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain("const name = $.prop($$props, 'name', \"World\")");
-    expect(code).toContain('$.get(name)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain("const name = $.prop($$props, 'name', \"World\")");
+		expect(code).toContain('$.get(name)');
+	});
 
-  // ── If block tests ───────────────────────────────────────────────
+	// ── If block tests ───────────────────────────────────────────────
 
-  it('compiles if/else block in JSX', () => {
-    const source = `component App() {
+	it('compiles if/else block in JSX', () => {
+		const source = `component App() {
   state show = true
   render (
     <div>
@@ -435,16 +449,16 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.if(');
-    expect(code).toContain('() => $.get(show)');
-    expect(code).toContain('$.jsx("p", { children: ["Visible"] })');
-    expect(code).toContain('$.jsx("span", { children: ["Hidden"] })');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.if(');
+		expect(code).toContain('() => $.get(show)');
+		expect(code).toContain('$.jsx("p", { children: ["Visible"] })');
+		expect(code).toContain('$.jsx("span", { children: ["Hidden"] })');
+	});
 
-  it('compiles if block without else', () => {
-    const source = `component App() {
+	it('compiles if block without else', () => {
+		const source = `component App() {
   state loaded = false
   render (
     <div>
@@ -454,15 +468,15 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.if(');
-    expect(code).toContain('() => $.get(loaded)');
-    expect(code).toContain('$.jsx("p", { children: ["Content"] })');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.if(');
+		expect(code).toContain('() => $.get(loaded)');
+		expect(code).toContain('$.jsx("p", { children: ["Content"] })');
+	});
 
-  it('compiles if block at root level', () => {
-    const source = `component App() {
+	it('compiles if block at root level', () => {
+		const source = `component App() {
   state show = true
   render (
     {if (show) {
@@ -470,16 +484,16 @@ describe('compiler', () => {
     }}
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.if(');
-    expect(code).toContain('() => $.get(show)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.if(');
+		expect(code).toContain('() => $.get(show)');
+	});
 
-  // ── For loop tests ──────────────────────────────────────────────
+	// ── For loop tests ──────────────────────────────────────────────
 
-  it('compiles for loop in JSX', () => {
-    const source = `component App() {
+	it('compiles for loop in JSX', () => {
+		const source = `component App() {
   state items = ["a", "b", "c"]
   render (
     <ul>
@@ -489,15 +503,15 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('() => items');
-    expect(code).toContain('(item) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('() => items');
+		expect(code).toContain('(item) =>');
+	});
 
-  it('compiles for loop with index and key', () => {
-    const source = `component App() {
+	it('compiles for loop with index and key', () => {
+		const source = `component App() {
   state todos = [{id: 1, text: "a"}]
   render (
     <ul>
@@ -507,15 +521,15 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('(todo, i) =>');
-    expect(code).toContain('(todo) => todo.id');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('(todo, i) =>');
+		expect(code).toContain('(todo) => todo.id');
+	});
 
-  it('compiles for loop at root level', () => {
-    const source = `component App() {
+	it('compiles for loop at root level', () => {
+		const source = `component App() {
   state items = [1, 2, 3]
   render (
     {for (const n of items) {
@@ -523,14 +537,14 @@ describe('compiler', () => {
     }}
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('() => items');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('() => items');
+	});
 
-  it('compiles for...in loop', () => {
-    const source = `component App() {
+	it('compiles for...in loop', () => {
+		const source = `component App() {
   state obj = { a: 1, b: 2 }
   render (
     <ul>
@@ -540,15 +554,15 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('Object.keys(');
-    expect(code).toContain('(key) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('Object.keys(');
+		expect(code).toContain('(key) =>');
+	});
 
-  it('compiles C-style for loop', () => {
-    const source = `component App() {
+	it('compiles C-style for loop', () => {
+		const source = `component App() {
   render (
     <ul>
       {for (let i = 0; i < 5; i++) {
@@ -557,15 +571,15 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('(i) =>');
-    expect(code).toContain('__a.push(i)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('(i) =>');
+		expect(code).toContain('__a.push(i)');
+	});
 
-  it('compiles C-style for loop with reactive bound', () => {
-    const source = `component App() {
+	it('compiles C-style for loop with reactive bound', () => {
+		const source = `component App() {
   state count = 5
   render (
     <ul>
@@ -575,14 +589,14 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('$.get(count)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('$.get(count)');
+	});
 
-  it('compiles .map() with JSX', () => {
-    const source = `component App() {
+	it('compiles .map() with JSX', () => {
+		const source = `component App() {
   state items = ["a", "b", "c"]
   render (
     <ul>
@@ -590,15 +604,15 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('() => items');
-    expect(code).toContain('(item) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('() => items');
+		expect(code).toContain('(item) =>');
+	});
 
-  it('compiles .map() with index parameter', () => {
-    const source = `component App() {
+	it('compiles .map() with index parameter', () => {
+		const source = `component App() {
   state items = ["a", "b"]
   render (
     <ul>
@@ -606,14 +620,14 @@ describe('compiler', () => {
     </ul>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.for(');
-    expect(code).toContain('(item, i) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.for(');
+		expect(code).toContain('(item, i) =>');
+	});
 
-  it('compiles ternary expression with JSX', () => {
-    const source = `component App() {
+	it('compiles ternary expression with JSX', () => {
+		const source = `component App() {
   state show = true
   render (
     <div>
@@ -621,16 +635,16 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.if(');
-    expect(code).toContain('() => $.get(show)');
-    expect(code).toContain('$.jsx("p"');
-    expect(code).toContain('$.jsx("span"');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.if(');
+		expect(code).toContain('() => $.get(show)');
+		expect(code).toContain('$.jsx("p"');
+		expect(code).toContain('$.jsx("span"');
+	});
 
-  it('compiles ternary with null alternate as if-only', () => {
-    const source = `component App() {
+	it('compiles ternary with null alternate as if-only', () => {
+		const source = `component App() {
   state show = true
   render (
     <div>
@@ -638,14 +652,14 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.if(');
-    expect(code).toContain('$.jsx("p"');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.if(');
+		expect(code).toContain('$.jsx("p"');
+	});
 
-  it('compiles logical && with JSX', () => {
-    const source = `component App() {
+	it('compiles logical && with JSX', () => {
+		const source = `component App() {
   state show = true
   render (
     <div>
@@ -653,17 +667,17 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.if(');
-    expect(code).toContain('() => $.get(show)');
-    expect(code).toContain('$.jsx("p"');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.if(');
+		expect(code).toContain('() => $.get(show)');
+		expect(code).toContain('$.jsx("p"');
+	});
 
-  // ── Switch block tests ───────────────────────────────────────────
+	// ── Switch block tests ───────────────────────────────────────────
 
-  it('compiles switch block in JSX', () => {
-    const source = `component App() {
+	it('compiles switch block in JSX', () => {
+		const source = `component App() {
   state status = 'loading'
   render (
     <div>
@@ -680,17 +694,17 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.switch(');
-    expect(code).toContain('() => $.get(status)');
-    expect(code).toContain("values: ['loading']");
-    expect(code).toContain("values: ['success']");
-    expect(code).toContain('values: null');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.switch(');
+		expect(code).toContain('() => $.get(status)');
+		expect(code).toContain("values: ['loading']");
+		expect(code).toContain("values: ['success']");
+		expect(code).toContain('values: null');
+	});
 
-  it('compiles switch block with fall-through cases', () => {
-    const source = `component App() {
+	it('compiles switch block with fall-through cases', () => {
+		const source = `component App() {
   state status = 'init'
   render (
     <div>
@@ -706,15 +720,15 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.switch(');
-    expect(code).toContain("values: ['init', 'loading']");
-    expect(code).toContain("values: ['success']");
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.switch(');
+		expect(code).toContain("values: ['init', 'loading']");
+		expect(code).toContain("values: ['success']");
+	});
 
-  it('compiles switch block at root level', () => {
-    const source = `component App() {
+	it('compiles switch block at root level', () => {
+		const source = `component App() {
   state mode = 'a'
   render (
     {switch (mode) {
@@ -727,16 +741,16 @@ describe('compiler', () => {
     }}
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.switch(');
-    expect(code).toContain('() => $.get(mode)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.switch(');
+		expect(code).toContain('() => $.get(mode)');
+	});
 
-  // ── Try/catch block tests ────────────────────────────────────────
+	// ── Try/catch block tests ────────────────────────────────────────
 
-  it('compiles try/catch block in JSX', () => {
-    const source = `component App() {
+	it('compiles try/catch block in JSX', () => {
+		const source = `component App() {
   render (
     <div>
       {try {
@@ -747,16 +761,16 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.try(');
-    expect(code).toContain('$.jsx("p", { children: ["Content"] })');
-    expect(code).toContain('$.jsx("p", { children: ["Error occurred"] })');
-    expect(code).toContain('(e) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.try(');
+		expect(code).toContain('$.jsx("p", { children: ["Content"] })');
+		expect(code).toContain('$.jsx("p", { children: ["Error occurred"] })');
+		expect(code).toContain('(e) =>');
+	});
 
-  it('compiles try/catch/pending block', () => {
-    const source = `component App() {
+	it('compiles try/catch/pending block', () => {
+		const source = `component App() {
   render (
     <div>
       {try {
@@ -769,14 +783,14 @@ describe('compiler', () => {
     </div>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.try(');
-    expect(code).toContain('(err) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.try(');
+		expect(code).toContain('(err) =>');
+	});
 
-  it('compiles try block at root level', () => {
-    const source = `component App() {
+	it('compiles try block at root level', () => {
+		const source = `component App() {
   render (
     {try {
       <p>Content</p>
@@ -785,14 +799,14 @@ describe('compiler', () => {
     }}
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.try(');
-    expect(code).toContain('(e) =>');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.try(');
+		expect(code).toContain('(e) =>');
+	});
 
-  it('wraps member expression effect dep in $.derived()', () => {
-    const source = `component App() {
+	it('wraps member expression effect dep in $.derived()', () => {
+		const source = `component App() {
   state obj = { count: 0 }
 
   effect(obj.count, (count, prevCount) => {
@@ -803,14 +817,14 @@ describe('compiler', () => {
     <p>{obj.count}</p>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    // obj.count in effect dep position should become $.derived(() => obj.count)
-    expect(code).toContain('effect($.derived(() => obj.count),');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		// obj.count in effect dep position should become $.derived(() => obj.count)
+		expect(code).toContain('effect($.derived(() => obj.count),');
+	});
 
-  it('wraps member expression in array effect deps', () => {
-    const source = `component App() {
+	it('wraps member expression in array effect deps', () => {
+		const source = `component App() {
   state obj = { a: 1, b: 2 }
 
   effect([obj.a, obj.b], ([a], [b]) => {
@@ -821,14 +835,14 @@ describe('compiler', () => {
     <p>{obj.a}</p>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('$.derived(() => obj.a)');
-    expect(code).toContain('$.derived(() => obj.b)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('$.derived(() => obj.a)');
+		expect(code).toContain('$.derived(() => obj.b)');
+	});
 
-  it('wraps member expression in reactive call target positions', () => {
-    const source = `import { watchCount } from './utils'
+	it('wraps member expression in reactive call target positions', () => {
+		const source = `import { watchCount } from './utils'
 
 component App() {
   state obj = { count: 0 }
@@ -839,18 +853,18 @@ component App() {
     <p>{obj.count}</p>
   )
 }`;
-    // watchCount has reactive param at position 0
-    const result = compile(source, {
-      filename: 'App.tsx',
-      reactiveImports: {},
-      reactiveCallImports: { watchCount: [0] },
-    });
-    const code = normalizeWhitespace(result.code);
-    expect(code).toContain('watchCount($.derived(() => obj.count))');
-  });
+		// watchCount has reactive param at position 0
+		const result = compile(source, {
+			filename: 'App.tsx',
+			reactiveImports: {},
+			reactiveCallImports: { watchCount: [0] },
+		});
+		const code = normalizeWhitespace(result.code);
+		expect(code).toContain('watchCount($.derived(() => obj.count))');
+	});
 
-  it('does not wrap plain signal in effect dep', () => {
-    const source = `component App() {
+	it('does not wrap plain signal in effect dep', () => {
+		const source = `component App() {
   state count = 0
 
   effect(count, (val) => {
@@ -861,10 +875,10 @@ component App() {
     <p>{count}</p>
   )
 }`;
-    const result = compile(source);
-    const code = normalizeWhitespace(result.code);
-    // Plain signal should stay as-is (no $.get, no $.derived)
-    expect(code).toContain('effect(count,');
-    expect(code).not.toContain('$.derived(() => count)');
-  });
+		const result = compile(source);
+		const code = normalizeWhitespace(result.code);
+		// Plain signal should stay as-is (no $.get, no $.derived)
+		expect(code).toContain('effect(count,');
+		expect(code).not.toContain('$.derived(() => count)');
+	});
 });

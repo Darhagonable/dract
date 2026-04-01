@@ -13,6 +13,8 @@ import { create_test_suite } from './test';
 // --- Component tests ---
 create_test_suite('./component/basic');
 create_test_suite('./component/props');
+create_test_suite('./component/renamed-props');
+create_test_suite('./component/bind-renamed-prop');
 create_test_suite('./component/composition');
 
 // --- Reactivity tests ---

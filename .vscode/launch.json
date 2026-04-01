@@ -1,0 +1,46 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Launch VS Code Extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--disable-extension=dartsx.dartsx-vscode",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-plugin/",
+				"${workspaceFolder}/playground"
+			],
+			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
+			"sourceMaps": true,
+			"preLaunchTask": "build-extension"
+		},
+		{
+			"name": "Debug Tests - Current File",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": [
+				"run",
+				"test",
+				"${relativeFile}",
+				"--",
+				"--inspect-brk",
+				"--no-file-parallelism"
+			],
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen",
+			"skipFiles": ["<node_internals>/**"]
+		},
+		{
+			"name": "Playground - Vite Dev",
+			"type": "node",
+			"request": "launch",
+			"cwd": "${workspaceFolder}/playground",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["run", "dev"],
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen",
+			"skipFiles": ["<node_internals>/**"]
+		}
+	]
+}
