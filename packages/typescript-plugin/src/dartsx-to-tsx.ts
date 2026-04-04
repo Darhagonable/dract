@@ -63,11 +63,165 @@ function transformComponentDeclarations(ms: MagicString, source: string): void {
 	const re = /\b((?:export\s+)?(?:default\s+)?(?:async\s+)?)component(\s+\w+)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
+		const prefix = match[1] ?? '';
+		const name = match[2].trim();
+		const hasDefaultExport = /\bdefault\b/.test(prefix);
+		const hasNamedExport = /\bexport\b/.test(prefix) && !hasDefaultExport;
+		const isAsync = /\basync\b/.test(prefix);
+		const openParen = source.indexOf('(', match.index + match[0].length - 1);
+		if (openParen !== -1) {
+			const closeParen = findMatchingParen(source, openParen);
+			if (closeParen !== -1 && !hasDefaultExport) {
+				const paramsSource = source.slice(openParen + 1, closeParen);
+				const overload = buildComponentPropsOverload(name, paramsSource, hasNamedExport, isAsync);
+				if (overload) {
+					ms.appendLeft(match.index, `${overload}\n`);
+				}
+			}
+		}
+
 		const prefixEnd = match.index + match[1].length;
 		const componentStart = prefixEnd;
 		const componentEnd = componentStart + 'component'.length;
 		ms.overwrite(componentStart, componentEnd, 'function');
 	}
+}
+
+function buildComponentPropsOverload(
+	name: string,
+	paramsSource: string,
+	isExported: boolean,
+	isAsync: boolean,
+): string | null {
+	const params = splitTopLevelParams(paramsSource)
+		.map((param) => param.trim())
+		.filter(Boolean);
+
+	const members: string[] = [];
+	for (const param of params) {
+		const propInfo = parseComponentParam(param);
+		if (!propInfo) continue;
+
+		const propKey = formatPropKey(propInfo.externalName);
+		const optional = propInfo.isBind || propInfo.hasDefault ? '?' : '';
+		members.push(`${propKey}${optional}: ${propInfo.typeText};`);
+
+		if (propInfo.isBind) {
+			members.push(`${formatPropKey(`bind:${propInfo.externalName}`)}?: any;`);
+		}
+	}
+
+	const exportPrefix = isExported ? 'export ' : '';
+	const returnType = isAsync ? 'Promise<Node>' : 'Node';
+	const propsType = members.length > 0 ? `{ ${members.join(' ')} }` : '{}';
+	return `${exportPrefix}function ${name}(props: ${propsType}): ${returnType};`;
+}
+
+function splitTopLevelParams(paramsSource: string): string[] {
+	const parts: string[] = [];
+	let start = 0;
+	let parenDepth = 0;
+	let bracketDepth = 0;
+	let braceDepth = 0;
+	let i = 0;
+
+	while (i < paramsSource.length) {
+		const ch = paramsSource[i];
+		if (ch === "'" || ch === '"') {
+			i = skipString(paramsSource, i);
+			continue;
+		}
+		if (ch === '`') {
+			i = skipTemplateLiteral(paramsSource, i);
+			continue;
+		}
+		if (ch === '(') parenDepth++;
+		else if (ch === ')') parenDepth--;
+		else if (ch === '[') bracketDepth++;
+		else if (ch === ']') bracketDepth--;
+		else if (ch === '{') braceDepth++;
+		else if (ch === '}') braceDepth--;
+		else if (ch === ',' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+			parts.push(paramsSource.slice(start, i));
+			start = i + 1;
+		}
+		i++;
+	}
+
+	parts.push(paramsSource.slice(start));
+	return parts;
+}
+
+function parseComponentParam(paramSource: string): {
+	externalName: string;
+	typeText: string;
+	isBind: boolean;
+	hasDefault: boolean;
+} | null {
+	if (!paramSource || paramSource.startsWith('...')) return null;
+
+	let source = paramSource.trim();
+	let isBind = false;
+	if (source.startsWith('bind ')) {
+		isBind = true;
+		source = source.slice(5).trim();
+	}
+
+	let externalName: string;
+	let remainder: string;
+	const renamedMatch = source.match(/^(['"])([^'"]+)\1\s+as\s+([A-Za-z_$][\w$]*)(.*)$/);
+	if (renamedMatch) {
+		externalName = renamedMatch[2];
+		remainder = `${renamedMatch[3]}${renamedMatch[4]}`;
+	} else {
+		const plainMatch = source.match(/^([A-Za-z_$][\w$]*)(.*)$/);
+		if (!plainMatch) return null;
+		externalName = plainMatch[1];
+		remainder = plainMatch[2];
+	}
+
+	const defaultIndex = findTopLevelChar(remainder, '=');
+	const hasDefault = defaultIndex !== -1;
+	const beforeDefault = (hasDefault ? remainder.slice(0, defaultIndex) : remainder).trim();
+	const colonIndex = findTopLevelChar(beforeDefault, ':');
+	const typeText = colonIndex === -1 ? 'any' : beforeDefault.slice(colonIndex + 1).trim() || 'any';
+
+	return { externalName, typeText, isBind, hasDefault };
+}
+
+function findTopLevelChar(source: string, target: string): number {
+	let parenDepth = 0;
+	let bracketDepth = 0;
+	let braceDepth = 0;
+	let i = 0;
+
+	while (i < source.length) {
+		const ch = source[i];
+		if (ch === "'" || ch === '"') {
+			i = skipString(source, i);
+			continue;
+		}
+		if (ch === '`') {
+			i = skipTemplateLiteral(source, i);
+			continue;
+		}
+		if (ch === '(') parenDepth++;
+		else if (ch === ')') parenDepth--;
+		else if (ch === '[') bracketDepth++;
+		else if (ch === ']') bracketDepth--;
+		else if (ch === '{') braceDepth++;
+		else if (ch === '}') braceDepth--;
+		else if (ch === target && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+			return i;
+		}
+		i++;
+	}
+
+	return -1;
+}
+
+function formatPropKey(name: string): string {
+	return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
 }
 
 // ── 'ext-name' as localName → localName ───────────────────────────

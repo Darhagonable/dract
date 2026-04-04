@@ -3,10 +3,19 @@
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
+	"types": "./dist/runtime/external/index.d.ts",
 	"exports": {
 		".": {
 			"types": "./dist/runtime/external/index.d.ts",
 			"default": "./dist/runtime/external/index.js"
+		},
+		"./jsx-runtime": {
+			"types": "./dist/runtime/external/jsx-runtime.d.ts",
+			"default": "./dist/runtime/external/jsx-runtime.js"
+		},
+		"./jsx-dev-runtime": {
+			"types": "./dist/runtime/external/jsx-dev-runtime.d.ts",
+			"default": "./dist/runtime/external/jsx-dev-runtime.js"
 		},
 		"./internal/client": {
 			"types": "./dist/runtime/internal/client/index.d.ts",

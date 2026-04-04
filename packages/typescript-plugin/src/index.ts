@@ -14,6 +14,38 @@ import { createLanguageServicePlugin } from '@volar/typescript/lib/quickstart/cr
 import { getDarTsxLanguagePlugin } from './language';
 import { isDarTsxFile } from './dartsx-to-tsx';
 import * as fs from 'fs';
+import { htmlData } from 'vscode-html-languageservice/lib/umd/languageFacts/data/webCustomData';
+
+/** Prebuilt lookup: HTML/SVG tag name → { description, references, baseline } */
+interface HtmlTagDoc {
+	description: string;
+	references: { name: string; url: string }[];
+	baseline: string; // e.g. "![Baseline icon](...) _Widely available..._" or ""
+}
+
+const BASELINE_HIGH_ICON = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTAiIHZpZXdCb3g9IjAgMCA1NDAgMzAwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxzdHlsZT4KICAgIC5ncmVlbi1zaGFwZSB7CiAgICAgIGZpbGw6ICNDNEVFRDA7IC8qIExpZ2h0IG1vZGUgKi8KICAgIH0KCiAgICBAbWVkaWEgKHByZWZlcnMtY29sb3Itc2NoZW1lOiBkYXJrKSB7CiAgICAgIC5ncmVlbi1zaGFwZSB7CiAgICAgICAgZmlsbDogIzEyNTIyNTsgLyogRGFyayBtb2RlICovCiAgICAgIH0KICAgIH0KICA8L3N0eWxlPgogIDxwYXRoIGQ9Ik00MjAgMzBMMzkwIDYwTDQ4MCAxNTBMMzkwIDI0MEwzMzAgMTgwTDMwMCAyMTBMMzkwIDMwMEw1NDAgMTUwTDQyMCAzMFoiIGNsYXNzPSJncmVlbi1zaGFwZSIvPgogIDxwYXRoIGQ9Ik0xNTAgMEwzMCAxMjBMNjAgMTUwTDE1MCA2MEwyMTAgMTIwTDI0MCA5MEwxNTAgMFoiIGNsYXNzPSJncmVlbi1zaGFwZSIvPgogIDxwYXRoIGQ9Ik0zOTAgMEw0MjAgMzBMMTUwIDMwMEwwIDE1MEwzMCAxMjBMMTUwIDI0MEwzOTAgMFoiIGZpbGw9IiMxRUE0NDYiLz4KPC9zdmc+';
+const BASELINE_LOW_ICON = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgiIGhlaWdodD0iMTAiIHZpZXdCb3g9IjAgMCA1NDAgMzAwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxzdHlsZT4KICAgIC5ibHVlLXNoYXBlIHsKICAgICAgZmlsbDogI0E4QzdGQTsgLyogTGlnaHQgbW9kZSAqLwogICAgfQoKICAgIEBtZWRpYSAocHJlZmVycy1jb2xvci1zY2hlbWU6IGRhcmspIHsKICAgICAgLmJsdWUtc2hhcGUgewogICAgICAgIGZpbGw6ICMyRDUwOUU7IC8qIERhcmsgbW9kZSAqLwogICAgICB9CiAgICB9CgogICAgLmRhcmtlci1ibHVlLXNoYXBlIHsKICAgICAgICBmaWxsOiAjMUI2RUYzOwogICAgfQoKICAgIEBtZWRpYSAocHJlZmVycy1jb2xvci1zY2hlbWU6IGRhcmspIHsKICAgICAgICAuZGFya2VyLWJsdWUtc2hhcGUgewogICAgICAgICAgICBmaWxsOiAjNDE4NUZGOwogICAgICAgIH0KICAgIH0KCiAgPC9zdHlsZT4KICA8cGF0aCBkPSJNMTUwIDBMMTgwIDMwTDE1MCA2MEwxMjAgMzBMMTUwIDBaIiBjbGFzcz0iYmx1ZS1zaGFwZSIvPgogIDxwYXRoIGQ9Ik0yMTAgNjBMMjQwIDkwTDIxMCAxMjBMMTgwIDkwTDIxMCA2MFoiIGNsYXNzPSJibHVlLXNoYXBlIi8+CiAgPHBhdGggZD0iTTQ1MCA2MEw0ODAgOTBMNDUwIDEyMEw0MjAgOTBMNDUwIDYwWiIgY2xhc3M9ImJsdWUtc2hhcGUiLz4KICA8cGF0aCBkPSJNNTEwIDEyMEw1NDAgMTUwTDUxMCAxODBMNDgwIDE1MEw1MTAgMTIwWiIgY2xhc3M9ImJsdWUtc2hhcGUiLz4KICA8cGF0aCBkPSJNNDUwIDE4MEw0ODAgMjEwTDQ1MCAyNDBMNDIwIDIxMEw0NTAgMTgwWiIgY2xhc3M9ImJsdWUtc2hhcGUiLz4KICA8cGF0aCBkPSJNMzkwIDI0MEw0MjAgMjcwTDM5MCAzMDBMMzYwIDI3MEwzOTAgMjQwWiIgY2xhc3M9ImJsdWUtc2hhcGUiLz4KICA8cGF0aCBkPSJNMzMwIDE4MEwzNjAgMjEwTDMzMCAyNDBMMzAwIDIxMEwzMzAgMTgwWiIgY2xhc3M9ImJsdWUtc2hhcGUiLz4KICA8cGF0aCBkPSJNOTAgNjBMMTIwIDkwTDkwIDEyMEw2MCA5MEw5MCA2MFoiIGNsYXNzPSJibHVlLXNoYXBlIi8+CiAgPHBhdGggZD0iTTM5MCAwTDQyMCAzMEwxNTAgMzAwTDAgMTUwTDMwIDEyMEwxNTAgMjQwTDM5MCAwWiIgY2xhc3M9ImRhcmtlci1ibHVlLXNoYXBlIi8+Cjwvc3ZnPg==';
+
+const htmlTagDocs = new Map<string, HtmlTagDoc>();
+for (const tag of htmlData.tags ?? []) {
+	const desc = typeof tag.description === 'string'
+		? tag.description
+		: (tag.description as { kind: string; value: string })?.value ?? '';
+	const status = (tag as any).status as { baseline?: string; baseline_low_date?: string; baseline_high_date?: string } | undefined;
+	let baseline = '';
+	if (status?.baseline === 'high' && status.baseline_low_date) {
+		const year = status.baseline_low_date.substring(0, 4);
+		baseline = `![Baseline icon](${BASELINE_HIGH_ICON}) _Widely available across major browsers (Baseline since ${year})_`;
+	} else if (status?.baseline === 'low' && status.baseline_low_date) {
+		const year = status.baseline_low_date.substring(0, 4);
+		baseline = `![Baseline icon](${BASELINE_LOW_ICON}) _Newly available across major browsers (Baseline since ${year})_`;
+	}
+	htmlTagDocs.set(tag.name, {
+		description: desc,
+		references: (tag.references ?? []) as { name: string; url: string }[],
+		baseline,
+	});
+}
 
 const baseInit = createLanguageServicePlugin(() => ({
 	languagePlugins: [getDarTsxLanguagePlugin()],
@@ -63,6 +95,7 @@ function getQuickInfoWithDarTsxKeywords(
 		return result;
 	}
 	if (!isDarTsxFile(content)) return result;
+	rewriteComponentPropsOverload(result);
 
 	const first = result.displayParts[0];
 
@@ -105,7 +138,67 @@ function getQuickInfoWithDarTsxKeywords(
 		}
 	}
 
+	// Append HTML/SVG tag documentation (description + MDN link) for intrinsic elements
+	appendHtmlTagDocumentation(result, content);
+
 	return result;
+}
+
+function rewriteComponentPropsOverload(result: import('typescript').QuickInfo): void {
+	if (!result.displayParts?.length) return;
+
+	const text = result.displayParts.map((part) => part.text).join('');
+	if (!/^(?:\(alias\)\s+)?(?:function|component)\s+[A-Za-z_$][\w$]*\(props:\s*\{/.test(text)) return;
+
+	const rewritten = text
+		.replace(/^((?:\(alias\)\s+)?)function\b/, '$1component')
+		.replace(/\(props:\s*\{/, '(')
+		.replace(/\}\)(?=:\s*)/, ')');
+
+	if (rewritten === text) return;
+
+	result.displayParts = [
+		{ kind: 'text', text: rewritten },
+	];
+}
+
+/** Append HTML/SVG element description + baseline + MDN reference when hovering over an intrinsic JSX tag. */
+function appendHtmlTagDocumentation(result: import('typescript').QuickInfo, content: string): void {
+	if (!result.displayParts?.length) return;
+
+	// Extract the hovered token from source
+	const word = content.substring(result.textSpan.start, result.textSpan.start + result.textSpan.length);
+
+	const tagDoc = htmlTagDocs.get(word);
+	if (!tagDoc) return;
+
+	// Confirm this is a JSX intrinsic element hover (not a variable named e.g. "div")
+	const text = result.displayParts.map(p => p.text).join('');
+	if (!/\bJSX\b/.test(text) && !/\bIntrinsicElements\b/.test(text)) {
+		if (!/^\(property\)/.test(text)) return;
+	}
+
+	// Replace the "(property) SvelteHTMLElements.div: ..." display with just the tag name
+	result.displayParts = [
+		{ kind: 'keyword', text: '(element)' },
+		{ kind: 'space', text: ' ' },
+		{ kind: 'tagName', text: `<${word}>` },
+	];
+
+	// Build documentation
+	const docParts: import('typescript').SymbolDisplayPart[] = [];
+	if (tagDoc.description) {
+		docParts.push({ kind: 'text', text: tagDoc.description });
+	}
+	if (tagDoc.baseline) {
+		docParts.push({ kind: 'text', text: `\n\n${tagDoc.baseline}` });
+	}
+	for (const ref of tagDoc.references) {
+		docParts.push({ kind: 'text', text: `\n\n[${ref.name}](${ref.url})` });
+	}
+	if (docParts.length) {
+		result.documentation = docParts;
+	}
 }
 
 function rewriteParameterLabel(
