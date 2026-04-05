@@ -16,17 +16,33 @@ export interface ComponentMeta {
     isAsync: boolean;
 }
 
+/** Marker comments embedded in preprocessed code to identify state/derived declarations */
+export const STATE_MARKER = '/*@s*/';
+export const DERIVED_MARKER = '/*@d*/';
+
 export interface PreprocessResult {
     /** The transformed source that OXC can parse */
     code: string;
     /** Components found during pre-processing */
     components: ComponentMeta[];
-    /** Names of `state` variable declarations */
+    /** All names ever declared with `state` (for reactive var tracking, not scoping) */
     stateVars: string[];
-    /** Names of `derived` variable declarations */
+    /** All names ever declared with `derived` (for reactive var tracking, not scoping) */
     derivedVars: string[];
-    /** Renamed params: localName → externalName (from 'ext-name' as localName syntax) */
-    renamedParams: Record<string, string>;
+    /** Renamed params: componentName → { localName → externalName } */
+    renamedParams: Record<string, Record<string, string>>;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Find the component that owns a given source offset ('' if module-level) */
+function findOwnerComponent(componentPositions: { name: string; start: number }[], offset: number): string {
+    let owner = '';
+    for (const cp of componentPositions) {
+        if (offset >= cp.start) owner = cp.name;
+        else break;
+    }
+    return owner;
 }
 
 // ── Pre-process ────────────────────────────────────────────────────
@@ -53,12 +69,28 @@ export function preprocess(source: string): PreprocessResult {
     );
 
     // 1b. Transform renamed params: 'ext-name' as localName → localName
-    //     Store the external→local mapping so the analyzer can set externalName on ParamIR.
-    const renamedParams: Record<string, string> = {};
+    //     Store the external→local mapping per component so the analyzer can set externalName on ParamIR.
+    const renamedParams: Record<string, Record<string, string>> = {};
+    // Build a position → component name mapping from the component list
+    // We search the *original* source for 'component Name(' to find positions
+    const componentPositions: { name: string; start: number }[] = [];
+    for (const comp of components) {
+        const re = new RegExp(`\\bcomponent\\s+${comp.name}\\s*\\(`);
+        const m = source.match(re);
+        if (m && m.index != null) {
+            componentPositions.push({ name: comp.name, start: m.index });
+        }
+    }
+    componentPositions.sort((a, b) => a.start - b.start);
+
     code = code.replace(
         /(['"])([^'"]+)\1\s+as\s+(\w+)/g,
-        (_match, _quote, externalName, localName) => {
-            renamedParams[localName] = externalName;
+        (_match, _quote, externalName, localName, offset) => {
+            const ownerComp = findOwnerComponent(componentPositions, offset);
+            if (ownerComp) {
+                if (!renamedParams[ownerComp]) renamedParams[ownerComp] = {};
+                renamedParams[ownerComp][localName] = externalName;
+            }
             return localName;
         },
     );
@@ -67,23 +99,23 @@ export function preprocess(source: string): PreprocessResult {
     //     so OXC can parse it as a valid identifier, and the analyzer can detect it.
     code = code.replace(/\bbind\s+(\w+)/g, '__bind__$1');
 
-    // 2. Transform `state varName = expr` → `let varName = expr`
-    //    Only match when `state` is used as a declaration keyword (not property access)
-    //    Also detect `export state` to track reactive exports
+    // 2. Transform `state varName = expr` → `let varName /*@s*/ = expr`
+    //    The /*@s*/ marker lets the analyzer identify this as a state declaration
+    //    regardless of scope, without relying on name matching alone.
     code = code.replace(
         /(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)\s*(?==)/g,
         (_match, exportKw, name) => {
             stateVars.push(name);
-            return `${exportKw || ''}let ${name} `;
+            return `${exportKw || ''}let ${name} ${STATE_MARKER} `;
         },
     );
 
-    // 3. Transform `derived varName = expr` → `const varName = expr`
+    // 3. Transform `derived varName = expr` → `const varName /*@d*/ = expr`
     code = code.replace(
         /(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)\s*(?==)/g,
         (_match, exportKw, name) => {
             derivedVars.push(name);
-            return `${exportKw || ''}const ${name} `;
+            return `${exportKw || ''}const ${name} ${DERIVED_MARKER} `;
         },
     );
 

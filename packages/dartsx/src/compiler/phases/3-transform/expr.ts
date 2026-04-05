@@ -305,14 +305,6 @@ export function transformBodyStatement(
     }
 
     walk(result.program as ASTNode, (node) => {
-        if (
-            node.type === 'CallExpression' &&
-            node.callee?.type === 'Identifier' &&
-            node.callee.name === 'effect' &&
-            node.arguments?.length >= 2
-        ) {
-            addExclusionArg(node.arguments[0]);
-        }
         // Exclude args at reactive positions for functions with reactive params
         if (
             reactiveCallTargets &&

@@ -1,4 +1,6 @@
 import { defineConfig } from 'vitest/config';
+import dartsx from './packages/vite-plugin/src/index';
+import path from 'path';
 
 export default defineConfig({
 	test: {
@@ -6,16 +8,24 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
-					name: 'unit',
-					include: ['packages/dartsx/tests/*.test.ts'],
+					name: 'compiler',
+					include: ['packages/dartsx/tests/compiler/**/*.test.ts'],
 				},
 			},
 			{
-				extends: true,
+				plugins: [dartsx()],
+				resolve: {
+					alias: {
+						'dartsx/internal/client': path.resolve(__dirname, 'packages/dartsx/src/runtime/internal/client/index.ts'),
+						'dartsx': path.resolve(__dirname, 'packages/dartsx/src/runtime/external/index.ts'),
+					},
+				},
 				test: {
-					name: 'runtime',
-					include: ['packages/dartsx/tests/runtime-tests/index.test.js'],
+					name: 'client',
+					include: ['packages/dartsx/tests/client/**/*.test.tsx'],
 					environment: 'jsdom',
+					setupFiles: ['packages/dartsx/tests/setup-client.js'],
+					globals: true,
 				},
 			},
 			{

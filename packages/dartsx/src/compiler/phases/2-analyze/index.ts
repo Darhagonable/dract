@@ -5,6 +5,7 @@
  * produces an Intermediate Representation (IR) for each component.
  */
 import type { ComponentMeta, PreprocessResult } from '../1-parse';
+import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
 
 // ── IR Types ───────────────────────────────────────────────────────
 
@@ -161,6 +162,17 @@ export interface AnalysisResult {
      * Provided so the Vite plugin can resolve them without regex-parsing the source.
      */
     importSpecifiers: string[];
+    /** Nested component declarations found inside module statements (e.g. inside describe/it blocks) */
+    nestedComponents: Array<{
+        /** Index into moduleStatements array */
+        statementIndex: number;
+        /** Start offset within the statement text */
+        localStart: number;
+        /** End offset within the statement text */
+        localEnd: number;
+        /** Component IR */
+        ir: ComponentIR;
+    }>;
 }
 
 // ── Analyze ────────────────────────────────────────────────────────
@@ -258,14 +270,16 @@ export function analyze(
                     const name = decl.id?.name;
                     if (!name) continue;
 
-                    if (stateSet.has(name)) {
+                    const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
+
+                    if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
                         const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         moduleStateVars.push({ name, initExpr, exported });
                         moduleReactiveVars.add(name);
                         if (decl.init && isProxyInit(decl.init)) moduleProxyVars.add(name);
                         if (exported) reactiveExports.push(name);
                         handled = true;
-                    } else if (derivedSet.has(name)) {
+                    } else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
                         const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         moduleDerivedVars.push({ name, expr, exported });
                         moduleReactiveVars.add(name);
@@ -301,6 +315,9 @@ export function analyze(
     // Walk the entire AST looking for call expressions
     walkCallSites(ast, allReactiveVars, functionParamMap, implicitReactiveParams, importSourceMap, importedReactiveCalls);
 
+    // Process pending non-function statements
+    const nestedComponents: AnalysisResult['nestedComponents'] = [];
+
     // Now process pending functions
     for (const { node, fnInfo } of pendingFunctions) {
         let reactiveParams: string[] | undefined;
@@ -327,13 +344,43 @@ export function analyze(
             moduleFunctions.push({ signature, bodyStatements: bodyStmts, reactiveParams });
         } else {
             // No reactive params — preserve as-is
+            const stmtIndex = moduleStatements.length;
             moduleStatements.push(source.slice(node.start, node.end));
+
+            // Find nested component declarations
+            const nested: Array<{ fnInfo: FnInfo; start: number; end: number }> = [];
+            findNestedFunctionDecls(node, componentNames, nested);
+            for (const { fnInfo: nestedFn, start, end } of nested) {
+                const compMeta = meta.components.find(c => c.name === nestedFn.name)!;
+                const ir = analyzeComponent(nestedFn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams);
+                nestedComponents.push({
+                    statementIndex: stmtIndex,
+                    localStart: start - node.start,
+                    localEnd: end - node.start,
+                    ir,
+                });
+            }
         }
     }
 
     // Process pending non-function statements
     for (const node of pendingStatements) {
+        const stmtIndex = moduleStatements.length;
         moduleStatements.push(source.slice(node.start, node.end));
+
+        // Find nested component declarations (e.g. inside describe/it blocks)
+        const nested: Array<{ fnInfo: FnInfo; start: number; end: number }> = [];
+        findNestedFunctionDecls(node, componentNames, nested);
+        for (const { fnInfo, start, end } of nested) {
+            const compMeta = meta.components.find(c => c.name === fnInfo.name)!;
+            const ir = analyzeComponent(fnInfo, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams);
+            nestedComponents.push({
+                statementIndex: stmtIndex,
+                localStart: start - node.start,
+                localEnd: end - node.start,
+                ir,
+            });
+        }
     }
 
     // Convert Set<number> to number[] for the result
@@ -395,6 +442,7 @@ export function analyze(
         reactiveCalls,
         reactiveCallTargets,
         importSpecifiers,
+        nestedComponents,
     };
 }
 
@@ -414,6 +462,18 @@ function walkCallSites(
     importSourceMap: Map<string, { specifier: string; exportedName: string }>,
     importedResult: Record<string, Record<string, Set<number>>>,
 ) {
+    /** Check if an argument contains a reactive reference */
+    function isReactiveArg(arg: any): boolean {
+        if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) return true;
+        // Member expression with reactive root: user.name, obj.a.b
+        if (arg.type === 'MemberExpression') return isReactiveArg(arg.object);
+        // Array of deps: [a, b] where any element is reactive
+        if (arg.type === 'ArrayExpression' && arg.elements) {
+            return arg.elements.some((el: any) => el && isReactiveArg(el));
+        }
+        return false;
+    }
+
     function visit(node: any) {
         if (!node || typeof node !== 'object') return;
 
@@ -425,8 +485,7 @@ function walkCallSites(
             const paramNames = functionParamMap.get(fnName);
             if (paramNames) {
                 for (let i = 0; i < args.length && i < paramNames.length; i++) {
-                    const arg = args[i];
-                    if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) {
+                    if (isReactiveArg(args[i])) {
                         if (!localResult.has(fnName)) localResult.set(fnName, new Set());
                         localResult.get(fnName)!.add(paramNames[i]);
                     }
@@ -437,8 +496,7 @@ function walkCallSites(
             const importInfo = importSourceMap.get(fnName);
             if (importInfo) {
                 for (let i = 0; i < args.length; i++) {
-                    const arg = args[i];
-                    if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) {
+                    if (isReactiveArg(args[i])) {
                         if (!importedResult[importInfo.specifier]) importedResult[importInfo.specifier] = {};
                         if (!importedResult[importInfo.specifier][importInfo.exportedName]) {
                             importedResult[importInfo.specifier][importInfo.exportedName] = new Set();
@@ -464,6 +522,43 @@ function walkCallSites(
     }
 
     visit(ast);
+}
+
+/**
+ * Recursively walk an AST node to find FunctionDeclaration nodes that match
+ * known component names. Used to discover components nested inside expression
+ * statements (e.g. inside describe/it test blocks).
+ */
+function findNestedFunctionDecls(
+    node: any,
+    componentNames: Set<string>,
+    results: Array<{ fnInfo: FnInfo; start: number; end: number }>,
+): void {
+    if (!node || typeof node !== 'object') return;
+
+    // If this node is a component function declaration, collect it and stop recursing
+    if (node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name)) {
+        const fn = extractFunctionDecl(node);
+        if (fn) {
+            results.push({ fnInfo: fn, start: node.start, end: node.end });
+            return;
+        }
+    }
+
+    // Recurse into children
+    for (const field of AST_CHILD_FIELDS) {
+        const child = node[field];
+        if (child == null) continue;
+        if (Array.isArray(child)) {
+            for (const item of child) {
+                if (item && typeof item === 'object' && item.type) {
+                    findNestedFunctionDecls(item, componentNames, results);
+                }
+            }
+        } else if (typeof child === 'object' && child.type) {
+            findNestedFunctionDecls(child, componentNames, results);
+        }
+    }
 }
 
 /** Known AST fields that contain child nodes — avoids iterating all object keys */
@@ -509,7 +604,7 @@ function analyzeComponent(
     stateSet: Set<string>,
     derivedSet: Set<string>,
     crossFileReactiveVars: Set<string>,
-    renamedParams: Record<string, string>,
+    renamedParams: Record<string, Record<string, string>>,
 ): ComponentIR {
     const params: ParamIR[] = [];
     const stateVars: { name: string; initExpr: string }[] = [];
@@ -519,9 +614,12 @@ function analyzeComponent(
     const bodyStatements: string[] = [];
     let jsx: JSXNodeIR | null = null;
 
+    // Get per-component rename map
+    const componentRenames = renamedParams[compMeta.name] || {};
+
     // Analyze params
     for (const param of fn.params) {
-        const p = analyzeParam(param, source, renamedParams);
+        const p = analyzeParam(param, source, componentRenames);
         params.push(p);
         // All non-rest props are reactive (wrapped in $.prop → derived signal)
         if (!p.isRest) {
@@ -537,12 +635,14 @@ function analyzeComponent(
                     const name = decl.id?.name;
                     if (!name) continue;
 
-                    if (stateSet.has(name)) {
+                    const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
+
+                    if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
                         const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         stateVars.push({ name, initExpr });
                         reactiveVars.add(name);
                         if (decl.init && isProxyInit(decl.init)) proxyVars.add(name);
-                    } else if (derivedSet.has(name)) {
+                    } else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
                         const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
                         derivedVars.push({ name, expr });
                         reactiveVars.add(name);

@@ -240,17 +240,17 @@ function proxyMap<K, V>(target: Map<K, V>, parentRoot?: State): Map<K, V> {
                     return obj.size;
                 case 'forEach':
                     return (cb: (v: V, k: K, m: Map<K, V>) => void) => {
-                        trackRead(version);
+                        trackRead(root);
                         return obj.forEach(cb);
                     };
                 case 'keys':
                     return () => { trackRead(version); return obj.keys(); };
                 case 'values':
-                    return () => { trackRead(version); return obj.values(); };
+                    return () => { trackRead(root); return obj.values(); };
                 case 'entries':
-                    return () => { trackRead(version); return obj.entries(); };
+                    return () => { trackRead(root); return obj.entries(); };
                 case Symbol.iterator:
-                    return () => { trackRead(version); return obj[Symbol.iterator](); };
+                    return () => { trackRead(root); return obj[Symbol.iterator](); };
                 default:
                     return Reflect.get(obj, prop);
             }

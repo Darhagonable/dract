@@ -1,0 +1,5 @@
+component App() {
+  render (
+    <Child />
+  )
+}

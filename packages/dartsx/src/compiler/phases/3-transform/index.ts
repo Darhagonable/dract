@@ -29,6 +29,7 @@ export function transform(analysis: AnalysisResult): string {
 
 	const needsRuntime =
 		analysis.components.length > 0 ||
+		analysis.nestedComponents.length > 0 ||
 		analysis.moduleStateVars.length > 0 ||
 		analysis.moduleDerivedVars.length > 0 ||
 		analysis.moduleFunctions.length > 0;
@@ -67,8 +68,44 @@ export function transform(analysis: AnalysisResult): string {
 	}
 	if (analysis.moduleFunctions.length > 0) lines.push('');
 
-	for (const stmt of analysis.moduleStatements) {
-		lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars));
+	// Group nested components by their parent statement index
+	const nestedByIndex = new Map<number, typeof analysis.nestedComponents>();
+	for (const nc of analysis.nestedComponents) {
+		if (!nestedByIndex.has(nc.statementIndex)) {
+			nestedByIndex.set(nc.statementIndex, []);
+		}
+		nestedByIndex.get(nc.statementIndex)!.push(nc);
+	}
+
+	for (let i = 0; i < analysis.moduleStatements.length; i++) {
+		let stmt = analysis.moduleStatements[i];
+		const nested = nestedByIndex.get(i);
+
+		if (nested) {
+			// Replace nested component source spans with placeholders, then splice in compiled code after
+			const sorted = [...nested].sort((a, b) => b.localStart - a.localStart);
+			const placeholders: Array<{ placeholder: string; compiled: string }> = [];
+
+			for (let j = 0; j < sorted.length; j++) {
+				const nc = sorted[j];
+				const compiled = transformComponent(nc.ir, analysis.reactiveCallTargets);
+				const placeholder = `__DARTSX_NC_${j}__`;
+				placeholders.push({ placeholder, compiled });
+				stmt = stmt.slice(0, nc.localStart) + placeholder + stmt.slice(nc.localEnd);
+			}
+
+			// Apply reactive var transformations to the non-component parts
+			stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars);
+
+			// Replace placeholders with compiled component code
+			for (const { placeholder, compiled } of placeholders) {
+				stmt = stmt.replace(placeholder, compiled);
+			}
+
+			lines.push(stmt);
+		} else {
+			lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars));
+		}
 	}
 	if (analysis.moduleStatements.length > 0) lines.push('');
 
