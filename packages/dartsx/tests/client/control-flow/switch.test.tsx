@@ -64,3 +64,30 @@ describe('control-flow > switch fall-through', () => {
 		expect(container.querySelector('span').textContent).toBe('Loading...');
 	});
 });
+
+describe('control-flow > switch with block render', () => {
+	it('renders using local variables in switch cases', async () => {
+		component SwitchBlockRender() {
+			state mode = 'a';
+
+			render (
+				<button onclick={() => mode = mode === 'a' ? 'b' : 'a'}>toggle</button>
+				{switch (mode) {
+					case 'a':
+						const aLabel = 'Alpha';
+						render <span>{aLabel}</span>
+					case 'b':
+						const bLabel = 'Beta';
+						render <span>{bLabel}</span>
+				}}
+			);
+		}
+
+		mountComponent(SwitchBlockRender);
+		expect(container.querySelector('span').textContent).toBe('Alpha');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('span').textContent).toBe('Beta');
+	});
+});

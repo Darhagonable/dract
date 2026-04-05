@@ -52,3 +52,25 @@ describe('control-flow > try pending catch', () => {
 		expect(container.querySelector('span').textContent).toBe('done');
 	});
 });
+
+describe('control-flow > try catch with block render', () => {
+	it('renders using local variables in catch block', () => {
+		function BrokenComponent() {
+			throw new Error('something broke');
+		}
+
+		component TryCatchBlockRender() {
+			render (
+				{try {
+					<BrokenComponent />
+				} catch (e) {
+					const msg = e.message;
+					render <span>{msg}</span>
+				}}
+			);
+		}
+
+		mountComponent(TryCatchBlockRender);
+		expect(container.querySelector('span').textContent).toBe('something broke');
+	});
+});

@@ -42,7 +42,8 @@ export type JSXNodeIR =
 	| JSXIfBlockIR
 	| JSXForBlockIR
 	| JSXSwitchBlockIR
-	| JSXTryBlockIR;
+	| JSXTryBlockIR
+	| JSXAnonymousBlockIR;
 
 export interface JSXElementIR {
 	type: 'element';
@@ -75,8 +76,12 @@ export interface JSXIfBlockIR {
 	condition: string;
 	/** Children for the true branch */
 	trueBranch: JSXNodeIR[];
+	/** Raw source of statements preceding the JSX in the true branch */
+	truePreamble?: string;
 	/** Children for the false branch (null if no else) */
 	falseBranch: JSXNodeIR[] | null;
+	/** Raw source of statements preceding the JSX in the false branch */
+	falsePreamble?: string;
 }
 
 export interface JSXForBlockIR {
@@ -91,6 +96,8 @@ export interface JSXForBlockIR {
 	keyExpr: string | null;
 	/** Children for the loop body */
 	body: JSXNodeIR[];
+	/** Raw source of statements preceding the JSX in the body */
+	preamble?: string;
 }
 
 export interface JSXSwitchBlockIR {
@@ -98,19 +105,31 @@ export interface JSXSwitchBlockIR {
 	/** Raw discriminant expression */
 	discriminant: string;
 	/** Cases with grouped values (null values = default case) */
-	cases: { values: string[] | null; body: JSXNodeIR[] }[];
+	cases: { values: string[] | null; body: JSXNodeIR[]; preamble?: string }[];
 }
 
 export interface JSXTryBlockIR {
 	type: 'try_block';
 	/** Try branch children */
 	tryBranch: JSXNodeIR[];
+	/** Raw source of statements preceding the JSX in the try branch */
+	tryPreamble?: string;
 	/** Catch parameter name (null if no catch) */
 	catchParam: string | null;
 	/** Catch branch children (null if no catch) */
 	catchBranch: JSXNodeIR[] | null;
+	/** Raw source of statements preceding the JSX in the catch branch */
+	catchPreamble?: string;
 	/** Pending branch children (null if no pending) */
 	pendingBranch: JSXNodeIR[] | null;
+	/** Raw source of statements preceding the JSX in the pending branch */
+	pendingPreamble?: string;
+}
+
+export interface JSXAnonymousBlockIR {
+	type: 'anonymous_block';
+	preamble?: string;
+	children: JSXNodeIR[];
 }
 
 export interface JSXAttrIR {
@@ -744,6 +763,14 @@ function analyzeJSXNode(node: any, source: string): JSXNodeIR {
 			) {
 				return analyzeTryBlock(expr, source);
 			}
+			// Detect __block() calls (anonymous blocks with statements + render)
+			if (
+				expr.type === 'CallExpression' &&
+				expr.callee?.type === 'Identifier' &&
+				expr.callee.name === '__block'
+			) {
+				return analyzeAnonymousBlock(expr, source);
+			}
 			// Detect .map() calls returning JSX: expr.map(item => <jsx/>)
 			if (
 				expr.type === 'CallExpression' &&
@@ -773,6 +800,10 @@ function analyzeJSXNode(node: any, source: string): JSXNodeIR {
 				if (isJSXNode(expr.right)) {
 					return analyzeLogicalAndExpression(expr, source);
 				}
+			}
+			// Bare JSX inside expression container: {<p>Hello</p>}
+			if (isJSXNode(expr)) {
+				return analyzeJSXNode(expr, source);
 			}
 			return {
 				type: 'expression',
@@ -929,6 +960,34 @@ function unwrapParen(node: any): any {
 	return node;
 }
 
+interface BranchBody {
+	children: JSXNodeIR[];
+	preamble?: string;
+}
+
+/**
+ * Extracts JSX children and optional preamble from an arrow function body.
+ * Handles both expression bodies `() => (<>jsx</>)` and block bodies
+ * `() => { stmts; return (<>jsx</>); }`.
+ */
+function extractBranchBody(arrowBody: any, source: string): BranchBody {
+	if (arrowBody?.type === 'BlockStatement') {
+		const stmts: any[] = arrowBody.body || [];
+		const returnStmt = stmts.find((s: any) => s.type === 'ReturnStatement');
+		if (returnStmt?.argument) {
+			const children = extractJSXChildren(returnStmt.argument, source);
+			// Everything before the return is preamble
+			const preambleStmts = stmts.filter((s: any) => s !== returnStmt);
+			const preamble = preambleStmts.length > 0
+				? source.slice(preambleStmts[0].start, preambleStmts[preambleStmts.length - 1].end).trim()
+				: undefined;
+			return { children, preamble };
+		}
+		return { children: [] };
+	}
+	return { children: extractJSXChildren(arrowBody, source) };
+}
+
 function extractJSXChildren(node: any, source: string): JSXNodeIR[] {
 	const jsx = unwrapParen(node);
 	if (!jsx) return [];
@@ -947,18 +1006,23 @@ function analyzeIfBlock(callExpr: any, source: string): JSXIfBlockIR {
 	const condBody = unwrapParen(condArrow?.body);
 	const condition = condBody ? source.slice(condBody.start, condBody.end) : 'true';
 
-	// Second arg: () => (<>trueBranch</>)
+	// Second arg: () => (<>trueBranch</>) or () => { stmts; return (<>...</>); }
 	const trueArrow = args[1];
-	const trueBranch = trueArrow ? extractJSXChildren(trueArrow.body, source) : [];
+	const trueResult = trueArrow ? extractBranchBody(trueArrow.body, source) : { children: [] };
 
 	// Third arg (optional): () => (<>falseBranch</>)
 	let falseBranch: JSXNodeIR[] | null = null;
+	let falsePreamble: string | undefined;
 	if (args.length > 2) {
 		const falseArrow = args[2];
-		falseBranch = falseArrow ? extractJSXChildren(falseArrow.body, source) : null;
+		if (falseArrow) {
+			const falseResult = extractBranchBody(falseArrow.body, source);
+			falseBranch = falseResult.children;
+			falsePreamble = falseResult.preamble;
+		}
 	}
 
-	return { type: 'if_block', condition, trueBranch, falseBranch };
+	return { type: 'if_block', condition, trueBranch: trueResult.children, truePreamble: trueResult.preamble, falseBranch, falsePreamble };
 }
 
 function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
@@ -969,13 +1033,13 @@ function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
 	const collBody = unwrapParen(collArrow?.body);
 	const collection = collBody ? source.slice(collBody.start, collBody.end) : '[]';
 
-	// Second arg: (item, index?) => (<>body</>)
+	// Second arg: (item, index?) => (<>body</>) or (item) => { stmts; return (<>...</>); }
 	const bodyArrow = args[1];
 	const params = bodyArrow?.params || [];
 	const itemParam = params[0];
 	const itemName = itemParam?.name || (itemParam ? source.slice(itemParam.start, itemParam.end) : 'item');
 	const indexName = params.length > 1 ? params[1]?.name : null;
-	const body = bodyArrow ? extractJSXChildren(bodyArrow.body, source) : [];
+	const bodyResult = bodyArrow ? extractBranchBody(bodyArrow.body, source) : { children: [] };
 
 	// Third arg (optional): (item) => (key)
 	let keyExpr: string | null = null;
@@ -985,7 +1049,7 @@ function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
 		keyExpr = keyBody ? source.slice(keyBody.start, keyBody.end) : null;
 	}
 
-	return { type: 'for_block', collection, itemName, indexName, keyExpr, body };
+	return { type: 'for_block', collection, itemName, indexName, keyExpr, body: bodyResult.children, preamble: bodyResult.preamble };
 }
 
 function analyzeSwitchBlock(callExpr: any, source: string): JSXSwitchBlockIR {
@@ -997,7 +1061,7 @@ function analyzeSwitchBlock(callExpr: any, source: string): JSXSwitchBlockIR {
 	const discriminant = discBody ? source.slice(discBody.start, discBody.end) : '""';
 
 	// Remaining args come in pairs: (values-array-or-null, body-fn)
-	const cases: { values: string[] | null; body: JSXNodeIR[] }[] = [];
+	const cases: { values: string[] | null; body: JSXNodeIR[]; preamble?: string }[] = [];
 	for (let i = 1; i < args.length; i += 2) {
 		const valuesArg = args[i];
 		const fnArg = args[i + 1];
@@ -1010,8 +1074,8 @@ function analyzeSwitchBlock(callExpr: any, source: string): JSXSwitchBlockIR {
 		}
 		// NullLiteral → values stays null (default case)
 
-		const body = fnArg ? extractJSXChildren(fnArg.body, source) : [];
-		cases.push({ values, body });
+		const result = fnArg ? extractBranchBody(fnArg.body, source) : { children: [] };
+		cases.push({ values, body: result.children, preamble: result.preamble });
 	}
 
 	return { type: 'switch_block', discriminant, cases };
@@ -1022,25 +1086,37 @@ function analyzeTryBlock(callExpr: any, source: string): JSXTryBlockIR {
 
 	// First arg: () => (<>tryBody</>)
 	const tryArrow = args[0];
-	const tryBranch = tryArrow ? extractJSXChildren(tryArrow.body, source) : [];
+	const tryResult = tryArrow ? extractBranchBody(tryArrow.body, source) : { children: [] };
 
 	// Second arg (optional): (param) => (<>catchBody</>) or null
 	let catchParam: string | null = null;
 	let catchBranch: JSXNodeIR[] | null = null;
+	let catchPreamble: string | undefined;
 	if (args.length > 1 && args[1].type !== 'NullLiteral') {
 		const catchArrow = args[1];
 		catchParam = catchArrow.params?.[0]?.name || 'e';
-		catchBranch = extractJSXChildren(catchArrow.body, source);
+		const catchResult = extractBranchBody(catchArrow.body, source);
+		catchBranch = catchResult.children;
+		catchPreamble = catchResult.preamble;
 	}
 
 	// Third arg (optional): () => (<>pendingBody</>)
 	let pendingBranch: JSXNodeIR[] | null = null;
+	let pendingPreamble: string | undefined;
 	if (args.length > 2) {
 		const pendArrow = args[2];
-		pendingBranch = extractJSXChildren(pendArrow.body, source);
+		const pendResult = extractBranchBody(pendArrow.body, source);
+		pendingBranch = pendResult.children;
+		pendingPreamble = pendResult.preamble;
 	}
 
-	return { type: 'try_block', tryBranch, catchParam, catchBranch, pendingBranch };
+	return { type: 'try_block', tryBranch: tryResult.children, tryPreamble: tryResult.preamble, catchParam, catchBranch, catchPreamble, pendingBranch, pendingPreamble };
+}
+
+function analyzeAnonymousBlock(callExpr: any, source: string): JSXAnonymousBlockIR {
+	const arrowFn = callExpr.arguments[0];
+	const result = extractBranchBody(arrowFn.body, source);
+	return { type: 'anonymous_block', preamble: result.preamble, children: result.children };
 }
 
 // ── JSX expression pattern detection helpers ───────────────────────

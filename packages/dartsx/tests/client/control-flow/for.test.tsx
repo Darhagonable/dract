@@ -83,6 +83,72 @@ describe('control-flow > for with key', () => {
 	});
 });
 
+describe('control-flow > for with key and index (index first)', () => {
+	it('provides both key and index with index first', async () => {
+		component ForIndexKey() {
+			state items = [
+				{ id: 10, text: 'a' },
+				{ id: 20, text: 'b' },
+				{ id: 30, text: 'c' },
+			];
+
+			render (
+				<button onclick={() => items.reverse()}>reverse</button>
+				<ul>
+					{for (const item of items; index i; key item.id) {
+						<li>{i}: {item.text}</li>
+					}}
+				</ul>
+			);
+		}
+
+		mountComponent(ForIndexKey);
+		let lis = container.querySelectorAll('li');
+		expect(lis[0].textContent).toBe('0: a');
+		expect(lis[2].textContent).toBe('2: c');
+
+		container.querySelector('button').click();
+		await tick();
+
+		lis = container.querySelectorAll('li');
+		expect(lis[0].textContent).toBe('2: c');
+		expect(lis[2].textContent).toBe('0: a');
+	});
+});
+
+describe('control-flow > for with key and index (key first)', () => {
+	it('provides both key and index with key first', async () => {
+		component ForKeyIndex() {
+			state items = [
+				{ id: 10, text: 'x' },
+				{ id: 20, text: 'y' },
+				{ id: 30, text: 'z' },
+			];
+
+			render (
+				<button onclick={() => items.reverse()}>reverse</button>
+				<ul>
+					{for (const item of items; key item.id; index i) {
+						<li>{i}: {item.text}</li>
+					}}
+				</ul>
+			);
+		}
+
+		mountComponent(ForKeyIndex);
+		let lis = container.querySelectorAll('li');
+		expect(lis[0].textContent).toBe('0: x');
+		expect(lis[2].textContent).toBe('2: z');
+
+		container.querySelector('button').click();
+		await tick();
+
+		lis = container.querySelectorAll('li');
+		expect(lis[0].textContent).toBe('2: z');
+		expect(lis[2].textContent).toBe('0: x');
+	});
+});
+
 describe('control-flow > C-style for loop', () => {
 	it('renders with a C-style for loop', () => {
 		component CStyleFor() {
@@ -122,5 +188,57 @@ describe('control-flow > .map() expression', () => {
 		const lis = container.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('a');
+	});
+});
+
+describe('control-flow > for-of with block render', () => {
+	it('renders using local variables and render keyword', () => {
+		component ForOfBlockRender() {
+			state items = [
+				{ name: "Alice" },
+				{ name: "Bob" },
+				{ name: "Charlie" },
+			];
+
+			render (
+				<ul>
+					{for (const item of items) {
+						const name = item.name;
+						render <li>{name}</li>
+					}}
+				</ul>
+			);
+		}
+
+		mountComponent(ForOfBlockRender);
+		const lis = container.querySelectorAll('li');
+		expect(lis.length).toBe(3);
+		expect(lis[0].textContent).toBe('Alice');
+		expect(lis[1].textContent).toBe('Bob');
+		expect(lis[2].textContent).toBe('Charlie');
+	});
+});
+
+describe('control-flow > C-style for with block render', () => {
+	it('renders using local variables in C-style for loop', () => {
+		component CStyleBlockRender() {
+			state count = 3;
+
+			render (
+				<ul>
+					{for (let i = 0; i < count; i++) {
+						const label = `item-${i}`;
+						render <li>{label}</li>
+					}}
+				</ul>
+			);
+		}
+
+		mountComponent(CStyleBlockRender);
+		const lis = container.querySelectorAll('li');
+		expect(lis.length).toBe(3);
+		expect(lis[0].textContent).toBe('item-0');
+		expect(lis[1].textContent).toBe('item-1');
+		expect(lis[2].textContent).toBe('item-2');
 	});
 });

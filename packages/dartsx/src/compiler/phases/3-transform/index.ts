@@ -14,6 +14,7 @@ import type {
 	JSXForBlockIR,
 	JSXSwitchBlockIR,
 	JSXTryBlockIR,
+	JSXAnonymousBlockIR,
 	JSXAttrIR,
 	JSXExpressionIR,
 } from '../2-analyze';
@@ -200,6 +201,8 @@ function emitJSXNode(node: JSXNodeIR, reactiveVars: Set<string>, indent: string)
 			return emitSwitchBlock(node, reactiveVars, indent);
 		case 'try_block':
 			return emitTryBlock(node, reactiveVars, indent);
+		case 'anonymous_block':
+			return emitAnonymousBlock(node, reactiveVars, indent);
 		default:
 			return 'null';
 	}
@@ -350,14 +353,37 @@ function emitChildExpression(node: JSXExpressionIR, reactiveVars: Set<string>): 
 
 // ── Control flow ───────────────────────────────────────────────────
 
+/**
+ * Emits an arrow-function callback for a CF branch.
+ * When preamble is present, produces a block-body arrow:
+ *   (params) => { preamble; return jsxExpr; }
+ * Otherwise produces an expression-body arrow:
+ *   (params) => jsxExpr
+ */
+function emitCFCallback(
+	children: JSXNodeIR[],
+	reactiveVars: Set<string>,
+	indent: string,
+	params?: string,
+	preamble?: string,
+): string {
+	const arrow = params ? `(${params}) =>` : `() =>`;
+	const bodyExpr = emitBranchReturn(children, reactiveVars, indent);
+	if (preamble) {
+		const transformedPreamble = transformBodyStatement(preamble, reactiveVars, undefined, currentProxyVars);
+		return `${arrow} { ${transformedPreamble} return ${bodyExpr}; }`;
+	}
+	return `${arrow} ${bodyExpr}`;
+}
+
 function emitIfBlock(node: JSXIfBlockIR, reactiveVars: Set<string>, indent: string): string {
 	const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentProxyVars);
-	const trueBody = emitBranchReturn(node.trueBranch, reactiveVars, indent);
+	const trueCallback = emitCFCallback(node.trueBranch, reactiveVars, indent, undefined, node.truePreamble);
 
-	let result = `$.if(() => ${condExpr}, () => ${trueBody}`;
+	let result = `$.if(() => ${condExpr}, ${trueCallback}`;
 	if (node.falseBranch) {
-		const falseBody = emitBranchReturn(node.falseBranch, reactiveVars, indent);
-		result += `, () => ${falseBody}`;
+		const falseCallback = emitCFCallback(node.falseBranch, reactiveVars, indent, undefined, node.falsePreamble);
+		result += `, ${falseCallback}`;
 	}
 	result += ')';
 	return result;
@@ -368,9 +394,9 @@ function emitForBlock(node: JSXForBlockIR, reactiveVars: Set<string>, indent: st
 		? transformBodyStatement(node.collection, reactiveVars, undefined, currentProxyVars)
 		: wrapReadsInGet(node.collection, reactiveVars, currentProxyVars);
 	const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
-	const bodyExpr = emitBranchReturn(node.body, reactiveVars, indent);
+	const bodyCallback = emitCFCallback(node.body, reactiveVars, indent, params, node.preamble);
 
-	let result = `$.for(() => ${collExpr}, (${params}) => ${bodyExpr}`;
+	let result = `$.for(() => ${collExpr}, ${bodyCallback}`;
 	if (node.keyExpr) {
 		const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentProxyVars);
 		result += `, (${node.itemName}) => ${keyExpr}`;
@@ -385,33 +411,42 @@ function emitSwitchBlock(node: JSXSwitchBlockIR, reactiveVars: Set<string>, inde
 	const caseStrs: string[] = [];
 	for (const c of node.cases) {
 		const valuesStr = c.values === null ? 'null' : `[${c.values.join(', ')}]`;
-		const bodyExpr = emitBranchReturn(c.body, reactiveVars, indent);
-		caseStrs.push(`{ values: ${valuesStr}, fn: () => ${bodyExpr} }`);
+		const fnCallback = emitCFCallback(c.body, reactiveVars, indent, undefined, c.preamble);
+		caseStrs.push(`{ values: ${valuesStr}, fn: ${fnCallback} }`);
 	}
 
 	return `$.switch(() => ${discExpr}, [${caseStrs.join(', ')}])`;
 }
 
 function emitTryBlock(node: JSXTryBlockIR, reactiveVars: Set<string>, indent: string): string {
-	const tryBody = emitBranchReturn(node.tryBranch, reactiveVars, indent);
+	const tryCallback = emitCFCallback(node.tryBranch, reactiveVars, indent, undefined, node.tryPreamble);
 
-	let result = `$.try(() => ${tryBody}`;
+	let result = `$.try(${tryCallback}`;
 
 	if (node.catchBranch) {
 		const param = node.catchParam || 'e';
-		const catchBody = emitBranchReturn(node.catchBranch, reactiveVars, indent);
-		result += `, (${param}) => ${catchBody}`;
+		const catchCallback = emitCFCallback(node.catchBranch, reactiveVars, indent, param, node.catchPreamble);
+		result += `, ${catchCallback}`;
 	} else if (node.pendingBranch) {
 		result += ', undefined';
 	}
 
 	if (node.pendingBranch) {
-		const pendBody = emitBranchReturn(node.pendingBranch, reactiveVars, indent);
-		result += `, () => ${pendBody}`;
+		const pendCallback = emitCFCallback(node.pendingBranch, reactiveVars, indent, undefined, node.pendingPreamble);
+		result += `, ${pendCallback}`;
 	}
 
 	result += ')';
 	return result;
+}
+
+function emitAnonymousBlock(node: JSXAnonymousBlockIR, reactiveVars: Set<string>, indent: string): string {
+	const bodyExpr = emitBranchReturn(node.children, reactiveVars, indent);
+	if (node.preamble) {
+		const transformedPreamble = transformBodyStatement(node.preamble, reactiveVars, undefined, currentProxyVars);
+		return `(() => { ${transformedPreamble} return ${bodyExpr}; })()`;
+	}
+	return bodyExpr;
 }
 
 // ── Branch helpers ─────────────────────────────────────────────────

@@ -128,3 +128,33 @@ describe('control-flow > logical &&', () => {
 		expect(container.querySelector('span')).toBeNull();
 	});
 });
+
+describe('control-flow > if with block render', () => {
+	it('renders using local variables in if/else blocks', async () => {
+		component IfBlockRender() {
+			state show = true;
+
+			render (
+				<button onclick={() => show = !show}>toggle</button>
+				{if (show) {
+					const msg = 'visible';
+					render <span>{msg}</span>
+				} else {
+					const msg = 'hidden';
+					render <span>{msg}</span>
+				}}
+			);
+		}
+
+		mountComponent(IfBlockRender);
+		expect(container.querySelector('span').textContent).toBe('visible');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('span').textContent).toBe('hidden');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('span').textContent).toBe('visible');
+	});
+});
