@@ -1,55 +1,55 @@
-import { get, SIGNAL, type State, type Subscriber } from '../internal/client/reactivity/state.js';
-import { STATE_SYMBOL, RAW, getProxyState } from '../internal/client/reactivity/proxy.js';
+import { get, isSignal, type State, type Subscriber } from '../internal/client/reactivity/state.js';
+import { RAW, getProxyState, isProxy } from '../internal/client/reactivity/proxy.js';
 import { getCurrentComponent } from '../internal/client/index.js';
 
 // ── Effect context (so onCleanup knows which effect is running) ────
 
 export interface EffectContext {
-    cleanups: (() => void)[];
+	cleanups: (() => void)[];
 }
 
 let currentEffect: EffectContext | null = null;
 
 export function getCurrentEffect(): EffectContext | null {
-    return currentEffect;
+	return currentEffect;
 }
 
 function runCleanups(ctx: EffectContext): void {
-    for (const fn of ctx.cleanups) fn();
-    ctx.cleanups = [];
+	for (const fn of ctx.cleanups) fn();
+	ctx.cleanups = [];
 }
 
 /** Resolve a dep (State, Derived, or proxy) to a State for subscription */
 function resolveSignal(dep: any): State {
-    // State or Derived
-    if (dep && typeof dep === 'object' && SIGNAL in dep) {
-        return dep;
-    }
-    // Proxy → get its root state
-    if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
-        const sig = getProxyState(dep);
-        if (sig) return sig;
-    }
-    throw new Error('effect: invalid dependency — expected a signal or proxy');
+	// State or Derived
+	if (isSignal(dep)) {
+		return dep;
+	}
+	// Proxy → get its root state
+	if (isProxy(dep)) {
+		const sig = getProxyState(dep);
+		if (sig) return sig;
+	}
+	throw new Error('effect: invalid dependency — expected a signal or proxy');
 }
 
 /** Read the current value of a dep (signal value, or the raw target for proxies) */
 function readDep(dep: any) {
-    if (dep && typeof dep === 'object' && SIGNAL in dep) {
-        return get(dep);
-    }
-    if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
-        return dep[RAW];
-    }
-    return dep;
+	if (isSignal(dep)) {
+		return get(dep);
+	}
+	if (isProxy(dep)) {
+		return dep[RAW];
+	}
+	return dep;
 }
 
 /** Snapshot a dep for oldVal tracking (structuredClone for proxies so old !== new) */
 function snapshotDep(dep: any) {
-    if (dep && typeof dep === 'object' && STATE_SYMBOL in dep) {
-        return structuredClone(dep[RAW]);
-    }
-    return readDep(dep);
+	if (isProxy(dep)) {
+		return structuredClone(dep[RAW]);
+	}
+	return readDep(dep);
 }
 
 /**
@@ -61,100 +61,100 @@ function snapshotDep(dep: any) {
  * - effect([dep1, dep2], ([new1, old1], [new2, old2]) => ...)  — multiple deps
  */
 type DepPairs<T extends unknown[]> = {
-    [K in keyof T]: [T[K], T[K]];
+	[K in keyof T]: [T[K], T[K]];
 };
 
 export function effect<T extends unknown[]>(
-    deps: [...T],
-    callback: (...new_and_old: [...DepPairs<T>]) => void,
+	deps: [...T],
+	callback: (...new_and_old: [...DepPairs<T>]) => void,
 ): void;
 export function effect<T extends unknown>(
-    dep: T,
-    callback: (newVal: T, oldVal: T) => void,
+	dep: T,
+	callback: (newVal: T, oldVal: T) => void,
 ): void;
 export function effect<T extends unknown>(
-    dep: T | T[],
-    callback: (...args: any[]) => void,
+	dep: T | T[],
+	callback: (...args: any[]) => void,
 ): void {
-    if (Array.isArray(dep) && !(dep && typeof dep === 'object' && STATE_SYMBOL in dep)) {
-        // Multiple dependencies (but not a proxied array)
-        const deps = dep;
-        const signals = deps.map(resolveSignal);
-        let oldVals = deps.map(readDep);
-        const ctx: EffectContext = { cleanups: [] };
+	if (Array.isArray(dep) && !isProxy(dep)) {
+		// Multiple dependencies (but not a proxied array)
+		const deps = dep;
+		const signals = deps.map(resolveSignal);
+		let oldVals = deps.map(readDep);
+		const ctx: EffectContext = { cleanups: [] };
 
-        const sub: Subscriber = {
-            run() {
-                runCleanups(ctx);
+		const sub: Subscriber = {
+			run() {
+				runCleanups(ctx);
 
-                const prevEffect = currentEffect;
-                currentEffect = ctx;
+				const prevEffect = currentEffect;
+				currentEffect = ctx;
 
-                const newVals = deps.map(readDep);
-                const pairs = deps.map((_, i) => [newVals[i], oldVals[i]]);
-                callback(...pairs);
+				const newVals = deps.map(readDep);
+				const pairs = deps.map((_, i) => [newVals[i], oldVals[i]]);
+				callback(...pairs);
 
-                currentEffect = prevEffect;
-                oldVals = deps.map(snapshotDep);
-                sub.dirty = false;
-            },
-            deps: new Set(),
-            dirty: true,
-        };
+				currentEffect = prevEffect;
+				oldVals = deps.map(snapshotDep);
+				sub.dirty = false;
+			},
+			deps: new Set(),
+			dirty: true,
+		};
 
-        for (const sig of signals) {
-            sig.subs.add(sub);
-            sub.deps.add(sig);
-        }
+		for (const sig of signals) {
+			sig.subs.add(sub);
+			sub.deps.add(sig);
+		}
 
-        sub.run();
+		sub.run();
 
-        // Auto-dispose when the owning component unmounts
-        const componentCtx = getCurrentComponent();
-        if (componentCtx) {
-            componentCtx.onDestroyCallbacks.push(() => {
-                runCleanups(ctx);
-                for (const sig of sub.deps) sig.subs.delete(sub);
-                sub.deps.clear();
-            });
-        }
-    } else {
-        // Single dependency
-        const sig = resolveSignal(dep);
-        let oldVal = readDep(dep);
-        const ctx: EffectContext = { cleanups: [] };
+		// Auto-dispose when the owning component unmounts
+		const componentCtx = getCurrentComponent();
+		if (componentCtx) {
+			componentCtx.onDestroyCallbacks.push(() => {
+				runCleanups(ctx);
+				for (const sig of sub.deps) sig.subs.delete(sub);
+				sub.deps.clear();
+			});
+		}
+	} else {
+		// Single dependency
+		const sig = resolveSignal(dep);
+		let oldVal = readDep(dep);
+		const ctx: EffectContext = { cleanups: [] };
 
-        const sub: Subscriber = {
-            run() {
-                runCleanups(ctx);
+		const sub: Subscriber = {
+			run() {
+				runCleanups(ctx);
 
-                const prevEffect = currentEffect;
-                currentEffect = ctx;
+				const prevEffect = currentEffect;
+				currentEffect = ctx;
 
-                const newVal = readDep(dep);
-                callback(newVal, oldVal);
+				const newVal = readDep(dep);
+				callback(newVal, oldVal);
 
-                currentEffect = prevEffect;
-                oldVal = snapshotDep(dep);
-                sub.dirty = false;
-            },
-            deps: new Set(),
-            dirty: true,
-        };
+				currentEffect = prevEffect;
+				oldVal = snapshotDep(dep);
+				sub.dirty = false;
+			},
+			deps: new Set(),
+			dirty: true,
+		};
 
-        sig.subs.add(sub);
-        sub.deps.add(sig);
+		sig.subs.add(sub);
+		sub.deps.add(sig);
 
-        sub.run();
+		sub.run();
 
-        // Auto-dispose when the owning component unmounts
-        const componentCtx = getCurrentComponent();
-        if (componentCtx) {
-            componentCtx.onDestroyCallbacks.push(() => {
-                runCleanups(ctx);
-                for (const s of sub.deps) s.subs.delete(sub);
-                sub.deps.clear();
-            });
-        }
-    }
+		// Auto-dispose when the owning component unmounts
+		const componentCtx = getCurrentComponent();
+		if (componentCtx) {
+			componentCtx.onDestroyCallbacks.push(() => {
+				runCleanups(ctx);
+				for (const s of sub.deps) s.subs.delete(sub);
+				sub.deps.clear();
+			});
+		}
+	}
 }
