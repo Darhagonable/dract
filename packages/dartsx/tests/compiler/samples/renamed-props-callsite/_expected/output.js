@@ -7,5 +7,5 @@ function Greeting($$props) {
 }
 
 function App() {
-    return Greeting({ "first-name": () => "Alice" });
+    return $.jsx(Greeting, { "first-name": () => "Alice" });
 }

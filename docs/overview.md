@@ -19,6 +19,7 @@ DarTsx is a reactive UI framework that uses a simple, declarative syntax to buil
 - [Event Handlers](./event-handlers.md) - Handling user events
 - [Control Flow](./control-flow.md) - Conditionals, loops, switch statements
 - [Bindings](./bindings.md) - Two-way data binding
+- [Context](./context.md) - Sharing state across components without prop drilling
 - [Lifecycle Hooks](./lifecycle-hooks.md) - Component lifecycle methods
 - [Comparison](./comparison.md) - Comparison with React and Svelte
 

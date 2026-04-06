@@ -5,7 +5,7 @@ export { scheduleEffect, getFlushPromise } from './reactivity/scheduler';
 export { prop } from './reactivity/prop';
 export { derived, getDerived, isDerived, type Derived } from './reactivity/derived';
 export { effect, teardown } from './reactivity/effect';
-export { proxy, RAW, STATE_SYMBOL, getProxyState, isProxy } from './reactivity/proxy';
+export { proxy, RAW, STATE_SYMBOL, getProxyState, isProxy, signalProxy, getSignalTarget } from './reactivity/proxy';
 export type { BindTuple } from './bindings/types';
 export { type ComponentContext, getCurrentComponent, setCurrentComponent } from './context';
 

@@ -1,5 +1,6 @@
 import { get, isSignal, type State, type Subscriber } from '../internal/client/reactivity/state.js';
-import { RAW, getProxyState, isProxy } from '../internal/client/reactivity/proxy.js';
+import { isDerived } from '../internal/client/reactivity/derived.js';
+import { RAW, getProxyState, getSignalTarget, isProxy } from '../internal/client/reactivity/proxy.js';
 import { getCurrentComponent } from '../internal/client/index.js';
 
 // ── Effect context (so onCleanup knows which effect is running) ────
@@ -23,6 +24,7 @@ function runCleanups(ctx: EffectContext): void {
 function resolveSignal(dep: any): State {
 	// State or Derived
 	if (isSignal(dep)) {
+		if (isDerived(dep)) return getSignalTarget(dep);
 		return dep;
 	}
 	// Proxy → get its root state

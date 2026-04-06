@@ -88,4 +88,18 @@ describe('reactivity > derived skip propagation', () => {
 		expect(container.querySelector('.count').textContent).toBe('1');
 		expect(container.querySelector('.large').textContent).toBe('no');
 	});
+
+	it('proxies object-valued derived results', async () => {
+		const runtime = await import('dartsx/internal/client');
+		const count = runtime.state(1);
+		const counter = runtime.derived(() => ({ count: runtime.get(count) }));
+
+		expect(runtime.isProxy(counter)).toBe(true);
+		expect(counter.count).toBe(1);
+
+		runtime.set(count, 2);
+
+		expect(counter.count).toBe(2);
+		expect(runtime.isProxy(runtime.get(counter))).toBe(true);
+	});
 });

@@ -1,5 +1,5 @@
 import $ from 'dartsx/internal/client';
 
 function App() {
-    return Child();
+    return $.jsx(Child);
 }

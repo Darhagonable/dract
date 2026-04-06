@@ -2,6 +2,8 @@ import Counter from "./Counter";
 import ProfileForm from "./ProfileForm";
 import { Dashboard } from "./Dashboard";
 import { RenamedPropsDemo } from "./RenamedPropsDemo";
+import { ContextDemo } from "./ContextDemo";
+import { ReactiveContextDemo } from "./ReactiveContextDemo";
 import { test } from "./helper-test";
 
 export default component App() {
@@ -30,6 +32,10 @@ export default component App() {
       <RenamedPropsDemo />
       <hr />
       <ProfileForm />
+      <hr />
+      <ContextDemo />
+      <hr />
+      <ReactiveContextDemo />
     </div>
   )
 }

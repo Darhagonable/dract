@@ -3,7 +3,6 @@ import { effect } from 'dartsx'
 
 function App() {
     let count = $.state(0);
-
     effect(count, (val) => {
     console.log(val);
   })

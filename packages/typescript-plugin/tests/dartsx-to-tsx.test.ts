@@ -13,6 +13,7 @@ describe('isDarTsxFile', () => {
 		expect(isDarTsxFile('export default function App() { return <input bind:value={name} /> }')).toBe(true);
 		expect(isDarTsxFile('function App() { return <Badge bind:display-name={name} /> }')).toBe(true);
 		expect(isDarTsxFile('function App() { render (<div />) }')).toBe(true);
+		expect(isDarTsxFile('function App() { derived { user: { name } } = loadUser() }')).toBe(true);
 	});
 
 	it('rejects regular TSX files', () => {
@@ -67,6 +68,26 @@ describe('dartsxToTsx', () => {
 	it('transforms derived → const', () => {
 		const { code } = dartsxToTsx('derived doubled = count * 2');
 		expect(code).toContain('const doubled = count * 2');
+	});
+
+	it('transforms derived destructuring → const destructuring', () => {
+		const { code } = dartsxToTsx('derived { count, increment } = CounterCtx()');
+		expect(code).toContain('const { count, increment } = CounterCtx()');
+	});
+
+	it('transforms deep derived destructuring → const destructuring', () => {
+		const { code } = dartsxToTsx('derived { user: { name }, items: [first, { label: itemLabel }] } = CounterCtx()');
+		expect(code).toContain('const { user: { name }, items: [first, { label: itemLabel }] } = CounterCtx()');
+	});
+
+	it('preserves defaults and object rest in derived destructuring', () => {
+		const { code } = dartsxToTsx("derived { user: { name = 'anon' }, ...rest } = CounterCtx()");
+		expect(code).toContain("const { user: { name = 'anon' }, ...rest } = CounterCtx()");
+	});
+
+	it('preserves defaults and array rest in derived destructuring', () => {
+		const { code } = dartsxToTsx('derived [first = 1, ...rest] = CounterCtx()');
+		expect(code).toContain('const [first = 1, ...rest] = CounterCtx()');
 	});
 
 	it('transforms render block to return with fragment', () => {

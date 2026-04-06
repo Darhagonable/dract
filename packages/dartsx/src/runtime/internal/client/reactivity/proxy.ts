@@ -1,4 +1,4 @@
-import { type State, SIGNAL, getSubscriber, notify } from './state';
+import { type State, SIGNAL, SETTER, getSubscriber, notify } from './state';
 
 // ── Symbols ────────────────────────────────────────────────────────
 
@@ -22,6 +22,88 @@ export function getProxyState(p: any): State | undefined {
 
 export function isProxy(value: unknown): boolean {
 	return !!value && typeof value === 'object' && STATE_SYMBOL in value;
+}
+
+// ── Signal proxy (value-forwarding wrapper) ────────────────────────
+//
+// Wraps a signal object so property access delegates to a dynamically
+// resolved value. Used by derived() so object-valued computations
+// can be accessed directly (e.g. rest.role instead of $.get(rest).role).
+
+/** Maps signal proxy → raw signal target */
+const signalProxyTargets = new WeakMap<object, any>();
+
+/** Unwrap a signal proxy to its raw signal target. Returns value as-is if not wrapped. */
+export function getSignalTarget<T extends object>(value: T): T {
+	return (signalProxyTargets.get(value)) ?? value;
+}
+
+function isObjectLike(value: unknown): value is object {
+	return (typeof value === 'object' && value !== null) || typeof value === 'function';
+}
+
+/**
+ * Create a proxy that wraps a signal and forwards property access
+ * to a dynamically resolved value. The signal retains its SIGNAL brand.
+ */
+export function signalProxy<T extends object>(
+	signal: T,
+	getValue: (raw: T) => unknown,
+): T {
+	const p = new Proxy<T>(signal, {
+		get(target, key) {
+			if (key === SIGNAL) return true;
+			if (key === SETTER) return (target as any)[SETTER];
+
+			const value = getValue(target);
+			if (value == null) return undefined;
+
+			const prop = (value as any)[key];
+			if (typeof prop === 'function') return prop.bind(value);
+			return prop;
+		},
+		set(target, key, newValue) {
+			if (key === SETTER) {
+				(target as any)[SETTER] = newValue;
+				return true;
+			}
+			const current = getValue(target);
+			if (!isObjectLike(current)) return false;
+			return Reflect.set(current, key, newValue);
+		},
+		has(target, key) {
+			if (key === SIGNAL) return true;
+			if (key === SETTER) return SETTER in target;
+			const value = getValue(target);
+			return isObjectLike(value) ? key in value : false;
+		},
+		ownKeys(target) {
+			const value = getValue(target);
+			return isObjectLike(value) ? Reflect.ownKeys(value) : [];
+		},
+		getOwnPropertyDescriptor(target, key) {
+			if (key === SIGNAL) {
+				return { configurable: true, enumerable: false, value: true, writable: false };
+			}
+			if (key === SETTER && SETTER in target) {
+				return { configurable: true, enumerable: false, value: target[SETTER], writable: true };
+			}
+			const value = getValue(target);
+			if (!isObjectLike(value)) return undefined;
+			const desc = Reflect.getOwnPropertyDescriptor(value, key);
+			if (!desc) return undefined;
+			return { ...desc, configurable: true };
+		},
+		deleteProperty(target, key) {
+			if (key === SIGNAL || key === SETTER) return false;
+			const value = getValue(target);
+			if (!isObjectLike(value)) return false;
+			return Reflect.deleteProperty(value, key);
+		},
+	});
+
+	signalProxyTargets.set(p, signal);
+	return p;
 }
 
 // ── Internal signal helpers ────────────────────────────────────────

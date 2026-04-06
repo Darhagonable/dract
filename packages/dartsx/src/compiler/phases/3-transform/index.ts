@@ -22,11 +22,14 @@ import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from '.
 
 // Module-level proxy vars for current transform context (avoids threading through every function)
 let currentProxyVars: Set<string> | undefined;
+let currentDirectMemberAccessVars: Set<string> | undefined;
 
 // ── Main entry ─────────────────────────────────────────────────────
 
 export function transform(analysis: AnalysisResult): string {
 	const lines: string[] = [];
+	const moduleDirectMemberAccessVars = new Set<string>(analysis.moduleProxyVars);
+	for (const d of analysis.moduleDerivedVars) moduleDirectMemberAccessVars.add(d.name);
 
 	const needsRuntime =
 		analysis.components.length > 0 ||
@@ -50,7 +53,7 @@ export function transform(analysis: AnalysisResult): string {
 
 	for (const d of analysis.moduleDerivedVars) {
 		const prefix = d.exported ? 'export ' : '';
-		const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars);
+		const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDirectMemberAccessVars);
 		lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrappedExpr});`);
 	}
 
@@ -63,7 +66,7 @@ export function transform(analysis: AnalysisResult): string {
 		for (const p of fn.reactiveParams) mergedReactive.add(p);
 		lines.push(fn.signature);
 		for (const stmt of fn.bodyStatements) {
-			lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars)}`);
+			lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDirectMemberAccessVars)}`);
 		}
 		lines.push('}');
 	}
@@ -96,7 +99,7 @@ export function transform(analysis: AnalysisResult): string {
 			}
 
 			// Apply reactive var transformations to the non-component parts
-			stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars);
+			stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDirectMemberAccessVars);
 
 			// Replace placeholders with compiled component code
 			for (const { placeholder, compiled } of placeholders) {
@@ -105,7 +108,7 @@ export function transform(analysis: AnalysisResult): string {
 
 			lines.push(stmt);
 		} else {
-			lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars));
+			lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDirectMemberAccessVars));
 		}
 	}
 	if (analysis.moduleStatements.length > 0) lines.push('');
@@ -124,6 +127,12 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	const lines: string[] = [];
 	const hasProps = comp.params.length > 0;
 	currentProxyVars = comp.proxyVars.size > 0 ? comp.proxyVars : undefined;
+	const directMemberAccessVars = new Set<string>(comp.proxyVars);
+	for (const d of comp.derivedVars) directMemberAccessVars.add(d.name);
+	for (const p of comp.params) {
+		if (!p.isRest) directMemberAccessVars.add(p.name);
+	}
+	currentDirectMemberAccessVars = directMemberAccessVars.size > 0 ? directMemberAccessVars : undefined;
 
 	const exportPrefix = comp.meta.isExport
 		? comp.meta.isDefault
@@ -133,15 +142,6 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	const asyncPrefix = comp.meta.isAsync ? 'async ' : '';
 	const propsParam = hasProps ? '$$props' : '';
 	lines.push(`${exportPrefix}${asyncPrefix}function ${comp.meta.name}(${propsParam}) {`);
-
-	for (const s of comp.stateVars) {
-		lines.push(`    let ${s.name} = $.state(${s.initExpr});`);
-	}
-
-	for (const d of comp.derivedVars) {
-		const wrappedExpr = wrapReadsInGet(d.expr, comp.reactiveVars, currentProxyVars);
-		lines.push(`    const ${d.name} = $.derived(() => ${wrappedExpr});`);
-	}
 
 	if (hasProps) {
 		for (const p of comp.params) {
@@ -163,17 +163,30 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 		}
 	}
 
-	if (comp.stateVars.length || comp.derivedVars.length || hasProps) {
+	if (hasProps) {
 		lines.push('');
 	}
 
-	for (const stmt of comp.bodyStatements) {
-		lines.push(`    ${transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets, currentProxyVars)}`);
+	for (const decl of comp.orderedDecls) {
+		if (decl.kind === 'state') {
+			lines.push(`    let ${decl.name} = $.state(${decl.initExpr});`);
+		} else if (decl.kind === 'derived') {
+			if (decl.raw) {
+				const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+				lines.push(`    const ${decl.name} = ${wrappedExpr};`);
+			} else {
+				const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+				lines.push(`    const ${decl.name} = $.derived(() => ${wrappedExpr});`);
+			}
+		} else {
+			lines.push(`    ${transformBodyStatement(decl.text, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars)}`);
+		}
 	}
 
 	const jsxCode = emitJSXNode(comp.jsx, comp.reactiveVars, '    ');
 	lines.push(`    return ${jsxCode};`);
 	lines.push('}');
+	currentDirectMemberAccessVars = undefined;
 
 	return lines.join('\n');
 }
@@ -252,9 +265,9 @@ function emitComponentCall(node: JSXElementIR, reactiveVars: Set<string>, indent
 	}
 
 	if (propEntries.length === 0) {
-		return `${node.tag}()`;
+		return `$.jsx(${node.tag})`;
 	}
-	return `${node.tag}({ ${propEntries.join(', ')} })`;
+	return `$.jsx(${node.tag}, { ${propEntries.join(', ')} })`;
 }
 
 // ── Attribute emission ─────────────────────────────────────────────
@@ -268,7 +281,7 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			break;
 		}
 		case 'dynamic': {
-			const wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars);
+			const wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 			if (isComponent) {
 				entries.push(`${key}: () => ${wrapped}`);
 			} else if (wrapped !== (attr.value || '') || containsReactiveVar(attr.value || '', reactiveVars)) {
@@ -279,7 +292,7 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			break;
 		}
 		case 'event': {
-			const handler = transformEventHandler(attr.value || '', reactiveVars, currentProxyVars);
+			const handler = transformEventHandler(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 			entries.push(`${key}: ${handler}`);
 			break;
 		}
@@ -287,13 +300,13 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			if (attr.bindProperty) {
 				if (attr.bindGetter !== undefined && attr.bindSetter !== undefined) {
 					// Function binding: bind:value={getter, setter}
-					const getter = wrapReadsInGet(attr.bindGetter, reactiveVars, currentProxyVars);
-					const setter = transformEventHandler(attr.bindSetter, reactiveVars, currentProxyVars);
+					const getter = wrapReadsInGet(attr.bindGetter, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+					const setter = transformEventHandler(attr.bindSetter, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 					entries.push(`${formatObjectKey(`bind:${attr.bindProperty}`)}: [${getter}, ${setter}]`);
 				} else if (attr.value) {
 					const val = attr.value;
-					const getter = wrapReadsInGet(val, reactiveVars, currentProxyVars);
-					const setter = transformEventHandler(`(v) => ${val} = v`, reactiveVars, currentProxyVars);
+					const getter = wrapReadsInGet(val, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+					const setter = transformEventHandler(`(v) => ${val} = v`, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 					entries.push(`${formatObjectKey(`bind:${attr.bindProperty}`)}: [() => ${getter}, ${setter}]`);
 				}
 			}
@@ -344,7 +357,7 @@ function emitChildrenArray(children: JSXNodeIR[], reactiveVars: Set<string>, ind
 }
 
 function emitChildExpression(node: JSXExpressionIR, reactiveVars: Set<string>): string {
-	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars);
+	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 	if (wrapped !== node.raw || containsReactiveVar(node.raw, reactiveVars)) {
 		return `() => ${wrapped}`;
 	}
@@ -370,14 +383,14 @@ function emitCFCallback(
 	const arrow = params ? `(${params}) =>` : `() =>`;
 	const bodyExpr = emitBranchReturn(children, reactiveVars, indent);
 	if (preamble) {
-		const transformedPreamble = transformBodyStatement(preamble, reactiveVars, undefined, currentProxyVars);
+		const transformedPreamble = transformBodyStatement(preamble, reactiveVars, undefined, currentProxyVars, currentDirectMemberAccessVars);
 		return `${arrow} { ${transformedPreamble} return ${bodyExpr}; }`;
 	}
 	return `${arrow} ${bodyExpr}`;
 }
 
 function emitIfBlock(node: JSXIfBlockIR, reactiveVars: Set<string>, indent: string): string {
-	const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentProxyVars);
+	const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 	const trueCallback = emitCFCallback(node.trueBranch, reactiveVars, indent, undefined, node.truePreamble);
 
 	let result = `$.if(() => ${condExpr}, ${trueCallback}`;
@@ -391,14 +404,14 @@ function emitIfBlock(node: JSXIfBlockIR, reactiveVars: Set<string>, indent: stri
 
 function emitForBlock(node: JSXForBlockIR, reactiveVars: Set<string>, indent: string): string {
 	const collExpr = node.collection.trimStart().startsWith('{')
-		? transformBodyStatement(node.collection, reactiveVars, undefined, currentProxyVars)
-		: wrapReadsInGet(node.collection, reactiveVars, currentProxyVars);
+		? transformBodyStatement(node.collection, reactiveVars, undefined, currentProxyVars, currentDirectMemberAccessVars)
+		: wrapReadsInGet(node.collection, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 	const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
 	const bodyCallback = emitCFCallback(node.body, reactiveVars, indent, params, node.preamble);
 
 	let result = `$.for(() => ${collExpr}, ${bodyCallback}`;
 	if (node.keyExpr) {
-		const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentProxyVars);
+		const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 		result += `, (${node.itemName}) => ${keyExpr}`;
 	}
 	result += ')';
@@ -406,7 +419,7 @@ function emitForBlock(node: JSXForBlockIR, reactiveVars: Set<string>, indent: st
 }
 
 function emitSwitchBlock(node: JSXSwitchBlockIR, reactiveVars: Set<string>, indent: string): string {
-	const discExpr = wrapReadsInGet(node.discriminant, reactiveVars, currentProxyVars);
+	const discExpr = wrapReadsInGet(node.discriminant, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 
 	const caseStrs: string[] = [];
 	for (const c of node.cases) {
@@ -443,8 +456,8 @@ function emitTryBlock(node: JSXTryBlockIR, reactiveVars: Set<string>, indent: st
 function emitAnonymousBlock(node: JSXAnonymousBlockIR, reactiveVars: Set<string>, indent: string): string {
 	const bodyExpr = emitBranchReturn(node.children, reactiveVars, indent);
 	if (node.preamble) {
-		const transformedPreamble = transformBodyStatement(node.preamble, reactiveVars, undefined, currentProxyVars);
-		return `(() => { ${transformedPreamble} return ${bodyExpr}; })()`;
+		const transformedPreamble = transformBodyStatement(node.preamble, reactiveVars, undefined, currentProxyVars, currentDirectMemberAccessVars);
+		return `() => { ${transformedPreamble} return ${bodyExpr}; }`;
 	}
 	return bodyExpr;
 }

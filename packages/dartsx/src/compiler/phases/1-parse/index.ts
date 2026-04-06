@@ -110,7 +110,12 @@ export function preprocess(source: string): PreprocessResult {
 		},
 	);
 
-	// 3. Transform `derived varName = expr` → `const varName /*@d*/ = expr`
+	// 3a. Transform destructured derived declarations into a temp plus
+	//     one derived binding per leaf identifier. This supports nested
+	//     object/array patterns, aliases, defaults, and rest bindings.
+	code = transformDerivedDestructuring(code, derivedVars);
+
+	// 3b. Transform `derived varName = expr` → `const varName /*@d*/ = expr`
 	code = code.replace(
 		/(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)\s*(?==)/g,
 		(_match, exportKw, name) => {
@@ -397,10 +402,249 @@ function skipTemplateLiteral(code: string, start: number): number {
 	return i;
 }
 
+function skipLineComment(code: string, start: number): number {
+	let i = start + 2;
+	while (i < code.length && code[i] !== '\n') i++;
+	return i;
+}
+
+function skipBlockComment(code: string, start: number): number {
+	let i = start + 2;
+	while (i < code.length - 1) {
+		if (code[i] === '*' && code[i + 1] === '/') return i + 2;
+		i++;
+	}
+	return code.length;
+}
+
 // ── Parse with OXC ─────────────────────────────────────────────────
 
 export function parse(filename: string, code: string) {
 	return parseSync(filename, code, { sourceType: 'module', lang: 'tsx' });
+}
+
+function transformDerivedDestructuring(code: string, derivedVars: string[]): string {
+	const derivedRegex = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[{[])/g;
+	let match: RegExpExecArray | null;
+	let result = '';
+	let lastIndex = 0;
+	let counter = 0;
+
+	while ((match = derivedRegex.exec(code)) !== null) {
+		const start = match.index;
+		const exportKw = match[1] || '';
+		let cursor = skipWhitespace(code, start + exportKw.length + 'derived'.length);
+
+		const patternStart = cursor;
+		const open = code[patternStart];
+		if (open !== '{' && open !== '[') continue;
+
+		const patternEnd = open === '{'
+			? findMatchingBrace(code, patternStart)
+			: findMatchingBracket(code, patternStart);
+		if (patternEnd === -1) continue;
+
+		cursor = skipWhitespace(code, patternEnd + 1);
+		if (code[cursor] !== '=') continue;
+
+		const exprStart = skipWhitespace(code, cursor + 1);
+		const exprEnd = findStatementEnd(code, exprStart);
+		const pattern = code.slice(patternStart, patternEnd + 1);
+		const expr = code.slice(exprStart, exprEnd).trim();
+
+		result += code.slice(lastIndex, start);
+		result += lowerDerivedPattern(pattern, expr, exportKw, derivedVars, counter++);
+
+		let nextIndex = exprEnd;
+		if (code[nextIndex] === ';') nextIndex++;
+		lastIndex = nextIndex;
+		derivedRegex.lastIndex = nextIndex;
+	}
+
+	result += code.slice(lastIndex);
+	return result;
+}
+
+function lowerDerivedPattern(
+	pattern: string,
+	expr: string,
+	exportKw: string,
+	derivedVars: string[],
+	counter: number,
+): string {
+	const tempName = `__derived_${counter}`;
+	const bindings = collectDerivedBindings(pattern, tempName);
+	const lines = [`const ${tempName} = ${expr}`];
+
+	for (const binding of bindings) {
+		derivedVars.push(binding.name);
+		lines.push(`${exportKw}const ${binding.name} ${DERIVED_MARKER} = ${binding.expr}`);
+	}
+
+	return lines.join(';\n\t');
+}
+
+function collectDerivedBindings(pattern: string, baseExpr: string): Array<{ name: string; expr: string }> {
+	const source = `const ${pattern} = __source__`;
+	const parsed = parseSync('derived-pattern.ts', source, { sourceType: 'module', lang: 'tsx' });
+	const stmt = parsed.program.body[0] as any;
+	const decl = stmt?.declarations?.[0];
+	const bindings: Array<{ name: string; expr: string }> = [];
+	collectDerivedBindingsFromNode(decl?.id, baseExpr, source, bindings);
+	return bindings;
+}
+
+function collectDerivedBindingsFromNode(
+	node: any,
+	baseExpr: string,
+	source: string,
+	bindings: Array<{ name: string; expr: string }>,
+): void {
+	if (!node) return;
+
+	if (node.type === 'Identifier') {
+		bindings.push({ name: node.name, expr: baseExpr });
+		return;
+	}
+
+	if (node.type === 'AssignmentPattern') {
+		const defaultExpr = source.slice(node.right.start, node.right.end);
+		const withDefault = `(() => { const __value = ${baseExpr}; return __value === undefined ? ${defaultExpr} : __value; })()`;
+		collectDerivedBindingsFromNode(node.left, withDefault, source, bindings);
+		return;
+	}
+
+	if (node.type === 'RestElement') {
+		collectRestBindings(node.argument, node, baseExpr, source, bindings);
+		return;
+	}
+
+	if (node.type === 'ObjectPattern') {
+		const excludedKeys = collectObjectRestKeys(node.properties || [], source);
+		for (const prop of node.properties || []) {
+			if (prop?.type === 'RestElement') {
+				collectRestBindings(prop.argument, prop, baseExpr, source, bindings, excludedKeys);
+				continue;
+			}
+			const nextBase = `${baseExpr}${buildObjectPropertyAccess(prop, source)}`;
+			collectDerivedBindingsFromNode(prop?.value, nextBase, source, bindings);
+		}
+		return;
+	}
+
+	if (node.type === 'ArrayPattern') {
+		for (let index = 0; index < (node.elements || []).length; index++) {
+			const element = node.elements[index];
+			if (!element) continue;
+			if (element.type === 'RestElement' && element.argument?.type === 'Identifier') {
+				bindings.push({ name: element.argument.name, expr: `${baseExpr}.slice(${index})` });
+				continue;
+			}
+			const nextBase = `${baseExpr}[${index}]`;
+			collectDerivedBindingsFromNode(element, nextBase, source, bindings);
+		}
+	}
+}
+
+function collectRestBindings(
+	argument: any,
+	node: any,
+	baseExpr: string,
+	source: string,
+	bindings: Array<{ name: string; expr: string }>,
+	excludedKeys: string[] = [],
+): void {
+	if (argument?.type === 'Identifier') {
+		if (node?.type === 'RestElement' && excludedKeys.length > 0) {
+			const deletes = excludedKeys.map((key) => `delete __rest[${key}];`).join(' ');
+			bindings.push({
+				name: argument.name,
+				expr: `(() => { const __rest = { ...(${baseExpr} ?? {}) }; ${deletes} return __rest; })()`,
+			});
+			return;
+		}
+		bindings.push({ name: argument.name, expr: baseExpr });
+		return;
+	}
+
+	collectDerivedBindingsFromNode(argument, baseExpr, source, bindings);
+}
+
+function buildObjectPropertyAccess(prop: any, source: string): string {
+	if (prop.computed) {
+		return `[${source.slice(prop.key.start, prop.key.end)}]`;
+	}
+
+	if (prop.key?.type === 'Identifier') {
+		return `.${prop.key.name}`;
+	}
+
+	return `[${source.slice(prop.key.start, prop.key.end)}]`;
+}
+
+function collectObjectRestKeys(properties: any[], source: string): string[] {
+	const keys: string[] = [];
+	for (const prop of properties) {
+		if (!prop || prop.type === 'RestElement') continue;
+		if (prop.computed) {
+			keys.push(source.slice(prop.key.start, prop.key.end));
+			continue;
+		}
+		if (prop.key?.type === 'Identifier') {
+			keys.push(JSON.stringify(prop.key.name));
+			continue;
+		}
+		keys.push(source.slice(prop.key.start, prop.key.end));
+	}
+	return keys;
+}
+
+
+function skipWhitespace(code: string, index: number): number {
+	let i = index;
+	while (i < code.length && /\s/.test(code[i])) i++;
+	return i;
+}
+
+function findStatementEnd(code: string, start: number): number {
+	let parenDepth = 0;
+	let bracketDepth = 0;
+	let braceDepth = 0;
+	let i = start;
+
+	while (i < code.length) {
+		const ch = code[i];
+		if (ch === '\'' || ch === '"') {
+			i = skipString(code, i);
+			continue;
+		}
+		if (ch === '`') {
+			i = skipTemplateLiteral(code, i);
+			continue;
+		}
+		if (ch === '/' && code[i + 1] === '/') {
+			i = skipLineComment(code, i);
+			continue;
+		}
+		if (ch === '/' && code[i + 1] === '*') {
+			i = skipBlockComment(code, i);
+			continue;
+		}
+		if (ch === '(') parenDepth++;
+		else if (ch === ')') parenDepth--;
+		else if (ch === '[') bracketDepth++;
+		else if (ch === ']') bracketDepth--;
+		else if (ch === '{') braceDepth++;
+		else if (ch === '}') {
+			if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
+			braceDepth--;
+		}
+		else if (ch === ';' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
+		else if (ch === '\n' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
+		i++;
+	}
+
+	return i;
 }
 
 // ── Control flow block transformation ──────────────────────────────
@@ -923,6 +1167,25 @@ function findMatchingBrace(code: string, openPos: number): number {
 		const ch = code[i];
 		if (ch === '{') depth++;
 		else if (ch === '}') depth--;
+		else if (ch === "'" || ch === '"') {
+			i = skipString(code, i);
+			continue;
+		} else if (ch === '`') {
+			i = skipTemplateLiteral(code, i);
+			continue;
+		}
+		i++;
+	}
+	return i - 1;
+}
+
+function findMatchingBracket(code: string, openPos: number): number {
+	let depth = 1;
+	let i = openPos + 1;
+	while (i < code.length && depth > 0) {
+		const ch = code[i];
+		if (ch === '[') depth++;
+		else if (ch === ']') depth--;
 		else if (ch === "'" || ch === '"') {
 			i = skipString(code, i);
 			continue;

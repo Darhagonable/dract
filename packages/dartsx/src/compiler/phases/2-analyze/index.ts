@@ -9,11 +9,16 @@ import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
 
 // ── IR Types ───────────────────────────────────────────────────────
 
+export type DeclEntry =
+	| { kind: 'state'; name: string; initExpr: string }
+	| { kind: 'derived'; name: string; expr: string; raw?: boolean }
+	| { kind: 'body'; text: string };
+
 export interface ComponentIR {
 	meta: ComponentMeta;
 	params: ParamIR[];
 	stateVars: { name: string; initExpr: string }[];
-	derivedVars: { name: string; expr: string }[];
+	derivedVars: { name: string; expr: string; raw?: boolean }[];
 	/** All variable names that are reactive (state + derived + bind props) */
 	reactiveVars: Set<string>;
 	/** State vars whose $.state() returns a proxy (object/array init) — skip $.get/$.set */
@@ -21,6 +26,8 @@ export interface ComponentIR {
 	jsx: JSXNodeIR;
 	/** Raw non-JSX statements between state/derived and render (to preserve) */
 	bodyStatements: string[];
+	/** All declarations in source order */
+	orderedDecls: DeclEntry[];
 }
 
 export interface ParamIR {
@@ -616,10 +623,11 @@ function analyzeComponent(
 ): ComponentIR {
 	const params: ParamIR[] = [];
 	const stateVars: { name: string; initExpr: string }[] = [];
-	const derivedVars: { name: string; expr: string }[] = [];
+	const derivedVars: { name: string; expr: string; raw?: boolean }[] = [];
 	const reactiveVars = new Set<string>(crossFileReactiveVars);
 	const proxyVars = new Set<string>();
 	const bodyStatements: string[] = [];
+	const orderedDecls: DeclEntry[] = [];
 	let jsx: JSXNodeIR | null = null;
 
 	// Get per-component rename map
@@ -641,22 +649,34 @@ function analyzeComponent(
 			if (stmt.type === 'VariableDeclaration') {
 				for (const decl of stmt.declarations) {
 					const name = decl.id?.name;
-					if (!name) continue;
+					if (!name) {
+						// Destructuring pattern or other non-simple binding — preserve as body statement
+						bodyStatements.push(source.slice(stmt.start, stmt.end));
+						orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
+						break;
+					}
 
 					const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
 
 					if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
 						const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
 						stateVars.push({ name, initExpr });
+						orderedDecls.push({ kind: 'state', name, initExpr });
 						reactiveVars.add(name);
 						if (decl.init && isProxyInit(decl.init)) proxyVars.add(name);
 					} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
 						const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
 						derivedVars.push({ name, expr });
+						orderedDecls.push({ kind: 'derived', name, expr });
 						reactiveVars.add(name);
+					} else if (name.startsWith('__derived_')) {
+						const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+						derivedVars.push({ name, expr, raw: true });
+						orderedDecls.push({ kind: 'derived', name, expr, raw: true });
 					} else {
 						// Normal variable — preserve
 						bodyStatements.push(source.slice(stmt.start, stmt.end));
+						orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
 					}
 				}
 			} else if (stmt.type === 'ReturnStatement' && stmt.argument) {
@@ -670,6 +690,7 @@ function analyzeComponent(
 			} else {
 				// Other statements — preserve as-is
 				bodyStatements.push(source.slice(stmt.start, stmt.end));
+				orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
 			}
 		}
 	}
@@ -678,7 +699,7 @@ function analyzeComponent(
 		jsx = { type: 'fragment', children: [] };
 	}
 
-	return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, proxyVars, jsx, bodyStatements };
+	return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, proxyVars, jsx, bodyStatements, orderedDecls };
 }
 
 function analyzeParam(param: any, source: string, renamedParams: Record<string, string>): ParamIR {

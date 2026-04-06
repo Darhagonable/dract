@@ -3,7 +3,6 @@ import { effect } from 'dartsx'
 
 function App() {
     let obj = $.state({ count: 0 });
-
     effect($.derived(() => obj.count), (count, prevCount) => {
     console.log(count);
   })

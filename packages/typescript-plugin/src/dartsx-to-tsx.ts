@@ -35,7 +35,8 @@ export function isDarTsxFile(content: string): boolean {
 	return /\bcomponent\s+\w+\s*\(/.test(sample)
 		|| /\bstate\s+\w+\s*=/.test(sample)
 		|| /\bderived\s+\w+\s*=/.test(sample)
-		|| /\brender\s*\(/.test(sample)
+		|| /\bderived\s+[{[]/.test(sample)
+		|| /\brender\s*[(<]/.test(sample)
 		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
 }
 
@@ -270,9 +271,19 @@ function transformStateDeclarations(ms: MagicString, source: string): void {
 // ── derived x = → const x = ───────────────────────────────────────
 
 function transformDerivedDeclarations(ms: MagicString, source: string): void {
+	// Simple: derived varName = expr
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(\s+\w+\s*)(?==)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
+		const derivedStart = match.index + (match[1]?.length ?? 0);
+		const derivedEnd = derivedStart + 'derived'.length;
+		ms.overwrite(derivedStart, derivedEnd, 'const');
+	}
+
+	// Destructuring: derived { ... } = expr  or  derived [ ... ] = expr
+	// Only the keyword needs rewriting here; TS can parse the rest natively.
+	const reDestructure = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[{[])/g;
+	while ((match = reDestructure.exec(source)) !== null) {
 		const derivedStart = match.index + (match[1]?.length ?? 0);
 		const derivedEnd = derivedStart + 'derived'.length;
 		ms.overwrite(derivedStart, derivedEnd, 'const');
@@ -282,6 +293,7 @@ function transformDerivedDeclarations(ms: MagicString, source: string): void {
 // ── render (...) → return (<>...</>) ───────────────────────────────
 
 function transformRenderBlocks(ms: MagicString, source: string): void {
+	// render (...) → return (<>...</>)
 	const re = /\brender\s*\(/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
@@ -296,6 +308,12 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 
 		// ) → </>)
 		ms.appendLeft(closeParen, '</>');
+	}
+
+	// render <JSX> → return <JSX> (inline render without parentheses)
+	const reInline = /\brender(\s+)(?=<)/g;
+	while ((match = reInline.exec(source)) !== null) {
+		ms.overwrite(match.index, match.index + 'render'.length, 'return');
 	}
 }
 

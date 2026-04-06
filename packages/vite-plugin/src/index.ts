@@ -6,7 +6,8 @@ function isDarTsxSource(code: string): boolean {
 	const sample = code.slice(0, 4096);
 	return /\bcomponent\s+\w+\s*\(/.test(sample)
 		|| /\bstate\s+\w+\s*=/.test(sample)
-		|| /\bderived\s+\w+\s*=/.test(sample);
+		|| /\bderived\s+\w+\s*=/.test(sample)
+		|| /\bderived\s+[{[]/.test(sample);
 }
 
 function extractImportSpecifiers(code: string): string[] {
