@@ -1,6 +1,6 @@
 // ── Reactive context tracking ──────────────────────────────────────
 
-import { proxy, isProxy } from './proxy';
+import { proxy, isProxy, getSignalTarget, getProxyState, signalProxy } from './proxy';
 import { getDerived, isDerived, type Derived } from './derived';
 import { scheduleEffect } from './scheduler';
 
@@ -63,20 +63,54 @@ export function isState<T>(value: Signal<T> | T): value is State<T> {
 
 // ── $.state(initialValue) ──────────────────────────────────────────
 //
-// Primitives → State (use get/set to read/write)
-// Objects    → Proxy  (property access is reactive)
+// Always returns a State signal.
+// Objects/arrays → signalProxy: deep access (user.name, items[0]) goes
+// through the proxy; root reads use $.get(), root reassignment uses $.set().
+// Primitives → plain State signal.
 
-export function state<T extends object>(initialValue: T): T;
-export function state<T>(initialValue: T): State<T>;
-export function state<T>(initialValue: T): T | State<T> {
-	if (typeof initialValue === 'object' && initialValue !== null) {
-		// Already proxied → wrap in State (reassignable object pattern)
-		if (isProxy(initialValue)) {
-			return { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
-		}
-		return proxy(initialValue);
+/**
+ * Bridge a proxy's root signal to a State signal so that deep mutations
+ * (e.g. user.name = 'Bob') also notify the State signal's subscribers.
+ */
+function bridgeProxyToSignal(proxyValue: any, sig: State): void {
+	const proxySig = getProxyState(proxyValue);
+	if (!proxySig) return;
+	const bridge: Subscriber = {
+		run() { notify(sig); },
+		dirty: false,
+		deps: new Set(),
+	};
+	proxySig.subs.add(bridge);
+}
+
+export function state<T>(initialValue: T): State<T> {
+	const sig: State<T> = { v: undefined as T, version: 0, subs: new Set(), [SIGNAL]: true };
+
+	// Object/array: create proxy, then share subs between proxy root & State signal
+	const v = (typeof initialValue === 'object' && initialValue !== null && !isProxy(initialValue))
+		? proxy(initialValue)
+		: initialValue;
+	sig.v = v;
+
+	// Bridge: proxy root mutations should notify the State signal
+	if (typeof v === 'object' && v !== null && isProxy(v)) {
+		bridgeProxyToSignal(v, sig);
 	}
-	return { v: initialValue, version: 0, subs: new Set(), [SIGNAL]: true };
+
+	// Object/array state: wrap in signalProxy so deep access works directly
+	if (typeof v === 'object' && v !== null) {
+		return signalProxy(sig, (raw) => {
+			// Track the read so effects/deriveds subscribe to root changes
+			const sub = currentSubscriber;
+			if (sub) {
+				raw.subs.add(sub);
+				sub.deps.add(raw);
+			}
+			return raw.v;
+		});
+	}
+
+	return sig;
 }
 
 // ── $.get(signal) ──────────────────────────────────────────────────
@@ -84,6 +118,9 @@ export function state<T>(initialValue: T): T | State<T> {
 export function get<T>(signal: Signal<T> | T): T {
 	// Passthrough for non-signal values
 	if (!isSignal(signal)) return signal;
+
+	// Unwrap signal proxies to access the raw signal
+	signal = getSignalTarget(signal);
 
 	// Derived — use getDerived for lazy evaluation
 	if (isDerived(signal)) {
@@ -103,6 +140,9 @@ export function set<T>(signal: Signal<T> | T, value: T): T {
 	// Passthrough for non-signal values
 	if (!isSignal(signal)) return value;
 
+	// Unwrap signal proxies
+	signal = getSignalTarget(signal);
+
 	// Bind-derived with custom setter: delegate to parent's setter
 	if (signal[SETTER]) {
 		signal[SETTER](value);
@@ -112,6 +152,10 @@ export function set<T>(signal: Signal<T> | T, value: T): T {
 	const stored = (typeof value === 'object' && value !== null) ? proxy(value) : value;
 	if (Object.is(signal.v, stored)) return value;
 	signal.v = stored;
+	// Re-bridge new proxy to signal so future mutations notify subscribers
+	if (typeof stored === 'object' && stored !== null && isProxy(stored)) {
+		bridgeProxyToSignal(stored, signal);
+	}
 	notify(signal);
 	return value;
 }

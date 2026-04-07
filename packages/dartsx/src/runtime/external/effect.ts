@@ -22,10 +22,9 @@ function runCleanups(ctx: EffectContext): void {
 
 /** Resolve a dep (State, Derived, or proxy) to a State for subscription */
 function resolveSignal(dep: any): State {
-	// State or Derived
+	// State or Derived — unwrap signalProxy to get raw signal
 	if (isSignal(dep)) {
-		if (isDerived(dep)) return getSignalTarget(dep);
-		return dep;
+		return getSignalTarget(dep);
 	}
 	// Proxy → get its root state
 	if (isProxy(dep)) {
@@ -38,7 +37,10 @@ function resolveSignal(dep: any): State {
 /** Read the current value of a dep (signal value, or the raw target for proxies) */
 function readDep(dep: any) {
 	if (isSignal(dep)) {
-		return get(dep);
+		const val = get(dep);
+		// If the signal holds a proxy, return its raw target for comparison
+		if (isProxy(val)) return val[RAW];
+		return val;
 	}
 	if (isProxy(dep)) {
 		return dep[RAW];
@@ -50,6 +52,11 @@ function readDep(dep: any) {
 function snapshotDep(dep: any) {
 	if (isProxy(dep)) {
 		return structuredClone(dep[RAW]);
+	}
+	if (isSignal(dep)) {
+		const val = get(dep);
+		if (isProxy(val)) return structuredClone(val[RAW]);
+		return val;
 	}
 	return readDep(dep);
 }
@@ -87,12 +94,19 @@ export function effect<T extends unknown>(
 
 		const sub: Subscriber = {
 			run() {
+				const newVals = deps.map(readDep);
+
+				// Skip if no dep actually changed (can happen with derived chain propagation)
+				if (!firstRun && newVals.every((v, i) => Object.is(v, oldVals[i]))) {
+					sub.dirty = false;
+					return;
+				}
+
 				runCleanups(ctx);
 
 				const prevEffect = currentEffect;
 				currentEffect = ctx;
 
-				const newVals = deps.map(readDep);
 				const pairs = deps.map((_, i) => [newVals[i], oldVals[i]]);
 				callback(...pairs);
 
@@ -104,12 +118,15 @@ export function effect<T extends unknown>(
 			dirty: true,
 		};
 
+		let firstRun = true;
+
 		for (const sig of signals) {
 			sig.subs.add(sub);
 			sub.deps.add(sig);
 		}
 
 		sub.run();
+		firstRun = false;
 
 		// Auto-dispose when the owning component unmounts
 		const componentCtx = getCurrentComponent();
@@ -128,12 +145,19 @@ export function effect<T extends unknown>(
 
 		const sub: Subscriber = {
 			run() {
+				const newVal = readDep(dep);
+
+				// Skip if dep value didn't actually change (can happen with derived chain propagation)
+				if (!firstRun && Object.is(newVal, oldVal)) {
+					sub.dirty = false;
+					return;
+				}
+
 				runCleanups(ctx);
 
 				const prevEffect = currentEffect;
 				currentEffect = ctx;
 
-				const newVal = readDep(dep);
 				callback(newVal, oldVal);
 
 				currentEffect = prevEffect;
@@ -144,10 +168,13 @@ export function effect<T extends unknown>(
 			dirty: true,
 		};
 
+		let firstRun = true;
+
 		sig.subs.add(sub);
 		sub.deps.add(sig);
 
 		sub.run();
+		firstRun = false;
 
 		// Auto-dispose when the owning component unmounts
 		const componentCtx = getCurrentComponent();

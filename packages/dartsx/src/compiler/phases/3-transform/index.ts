@@ -277,15 +277,17 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 	switch (attr.kind) {
 		case 'static': {
 			const val = attr.value === 'true' ? 'true' : JSON.stringify(attr.value || '');
-			entries.push(isComponent ? `${key}: () => ${val}` : `${key}: ${val}`);
+			entries.push(`${key}: ${val}`);
 			break;
 		}
 		case 'dynamic': {
 			const wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-			if (isComponent) {
-				entries.push(`${key}: () => ${wrapped}`);
-			} else if (wrapped !== (attr.value || '') || containsReactiveVar(attr.value || '', reactiveVars)) {
-				entries.push(`${key}: () => ${wrapped}`);
+			const isReactive = wrapped !== (attr.value || '') || containsReactiveVar(attr.value || '', reactiveVars);
+			if (isReactive && isComponent) {
+				// Use object getter so callback functions aren't confused with reactive getters
+				entries.push(`get ${key}() { return ${wrapped}; }`);
+			} else if (isReactive) {
+				entries.push(`${key}: () => ${wrapArrowBody(wrapped)}`);
 			} else {
 				entries.push(`${key}: ${attr.value}`);
 			}
@@ -359,7 +361,7 @@ function emitChildrenArray(children: JSXNodeIR[], reactiveVars: Set<string>, ind
 function emitChildExpression(node: JSXExpressionIR, reactiveVars: Set<string>): string {
 	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
 	if (wrapped !== node.raw || containsReactiveVar(node.raw, reactiveVars)) {
-		return `() => ${wrapped}`;
+		return `() => ${wrapArrowBody(wrapped)}`;
 	}
 	return node.raw;
 }
@@ -481,6 +483,13 @@ function containsReactiveVar(expr: string, reactiveVars: Set<string>): boolean {
 		if (re.test(expr)) return true;
 	}
 	return false;
+}
+
+/** Parenthesize an expression if it starts with `{` so `() => {...}` becomes `() => ({...})` */
+function wrapArrowBody(expr: string): string {
+	const trimmed = expr.trimStart();
+	if (trimmed.startsWith('{')) return `(${expr})`;
+	return expr;
 }
 
 function formatObjectKey(key: string): string {

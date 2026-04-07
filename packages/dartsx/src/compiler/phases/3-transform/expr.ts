@@ -110,8 +110,6 @@ export function wrapReadsInGet(
 
 	walk(ast, (node, parent, key) => {
 		if (node.type === 'Identifier' && reactiveVars.has(node.name)) {
-			// Skip proxy vars — proxy traps handle reactivity directly
-			if (proxyVars?.has(node.name)) return;
 			// Skip the root object of a member expression (obj.count / obj[expr]).
 			// Object-valued reactive roots are proxy-backed at runtime, so member
 			// access should stay as `obj.prop`, not `$.get(obj).prop`.
@@ -122,11 +120,20 @@ export function wrapReadsInGet(
 			if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) {
 				return;
 			}
+			// Skip the key side of a shorthand property — we handle it via the value side
+			if (parent?.type === 'Property' && parent.shorthand && key === 'key') {
+				return;
+			}
 			const id = node;
 			// Offset from wrapper
 			const start = id.start - WRAPPER_OFFSET;
 			const end = id.end - WRAPPER_OFFSET;
-			replacements.push({ start, end, text: `$.get(${id.name})` });
+			// Expand shorthand properties: { label } → { label: $.get(label) }
+			if (parent?.type === 'Property' && parent.shorthand && key === 'value') {
+				replacements.push({ start, end, text: `${id.name}: $.get(${id.name})` });
+			} else {
+				replacements.push({ start, end, text: `$.get(${id.name})` });
+			}
 		}
 	});
 
@@ -210,7 +217,7 @@ function transformExpr(
 	if (node.type === 'UpdateExpression') {
 		const update = node;
 		const arg = update.argument;
-		if (arg.type === 'Identifier' && reactiveVars.has(arg.name) && !proxyVars?.has(arg.name)) {
+		if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) {
 			const name = arg.name;
 			const delta = update.operator === '++' ? '+ 1' : '- 1';
 			return `$.set(${name}, $.get(${name}) ${delta})`;
@@ -221,7 +228,7 @@ function transformExpr(
 	if (node.type === 'AssignmentExpression') {
 		const assign = node;
 		const left = assign.left;
-		if (left.type === 'Identifier' && reactiveVars.has(left.name) && !proxyVars?.has(left.name)) {
+		if (left.type === 'Identifier' && reactiveVars.has(left.name)) {
 			const name = left.name;
 			const rhsStart = assign.right.start - WRAPPER_OFFSET;
 			const rhsEnd = assign.right.end - WRAPPER_OFFSET;
@@ -422,7 +429,7 @@ export function transformBodyStatement(
 	walk(result.program, (node, parent, key) => {
 		if (node.type === 'AssignmentExpression') {
 			const left = node.left;
-			if (left?.type === 'Identifier' && allReactiveVars.has(left.name) && !proxyVars?.has(left.name)) {
+			if (left?.type === 'Identifier' && allReactiveVars.has(left.name)) {
 				const name = left.name;
 				const rhsSource = stmt.slice(s(node.right.start), s(node.right.end));
 				const wrappedRhs = wrapReadsInGet(rhsSource, allReactiveVars, proxyVars, allDirectMemberAccessVars);
@@ -438,7 +445,7 @@ export function transformBodyStatement(
 
 		if (node.type === 'UpdateExpression') {
 			const arg = node.argument;
-			if (arg?.type === 'Identifier' && allReactiveVars.has(arg.name) && !proxyVars?.has(arg.name)) {
+			if (arg?.type === 'Identifier' && allReactiveVars.has(arg.name)) {
 				const delta = node.operator === '++' ? '+ 1' : '- 1';
 				replacements.push({
 					start: s(node.start),
@@ -453,8 +460,6 @@ export function transformBodyStatement(
 	// Pass 2: Identifier reads not already covered by assignment/update transforms
 	walk(result.program, (node, parent, key) => {
 		if (node.type !== 'Identifier' || !allReactiveVars.has(node.name)) return;
-		// Skip proxy vars — proxy traps handle reactivity directly
-		if (proxyVars?.has(node.name)) return;
 		// Skip assignment LHS
 		if (parent?.type === 'AssignmentExpression' && key === 'left') return;
 		// Skip update argument
