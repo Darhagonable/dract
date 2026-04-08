@@ -1,7 +1,9 @@
 // ── JSX runtime ────────────────────────────────────────────────────
 
+import clsx from 'clsx';
 import { effect } from '../reactivity/effect';
 import { applyBinding } from '../bindings';
+import { setValueForStyles } from './style';
 import { getCurrentComponent, setCurrentComponent, type ComponentContext } from '../context';
 
 // ── Fragment sentinel ──────────────────────────────────────────────
@@ -122,6 +124,18 @@ function applyProp(el: Element, key: string, value: any): void {
 
 	// Dynamic attribute (function → reactive)
 	if (typeof value === 'function') {
+		// Style objects need prevStyles tracking for proper diffing
+		if (key === 'style') {
+			let prevStyles: Record<string, any> | null = null;
+			effect(() => {
+				const nextStyles = value();
+				if (typeof nextStyles === 'object' && nextStyles !== null && !Array.isArray(nextStyles)) {
+					setValueForStyles(el as HTMLElement, nextStyles, prevStyles);
+					prevStyles = nextStyles;
+				}
+			});
+			return;
+		}
 		effect(() => {
 			setAttribute(el, key, value());
 		});
@@ -142,6 +156,23 @@ function setAttribute(el: Element, name: string, value: any): void {
 		} else {
 			el.setAttribute(name, String(value));
 		}
+		return;
+	}
+
+	// class: support objects, arrays, and strings via clsx
+	if (name === 'class') {
+		const classValue = typeof value === 'string' ? value : clsx(value);
+		if (classValue) {
+			el.setAttribute('class', classValue);
+		} else {
+			el.removeAttribute('class');
+		}
+		return;
+	}
+
+	// style: support objects with camelCase properties
+	if (name === 'style' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+		setValueForStyles(el as HTMLElement, value);
 		return;
 	}
 

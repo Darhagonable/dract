@@ -12,9 +12,9 @@ export component Dashboard() {
 
   render (
     <div class="dashboard">
-      <h2>Dashboard (cross-file reactivity)</h2>
+      <h2 style={{backgroundColor: "red"}}>Dashboard (cross-file reactivity)</h2>
       <p>Count: {count}</p>
-      <button onclick={increment}>Increment</button>
+      <button class={["increment-button"]} onclick={increment}>Increment</button>
       <hr />
       <p>User: {displayName}</p>
       <p>Age: {user.age}</p>

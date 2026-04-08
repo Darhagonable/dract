@@ -636,6 +636,16 @@ export type AriaRole =
 	| 'treeitem'
 	| (string & {});
 
+/**
+ * CSS style object — accepts camelCase property names with string or numeric values.
+ * Numeric values are auto-suffixed with 'px' for non-unitless properties.
+ */
+export type CSSProperties = {
+	[K in keyof CSSStyleDeclaration]?: CSSStyleDeclaration[K];
+} & {
+	[key: `--${string}`]: string | number;
+};
+
 export interface HTMLAttributes<T extends EventTarget> extends AriaAttributes, DOMAttributes<T> {
 	// Standard HTML Attributes
 	accesskey?: string | undefined | null;
@@ -664,7 +674,7 @@ export interface HTMLAttributes<T extends EventTarget> extends AriaAttributes, D
 	placeholder?: string | undefined | null;
 	slot?: string | undefined | null;
 	spellcheck?: Booleanish | undefined | null;
-	style?: string | undefined | null;
+	style?: CSSProperties | string | undefined | null;
 	tabindex?: number | undefined | null;
 	title?: string | undefined | null;
 	translate?: 'yes' | 'no' | '' | undefined | null;
@@ -1408,7 +1418,7 @@ export interface SVGAttributes<T extends EventTarget> extends AriaAttributes, DO
 	method?: 'align' | 'stretch' | undefined | null;
 	min?: number | string | undefined | null;
 	name?: string | undefined | null;
-	style?: string | undefined | null;
+	style?: CSSProperties | string | undefined | null;
 	target?: string | undefined | null;
 	type?: string | undefined | null;
 	width?: number | string | undefined | null;
