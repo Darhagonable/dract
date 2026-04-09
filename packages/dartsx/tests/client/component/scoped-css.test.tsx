@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tick } from 'dartsx';
 
 describe('scoped CSS > data attribute injection', () => {
-	it('adds data-dartsx-* attributes to all elements', () => {
+	it('adds data-scope attribute to all elements', () => {
 		component Card() {
 			render (
 				<div>
@@ -21,16 +21,14 @@ describe('scoped CSS > data attribute injection', () => {
 		const h2 = container.querySelector('h2');
 		const p = container.querySelector('p');
 
-		// All elements should have a data-dartsx-* attribute
-		const attrNames = [...div.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		expect(attrNames.length).toBe(1);
-
-		const attr = attrNames[0];
-		expect(h2.hasAttribute(attr)).toBe(true);
-		expect(p.hasAttribute(attr)).toBe(true);
+		// All elements should have a data-scope attribute with a scope hash
+		const hash = div.getAttribute('data-scope');
+		expect(hash).toBeTruthy();
+		expect(h2.getAttribute('data-scope')).toBe(hash);
+		expect(p.getAttribute('data-scope')).toBe(hash);
 	});
 
-	it('adds data attributes to fragment roots', () => {
+	it('adds data-scope to fragment roots', () => {
 		component Multi() {
 			render (
 				<h1>Title</h1>
@@ -45,14 +43,14 @@ describe('scoped CSS > data attribute injection', () => {
 		const h1 = container.querySelector('h1');
 		const p = container.querySelector('p');
 
-		const h1Attrs = [...h1.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		const pAttrs = [...p.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		expect(h1Attrs.length).toBe(1);
-		expect(pAttrs.length).toBe(1);
-		expect(h1Attrs[0]).toBe(pAttrs[0]);
+		const h1Hash = h1.getAttribute('data-scope');
+		const pHash = p.getAttribute('data-scope');
+		expect(h1Hash).toBeTruthy();
+		expect(pHash).toBeTruthy();
+		expect(h1Hash).toBe(pHash);
 	});
 
-	it('adds data attributes to elements inside control flow', async () => {
+	it('adds data-scope to elements inside control flow', async () => {
 		component List() {
 			state items = ['a', 'b']
 			render (
@@ -72,11 +70,11 @@ describe('scoped CSS > data attribute injection', () => {
 		expect(lis.length).toBe(2);
 
 		const ul = container.querySelector('ul');
-		const ulAttr = [...ul.attributes].map(a => a.name).find(n => n.startsWith('data-dartsx-'));
-		expect(ulAttr).toBeTruthy();
+		const hash = ul.getAttribute('data-scope');
+		expect(hash).toBeTruthy();
 
 		for (const li of lis) {
-			expect(li.hasAttribute(ulAttr)).toBe(true);
+			expect(li.getAttribute('data-scope')).toBe(hash);
 		}
 	});
 });
@@ -96,13 +94,13 @@ describe('scoped CSS > style injection', () => {
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		expect(styles.length).toBeGreaterThanOrEqual(1);
 
-		// The style should contain the scoped CSS with data attribute selector
+		// The style should contain the scoped CSS with data-scope selector
 		const styleTexts = [...styles].map(s => s.textContent);
-		const hasScoped = styleTexts.some(t => t.includes('data-dartsx-') && t.includes('color: red'));
+		const hasScoped = styleTexts.some(t => t.includes('data-scope') && t.includes('color: red'));
 		expect(hasScoped).toBe(true);
 	});
 
-	it('does not add data attributes for global style blocks', () => {
+	it('does not add data-scope for global style blocks', () => {
 		component GlobalStyled() {
 			render (
 				<div>Hello</div>
@@ -114,8 +112,7 @@ describe('scoped CSS > style injection', () => {
 
 		mountComponent(GlobalStyled);
 		const div = container.querySelector('div');
-		const dartsxAttrs = [...div.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		expect(dartsxAttrs.length).toBe(0);
+		expect(div.hasAttribute('data-scope')).toBe(false);
 	});
 
 	it('injects global styles without selector rewriting', () => {
@@ -163,8 +160,7 @@ describe('scoped CSS > multiple components', () => {
 			? (globalThis as any).__mount_to(CompA, divA)
 			: (() => { mountComponent(CompA); return { unmount: () => {} }; })();
 
-		const attrA = [...container.querySelector('div').attributes]
-			.map(a => a.name).find(n => n.startsWith('data-dartsx-'));
+		const attrA = container.querySelector('div').getAttribute('data-scope');
 
 		// Mount B in a separate container
 		const divB = document.createElement('div');
@@ -194,12 +190,12 @@ describe('scoped CSS > multiple components', () => {
 
 		mountComponent(MixedStyles);
 
-		// Scoped: div and p should have data attribute
+		// Scoped: div and p should have data-scope attribute
 		const div = container.querySelector('div');
 		const p = container.querySelector('p');
-		const scopeAttr = [...div.attributes].map(a => a.name).find(n => n.startsWith('data-dartsx-'));
-		expect(scopeAttr).toBeTruthy();
-		expect(p.hasAttribute(scopeAttr)).toBe(true);
+		const hash = div.getAttribute('data-scope');
+		expect(hash).toBeTruthy();
+		expect(p.getAttribute('data-scope')).toBe(hash);
 
 		// Global style should be injected without scoping
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
@@ -223,8 +219,8 @@ describe('scoped CSS > selector rewriting', () => {
 		mountComponent(Simple);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
-		// Should have p[data-dartsx-...] not bare p
-		const hasScopedP = styleTexts.some(t => /p\[data-dartsx-\w+\]/.test(t) && t.includes('color: green'));
+		// Should have p[data-scope~="..."] not bare p
+		const hasScopedP = styleTexts.some(t => /p\[data-scope~="?\w+"?\]/.test(t) && t.includes('color: green'));
 		expect(hasScopedP).toBe(true);
 	});
 
@@ -269,7 +265,7 @@ describe('scoped CSS > selector rewriting', () => {
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		const hasScopedMedia = styleTexts.some(t =>
-			t.includes('@media') && /p\[data-dartsx-\w+\]/.test(t)
+			t.includes('@media') && /p\[data-scope~="?\w+"?\]/.test(t)
 		);
 		expect(hasScopedMedia).toBe(true);
 	});
@@ -289,9 +285,9 @@ describe('scoped CSS > selector rewriting', () => {
 		mountComponent(DeepTest);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
-		// Should have div[data-dartsx-...] .child (no attr on .child)
+		// Should have div[data-scope~="..."] .child (no attr on .child)
 		const hasDeep = styleTexts.some(t =>
-			/div\[data-dartsx-\w+\]\s+\.child/.test(t)
+			/div\[data-scope~="?\w+"?\]\s+\.child/.test(t)
 		);
 		expect(hasDeep).toBe(true);
 	});
@@ -311,10 +307,10 @@ describe('scoped CSS > selector rewriting', () => {
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		// :global(body) → bare body selector
-		const hasGlobalBody = styleTexts.some(t => t.includes('body { margin: 0; }') && !t.includes('body[data-dartsx'));
+		const hasGlobalBody = styleTexts.some(t => t.includes('body { margin: 0; }') && !t.includes('body[data-scope'));
 		expect(hasGlobalBody).toBe(true);
 		// p should still be scoped
-		const hasScopedP = styleTexts.some(t => /p\[data-dartsx-\w+\]/.test(t));
+		const hasScopedP = styleTexts.some(t => /p\[data-scope~="?\w+"?\]/.test(t));
 		expect(hasScopedP).toBe(true);
 	});
 });
@@ -338,9 +334,8 @@ describe('scoped CSS > children / slots', () => {
 
 		mountComponent(Parent);
 		const p = container.querySelector('p');
-		const pAttrs = [...p.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		// The <p> was authored by Parent so it should have Parent's scope attr
-		expect(pAttrs.length).toBe(1);
+		// The <p> was authored by Parent so it should have Parent's scope hash
+		expect(p.getAttribute('data-scope')).toBeTruthy();
 	});
 });
 
@@ -372,24 +367,24 @@ describe('scoped CSS > nested style blocks', () => {
 		const outerP = allP[0]; // "Outside"
 		const innerP = allP[1]; // "Inside"
 
-		// Collect scope attrs
-		const outerDivAttrs = [...outerDiv.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		const innerDivAttrs = [...innerDiv.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		const outerPAttrs = [...outerP.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
-		const innerPAttrs = [...innerP.attributes].map(a => a.name).filter(n => n.startsWith('data-dartsx-'));
+		// Collect scope hashes from data-scope (space-separated)
+		const outerDivHashes = (outerDiv.getAttribute('data-scope') || '').split(/\s+/).filter(Boolean);
+		const innerDivHashes = (innerDiv.getAttribute('data-scope') || '').split(/\s+/).filter(Boolean);
+		const outerPHashes = (outerP.getAttribute('data-scope') || '').split(/\s+/).filter(Boolean);
+		const innerPHashes = (innerP.getAttribute('data-scope') || '').split(/\s+/).filter(Boolean);
 
-		// Outer div has only the outer scope attr
-		expect(outerDivAttrs.length).toBe(1);
+		// Outer div has only the outer scope hash
+		expect(outerDivHashes.length).toBe(1);
 
-		// Inner div has both outer and inner scope attrs
-		expect(innerDivAttrs.length).toBe(2);
+		// Inner div has both outer and inner scope hashes
+		expect(innerDivHashes.length).toBe(2);
 
-		// Outer p has only the outer scope attr
-		expect(outerPAttrs.length).toBe(1);
-		expect(outerPAttrs[0]).toBe(outerDivAttrs[0]);
+		// Outer p has only the outer scope hash
+		expect(outerPHashes.length).toBe(1);
+		expect(outerPHashes[0]).toBe(outerDivHashes[0]);
 
-		// Inner p has both scope attrs
-		expect(innerPAttrs.length).toBe(2);
+		// Inner p has both scope hashes
+		expect(innerPHashes.length).toBe(2);
 	});
 });
 
@@ -447,8 +442,8 @@ describe('scoped CSS > reactive CSS values', () => {
 		mountComponent(VarRef);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
-		// Should contain var(--dartsx-...) not the literal expression
-		const hasVar = styleTexts.some(t => /var\(--dartsx-\w+-\d+\)/.test(t));
+		// Should contain var(--color) not the literal expression
+		const hasVar = styleTexts.some(t => /var\(--[a-z][\w-]*\)/.test(t));
 		expect(hasVar).toBe(true);
 	});
 });

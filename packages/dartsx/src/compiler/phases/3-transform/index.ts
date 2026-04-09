@@ -20,7 +20,7 @@ import type {
 	JSXExpressionIR,
 } from '../2-analyze';
 import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from './expr';
-import { scopeHash, scopeAttr, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
+import { scopeHash, scopeAttr, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 
 // Module-level proxy vars for current transform context (avoids threading through every function)
 let currentProxyVars: Set<string> | undefined;
@@ -222,36 +222,13 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	}
 
 	const allCssVars = scopedStyles.flatMap(ss => ss.cssVars);
-	const jsxCode = emitJSXNode(comp.jsx, comp.reactiveVars, '    ');
 
 	if (allCssVars.length > 0) {
-		// Group CSS vars by their scoped selector for surgical per-element placement
-		const varsBySelector = new Map<string, CSSVar[]>();
-		for (const v of allCssVars) {
-			const sel = v.selector || '';
-			if (!varsBySelector.has(sel)) varsBySelector.set(sel, []);
-			varsBySelector.get(sel)!.push(v);
-		}
-
-		lines.push(`    var $$root = ${jsxCode};`);
-		lines.push(`    $.cssVars($$root, [`);
-		for (const [selector, vars] of varsBySelector) {
-			const entries = vars.map(v => {
-				const wrappedExpr = wrapReadsInGet(v.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-				if (v.suffix) {
-					return `            ${JSON.stringify(v.varName)}: () => ${wrappedExpr} + ${JSON.stringify(v.suffix)}`;
-				}
-				return `            ${JSON.stringify(v.varName)}: () => ${wrappedExpr}`;
-			});
-			lines.push(`        [${JSON.stringify(selector)}, {`);
-			lines.push(entries.join(',\n'));
-			lines.push(`        }],`);
-		}
-		lines.push(`    ]);`);
-		lines.push(`    return $$root;`);
-	} else {
-		lines.push(`    return ${jsxCode};`);
+		injectCSSVarsAsStyle(comp.jsx, allCssVars, comp.reactiveVars);
 	}
+
+	const jsxCode = emitJSXNode(comp.jsx, comp.reactiveVars, '    ');
+	lines.push(`    return ${jsxCode};`);
 	lines.push('}');
 	currentDirectMemberAccessVars = undefined;
 	currentScopeAttrs = undefined;
@@ -291,11 +268,7 @@ function processScopeStyles(blocks: StyleBlockIR[], componentName: string, filen
 			continue;
 		}
 		const attr = scopeAttr(hash);
-		const { css: rewrittenCSS, varSelectors } = rewriteScopedCSS(css, hash);
-		// Merge scoped selectors into cssVars for surgical per-element placement
-		for (const v of extracted.cssVars) {
-			v.selector = varSelectors.get(v.varName);
-		}
+		const rewrittenCSS = rewriteScopedCSS(css, hash);
 		results.push({ hash, attr, css: rewrittenCSS, scopePath: block.scopePath, cssVars: extracted.cssVars });
 	}
 	return results;
@@ -347,6 +320,42 @@ function injectScopeAttrsIntoTree(node: JSXNodeIR, styles: ProcessedStyle[]): vo
 }
 
 /**
+ * Inject CSS vars as a reactive `style` attribute on the root element(s).
+ * CSS custom properties inherit, so setting them on the root is sufficient.
+ */
+function injectCSSVarsAsStyle(node: JSXNodeIR, cssVars: CSSVar[], reactiveVars: Set<string>): void {
+	// Build the raw style expression — emitAttr will handle wrapReadsInGet
+	const styleEntries = cssVars.map(v => {
+		const valExpr = v.suffix ? `${v.expr} + ${JSON.stringify(v.suffix)}` : v.expr;
+		return `${JSON.stringify(v.varName)}: ${valExpr}`;
+	});
+	const styleExpr = `{ ${styleEntries.join(', ')} }`;
+
+	function injectOnRoot(n: JSXNodeIR): void {
+		if (n.type === 'element' && !(n as JSXElementIR).isComponent) {
+			(n as JSXElementIR).attributes.push({
+				kind: 'dynamic',
+				name: 'style',
+				value: styleExpr,
+			});
+		} else if (n.type === 'fragment') {
+			// For fragments, inject on each root-level element child
+			for (const child of (n as JSXFragmentIR).children) {
+				if (child.type === 'element' && !(child as JSXElementIR).isComponent) {
+					(child as JSXElementIR).attributes.push({
+						kind: 'dynamic',
+						name: 'style',
+						value: styleExpr,
+					});
+				}
+			}
+		}
+	}
+
+	injectOnRoot(node);
+}
+
+/**
  * Navigate the IR tree following a scopePath to find the target element node.
  * The scopePath is an array of child indices through JSXElement nodes.
  */
@@ -376,52 +385,60 @@ function navigateToNode(node: JSXNodeIR, path: number[]): JSXNodeIR | null {
 	return current;
 }
 
-function injectAttrsRecursive(node: JSXNodeIR, attrs: string[]): void {
+function injectAttrsRecursive(node: JSXNodeIR, hashes: string[]): void {
 	if (node.type === 'element' && !(node as JSXElementIR).isComponent) {
 		const el = node as JSXElementIR;
-		for (const attr of attrs) {
-			el.attributes.push({ kind: 'static', name: attr, value: '' });
+		// Merge hashes into a single data-comp attribute
+		const existing = el.attributes.find(a => a.kind === 'static' && a.name === SCOPE_ATTR);
+		if (existing) {
+			const current = (existing.value || '').split(/\s+/).filter(Boolean);
+			for (const h of hashes) {
+				if (!current.includes(h)) current.push(h);
+			}
+			existing.value = current.join(' ');
+		} else {
+			el.attributes.push({ kind: 'static', name: SCOPE_ATTR, value: hashes.join(' ') });
 		}
 		for (const child of el.children) {
-			injectAttrsRecursive(child, attrs);
+			injectAttrsRecursive(child, hashes);
 		}
 	} else if (node.type === 'element' && (node as JSXElementIR).isComponent) {
 		// Recurse into children of component elements — they were authored by
 		// the parent and should receive the parent's scope attribute.
 		const el = node as JSXElementIR;
 		for (const child of el.children) {
-			injectAttrsRecursive(child, attrs);
+			injectAttrsRecursive(child, hashes);
 		}
 	} else if (node.type === 'fragment') {
 		for (const child of (node as JSXFragmentIR).children) {
-			injectAttrsRecursive(child, attrs);
+			injectAttrsRecursive(child, hashes);
 		}
 	} else if (node.type === 'if_block') {
 		const block = node as JSXIfBlockIR;
-		for (const child of block.trueBranch) injectAttrsRecursive(child, attrs);
+		for (const child of block.trueBranch) injectAttrsRecursive(child, hashes);
 		if (block.falseBranch) {
-			for (const child of block.falseBranch) injectAttrsRecursive(child, attrs);
+			for (const child of block.falseBranch) injectAttrsRecursive(child, hashes);
 		}
 	} else if (node.type === 'for_block') {
 		const block = node as JSXForBlockIR;
-		for (const child of block.body) injectAttrsRecursive(child, attrs);
+		for (const child of block.body) injectAttrsRecursive(child, hashes);
 	} else if (node.type === 'switch_block') {
 		const block = node as JSXSwitchBlockIR;
 		for (const c of block.cases) {
-			for (const child of c.body) injectAttrsRecursive(child, attrs);
+			for (const child of c.body) injectAttrsRecursive(child, hashes);
 		}
 	} else if (node.type === 'try_block') {
 		const block = node as JSXTryBlockIR;
-		for (const child of block.tryBranch) injectAttrsRecursive(child, attrs);
+		for (const child of block.tryBranch) injectAttrsRecursive(child, hashes);
 		if (block.catchBranch) {
-			for (const child of block.catchBranch) injectAttrsRecursive(child, attrs);
+			for (const child of block.catchBranch) injectAttrsRecursive(child, hashes);
 		}
 		if (block.pendingBranch) {
-			for (const child of block.pendingBranch) injectAttrsRecursive(child, attrs);
+			for (const child of block.pendingBranch) injectAttrsRecursive(child, hashes);
 		}
 	} else if (node.type === 'anonymous_block') {
 		const block = node as JSXAnonymousBlockIR;
-		for (const child of block.children) injectAttrsRecursive(child, attrs);
+		for (const child of block.children) injectAttrsRecursive(child, hashes);
 	}
 }
 
@@ -732,11 +749,11 @@ function wrapArrowBody(expr: string): string {
 
 /**
  * Inject scope data attributes into JSX opening tags within a source expression.
- * Handles JSX like `<th>Name</th>` → `<th data-dartsx-abc="">Name</th>`.
+ * Handles JSX like `<th>Name</th>` → `<th data-comp="abc">Name</th>`.
  * Only injects into HTML element tags (lowercase), not component tags (uppercase).
  */
 function injectScopeAttrsIntoJSXSource(source: string, scopeAttrs: string[]): string {
-	const attrStr = scopeAttrs.map(a => ` ${a}=""`).join('');
+	const attrStr = ` ${SCOPE_ATTR}="${scopeAttrs.join(' ')}"`;
 	// Match JSX opening tags: <tagname (lowercase start), capture up to > or />
 	return source.replace(/<([a-z][a-zA-Z0-9]*)([\s/>])/g, (match, tag, after) => {
 		return `<${tag}${attrStr}${after}`;

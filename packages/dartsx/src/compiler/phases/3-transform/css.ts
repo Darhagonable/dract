@@ -10,7 +10,7 @@
  * - @keyframes name hash-prefixing
  * - :global() extraction
  * - :deep() handling
- * - Reactive CSS variable extraction ({expression} → var(--dartsx-hash-N))
+ * - Reactive CSS variable extraction ({expression} → var(--readable-name))
  */
 import postcss from 'postcss';
 import selectorParser from 'postcss-selector-parser';
@@ -30,10 +30,15 @@ export function scopeHash(input: string): string {
 }
 
 /**
- * Generate the data attribute name for a scope hash.
+ * The attribute name used for component scoping.
+ */
+export const SCOPE_ATTR = 'data-scope';
+
+/**
+ * Generate the scope hash value (used as a token in data-comp="...").
  */
 export function scopeAttr(hash: string): string {
-	return `data-dartsx-${hash}`;
+	return hash;
 }
 
 // ── Reactive CSS Variable Extraction ───────────────────────────────
@@ -42,24 +47,63 @@ export interface CSSVar {
 	varName: string;
 	expr: string;
 	suffix: string;
-	/** Scoped CSS selector for surgical placement (set via PostCSS scan after rewriting). */
-	selector?: string;
+}
+
+/** Convert camelCase to kebab-case: `accentColor` → `accent-color` */
+function camelToKebab(s: string): string {
+	return s.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+}
+
+/**
+ * Generate a human-readable CSS custom property name from an expression.
+ * - Simple identifier: `color` → `--color`, `accentColor` → `--accent-color`
+ * - Complex expression: `size + height / 2` → `--size-height-<hash>`
+ * Appends a numeric suffix if the name is already taken within the component.
+ */
+function cssVarName(expr: string, usedNames: Set<string>): string {
+	const ids = expr.match(/[a-zA-Z_$][a-zA-Z0-9_$]*/g) ?? [];
+	const kebabIds = [...new Set(ids.map(camelToKebab))];
+	const isSimple = ids.length === 1 && expr.trim() === ids[0];
+
+	let base: string;
+	if (kebabIds.length === 0) {
+		base = '--v';
+	} else if (isSimple) {
+		base = `--${kebabIds[0]}`;
+	} else {
+		// Complex expression: identifiers + short hash for uniqueness
+		let h = 5381;
+		for (let i = 0; i < expr.length; i++) h = ((h << 5) + h + expr.charCodeAt(i)) >>> 0;
+		base = `--${kebabIds.join('-')}-${h.toString(36).slice(0, 4)}`;
+	}
+
+	// Collision guard within the same component
+	let name = base;
+	let n = 2;
+	while (usedNames.has(name)) {
+		name = `${base}-${n++}`;
+	}
+	return name;
 }
 
 /**
  * Extract `{expression}suffix` patterns from CSS declaration values
- * and replace with `var(--dartsx-hash-N)`.
+ * and replace with `var(--readable-name)`.
  *
  * Runs as a text pre-pass before PostCSS parsing, since `{expr}` is
  * invalid CSS that PostCSS can't parse. Only replaces inside property
  * values (after `:` within rule bodies), never in selectors or at-rule
  * prelude — tracked via brace-depth counting.
+ *
+ * Naming: simple identifier `{color}` → `--color`, camelCase `{accentColor}` → `--accent-color`,
+ * complex expressions `{size / 2}` → `--size-<hash>`.
  */
 export function extractCSSVars(css: string, hash: string): { css: string; cssVars: CSSVar[] } {
 	const cssVars: CSSVar[] = [];
 	/** Dedup: map "expr\0suffix" → existing varName so identical expressions share one CSS var */
 	const seen = new Map<string, string>();
-	let varCounter = 0;
+	/** Track used names to avoid collisions within a component */
+	const usedNames = new Set<string>();
 	let result = '';
 	let i = 0;
 	let insideRule = 0;
@@ -103,7 +147,8 @@ export function extractCSSVars(css: string, hash: string): { css: string; cssVar
 			const dedup = `${expr}\0${suffix}`;
 			let varName = seen.get(dedup);
 			if (!varName) {
-				varName = `--dartsx-${hash}-${varCounter++}`;
+				varName = cssVarName(expr, usedNames);
+				usedNames.add(varName);
 				seen.set(dedup, varName);
 				cssVars.push({ varName, expr, suffix });
 			}
@@ -128,8 +173,8 @@ export function extractCSSVars(css: string, hash: string): { css: string; cssVar
  * - Strip :global() wrappers
  * - Handle :deep()
  */
-export function rewriteScopedCSS(css: string, hash: string): { css: string; varSelectors: Map<string, string> } {
-	const attr = `[data-dartsx-${hash}]`;
+export function rewriteScopedCSS(css: string, hash: string): string {
+	const attr = `[${SCOPE_ATTR}~="${hash}"]`;
 	const keyframeNames = new Map<string, string>();
 
 	const root = postcss.parse(css, { from: undefined });
@@ -166,29 +211,9 @@ export function rewriteScopedCSS(css: string, hash: string): { css: string; varS
 		}
 	});
 
-	// Scan for var(--dartsx-HASH-N) references and map each to its rule's scoped selector.
-	// A deduplicated var may appear in multiple rules, so collect all selectors.
-	const varSelectorSets = new Map<string, Set<string>>();
-	const varRefPattern = new RegExp(`var\\((--dartsx-${escapeRegex(hash)}-\\d+)\\)`, 'g');
-	root.walkDecls(decl => {
-		const rule = decl.parent;
-		if (rule?.type !== 'rule') return;
-		for (const match of decl.value.matchAll(varRefPattern)) {
-			const varName = match[1];
-			if (!varSelectorSets.has(varName)) varSelectorSets.set(varName, new Set());
-			// Strip pseudo-elements (::before, ::after) — can't querySelectorAll on them
-			const sel = (rule as postcss.Rule).selector.replace(/::[\w-]+(\(.*?\))?/g, '').trim();
-			if (sel) varSelectorSets.get(varName)!.add(sel);
-		}
-	});
-	const varSelectors = new Map<string, string>();
-	for (const [varName, sels] of varSelectorSets) {
-		varSelectors.set(varName, [...sels].join(', '));
-	}
-
 	let result = root.toString();
 	if (result.length > 0 && !result.endsWith('\n')) result += '\n';
-	return { css: result, varSelectors };
+	return result;
 }
 
 /**
@@ -236,14 +261,14 @@ function rewriteRuleSelector(selector: string, attr: string): string {
 					if (lastBefore.type === 'combinator') {
 						// Attach attr to element before combinator: .wrapper[attr] .child
 						newNodes.push(...before.slice(0, -1).map(n => n.clone()));
-						newNodes.push(attrSelector(attr.slice(1, -1)));
+						newNodes.push(attrSelector(attr));
 						newNodes.push(lastBefore.clone());
 					} else {
 						newNodes.push(...before.map(n => n.clone()));
-						newNodes.push(attrSelector(attr.slice(1, -1)));
+						newNodes.push(attrSelector(attr));
 					}
 				} else {
-					newNodes.push(attrSelector(attr.slice(1, -1)));
+					newNodes.push(attrSelector(attr));
 				}
 				if (innerNodes.length > 0) {
 					// Add space combinator if not already present
@@ -311,7 +336,7 @@ function scopeSelector(selector: selectorParser.Selector, attr: string): void {
 			}
 		}
 
-		const attrNode = attrSelector(attr.slice(1, -1));
+		const attrNode = attrSelector(attr);
 
 		if (isSubject) {
 			// Subject — append [attr] directly
@@ -335,9 +360,18 @@ function scopeSelector(selector: selectorParser.Selector, attr: string): void {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-/** Create a presence attribute node like `[data-dartsx-xxx]` (Vue pattern: raws={} suppresses =value) */
-function attrSelector(attribute: string): selectorParser.Attribute {
-	return selectorParser.attribute({ attribute, value: attribute, raws: {}, quoteMark: '"' });
+/** Create an attribute selector node like `[data-comp~="hash"]` */
+function attrSelector(attrStr: string): selectorParser.Attribute {
+	// Parse the attr string like `[data-comp~="hash"]`
+	const m = attrStr.match(/^\[([\w-]+)([~|^$*]?=)"([^"]+)"\]$/);
+	if (!m) throw new Error(`Invalid attr selector: ${attrStr}`);
+	return selectorParser.attribute({
+		attribute: m[1],
+		operator: m[2] as selectorParser.AttributeOptions['operator'],
+		value: m[3],
+		quoteMark: '"',
+		raws: { value: `"${m[3]}"` },
+	});
 }
 
 function escapeRegex(str: string): string {

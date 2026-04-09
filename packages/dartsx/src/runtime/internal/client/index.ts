@@ -13,7 +13,6 @@ export { type ComponentContext, getCurrentComponent, setCurrentComponent } from 
 
 export { jsx, Fragment } from './jsx';
 export { style } from './jsx/style-inject';
-export { cssVars } from './jsx/css-vars';
 export { if_block } from './blocks/if';
 export { for_block } from './blocks/for';
 export { switch_block, type SwitchCase } from './blocks/switch';
@@ -33,7 +32,6 @@ import { switch_block } from './blocks/switch';
 import { try_block } from './blocks/try';
 import { jsx, Fragment } from './jsx';
 import { style } from './jsx/style-inject';
-import { cssVars } from './jsx/css-vars';
 
 // ── Default export ─────────────────────────────────────────────────
 
@@ -48,7 +46,6 @@ export default {
 	jsx,
 	Fragment,
 	style,
-	cssVars,
 	if: if_block,
 	for: for_block,
 	switch: switch_block,
