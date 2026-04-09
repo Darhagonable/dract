@@ -34,13 +34,6 @@ export function scopeHash(input: string): string {
  */
 export const SCOPE_ATTR = 'data-scope';
 
-/**
- * Generate the scope hash value (used as a token in data-comp="...").
- */
-export function scopeAttr(hash: string): string {
-	return hash;
-}
-
 // ── Reactive CSS Variable Extraction ───────────────────────────────
 
 export interface CSSVar {

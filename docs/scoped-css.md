@@ -12,8 +12,8 @@ No `@scope` is used — data attribute selector rewriting handles everything wit
 
 Each scoped `<style>` block gets:
 
-1. A **data attribute** per `<style>` block (e.g., `data-dartsx-a1b2c3`) added to elements at the same level and down
-2. Its CSS selectors rewritten to include `[data-dartsx-a1b2c3]`
+1. A `data-scope` attribute with a unique hash token (e.g., `data-scope="a1b2c3"`) added to elements at the same level and down
+2. Its CSS selectors rewritten to include `[data-scope~="a1b2c3"]`
 3. The CSS injected into the document or extracted to a `.css` file
 
 A component can have multiple `<style>` blocks at different nesting levels — each scopes to its siblings and their descendants.
@@ -38,15 +38,15 @@ Compiles to:
 ```js
 function Card() {
   $.style("a1b2c3",
-    "h2[data-dartsx-a1b2c3] { color: red; }\n" +
-    "p[data-dartsx-a1b2c3] { font-size: 14px; }"
+    "h2[data-scope~=\"a1b2c3\"] { color: red; }\n" +
+    "p[data-scope~=\"a1b2c3\"] { font-size: 14px; }"
   );
 
   return $.jsx("div", {
-    "data-dartsx-a1b2c3": "",
+    "data-scope": "a1b2c3",
     children: [
-      $.jsx("h2", { "data-dartsx-a1b2c3": "", children: "Title" }),
-      $.jsx("p", { "data-dartsx-a1b2c3": "", children: "Content" }),
+      $.jsx("h2", { "data-scope": "a1b2c3", children: "Title" }),
+      $.jsx("p", { "data-scope": "a1b2c3", children: "Content" }),
     ]
   });
 }
@@ -81,19 +81,19 @@ hash("src/components/Card.tsx::Card::1") → "bbb222"   (inner style)
 
 - Deterministic: same input always produces the same hash
 - Unique: different `<style>` blocks get different hashes, even within the same component
-- Short: 6-8 character hex suffix
-- Attribute name: `data-dartsx-{hash}`
+- Short: 7-character base-36 suffix
+- Attribute: `data-scope="{hash}"`
 
 ### Data Attribute Injection
 
-Each `<style>` block's scope attribute is added to its **sibling elements and all their descendants**. Elements deeper in the tree may accumulate multiple scope attributes if they fall within multiple `<style>` scopes.
+Each `<style>` block's scope attribute is added to its **sibling elements and all their descendants**. Elements deeper in the tree may accumulate multiple scope hashes (space-separated in a single `data-scope` attribute) if they fall within multiple `<style>` scopes.
 
 When there's a single `<style>` at the root level (the common case), this means every element gets the attribute — same as Svelte/Vue:
 
 **Single root:**
 ```tsx
 render <div><p>text</p></div>
-// → <div data-dartsx-a1b2c3><p data-dartsx-a1b2c3>text</p></div>
+// → <div data-scope="a1b2c3"><p data-scope="a1b2c3">text</p></div>
 ```
 
 **Multiple roots (fragment):**
@@ -102,8 +102,8 @@ render (
   <h1>Title</h1>
   <p>Subtitle</p>
 )
-// → <h1 data-dartsx-a1b2c3>...</h1>
-//   <p data-dartsx-a1b2c3>...</p>
+// → <h1 data-scope="a1b2c3">...</h1>
+//   <p data-scope="a1b2c3">...</p>
 ```
 
 ### Selector Rewriting
@@ -112,24 +112,24 @@ Every CSS selector in the `<style>` block is rewritten to append the data attrib
 
 | Authored | Compiled |
 |---|---|
-| `p { ... }` | `p[data-dartsx-a1b2c3] { ... }` |
-| `.card { ... }` | `.card[data-dartsx-a1b2c3] { ... }` |
-| `div > p { ... }` | `div > p[data-dartsx-a1b2c3] { ... }` |
-| `ul li:first-child { ... }` | `ul li:first-child[data-dartsx-a1b2c3] { ... }` |
-| `h1, h2 { ... }` | `h1[data-dartsx-a1b2c3], h2[data-dartsx-a1b2c3] { ... }` |
-| `::before` | `[data-dartsx-a1b2c3]::before { ... }` (on the owning element) |
+| `p { ... }` | `p[data-scope~="a1b2c3"] { ... }` |
+| `.card { ... }` | `.card[data-scope~="a1b2c3"] { ... }` |
+| `div > p { ... }` | `div > p[data-scope~="a1b2c3"] { ... }` |
+| `ul li:first-child { ... }` | `ul li:first-child[data-scope~="a1b2c3"] { ... }` |
+| `h1, h2 { ... }` | `h1[data-scope~="a1b2c3"], h2[data-scope~="a1b2c3"] { ... }` |
+| `::before` | `[data-scope~="a1b2c3"]::before { ... }` (on the owning element) |
 
-For subsequent selectors in a complex selector, `:where([data-dartsx-a1b2c3])` is used to avoid specificity inflation (like Svelte):
+For subsequent selectors in a complex selector, `:where([data-scope~="a1b2c3"])` is used to avoid specificity inflation (like Svelte):
 
 | Authored | Compiled |
 |---|---|
-| `.parent .child { ... }` | `.parent:where([data-dartsx-a1b2c3]) .child[data-dartsx-a1b2c3] { ... }` |
+| `.parent .child { ... }` | `.parent:where([data-scope~="a1b2c3"]) .child[data-scope~="a1b2c3"] { ... }` |
 
 ### CSS Extraction
 
 The `<style>` tag is removed from the render output during the transform phase. Its text content is:
 
-1. Parsed to rewrite selectors (append `[data-dartsx-hash]`)
+1. Parsed to rewrite selectors (append `[data-scope~="hash"]`)
 2. `@keyframes` names are hash-prefixed
 3. `:global()` rules are extracted and emitted without scoping
 4. Emitted as a `$.style(hash, css)` call (injected mode) or returned as `css` output (external mode)
@@ -157,26 +157,26 @@ component StyledComponent() {
 }
 ```
 
-Each `<style>` block gets its own scope hash. Elements accumulate data attributes from every scope they belong to:
+Each `<style>` block gets its own scope hash. Elements accumulate scope hashes (space-separated) in a single `data-scope` attribute:
 
 ```
-div[data-dartsx-aaa]                              ← outer scope only
-├── p[data-dartsx-aaa]                             ← "Outside" → red
-└── div[data-dartsx-aaa][data-dartsx-bbb]          ← both scopes
-    └── p[data-dartsx-aaa][data-dartsx-bbb]        ← "Inside" → green
+div[data-scope="aaa"]                              ← outer scope only
+├── p[data-scope="aaa"]                             ← "Outside" → red
+└── div[data-scope="aaa bbb"]                       ← both scopes
+    └── p[data-scope="aaa bbb"]                     ← "Inside" → green
 ```
 
 The compiled CSS emits outer styles first, inner styles second:
 
 ```css
 /* outer style block */
-p[data-dartsx-aaa] { color: red; }
+p[data-scope~="aaa"] { color: red; }
 
 /* inner style block */
-p[data-dartsx-bbb] { color: green; }
+p[data-scope~="bbb"] { color: green; }
 ```
 
-The inner `<p>` matches both rules (it has both attributes), but `green` wins because it appears later in source order with equal specificity. The outer `<p>` only has `data-dartsx-aaa`, so only `red` applies.
+The inner `<p>` matches both rules (it has both scope hashes), but `green` wins because it appears later in source order with equal specificity. The outer `<p>` only has the `aaa` hash, so only `red` applies.
 
 **Scoping rules for each `<style>` block:**
 
@@ -251,14 +251,14 @@ component Child(children) {
 Every element gets the data attribute of **the component that authored it**:
 
 ```
-div[data-dartsx-parent]
-├── p[data-dartsx-parent]            → "Styled by parent"         ✅ red
-└── div[data-dartsx-child]
-    ├── p[data-dartsx-child]         → "NOT styled by parent"      ❌ not red
-    └── p[data-dartsx-parent]        → "Also styled by parent"     ✅ red
+div[data-scope~="parent"]
+├── p[data-scope~="parent"]            → "Styled by parent"         ✅ red
+└── div[data-scope~="child"]
+    ├── p[data-scope~="child"]         → "NOT styled by parent"      ❌ not red
+    └── p[data-scope~="parent"]        → "Also styled by parent"     ✅ red
 ```
 
-The compiled CSS `p[data-dartsx-parent]` matches only the `<p>` elements with the parent's attribute — including slotted content — while correctly excluding the child's own `<p>`.
+The compiled CSS `p[data-scope~="parent"]` matches only the `<p>` elements with the parent's attribute — including slotted content — while correctly excluding the child's own `<p>`.
 
 ### Attribute Placement Rules
 
@@ -288,7 +288,7 @@ render (
 ```
 
 ```css
-h1[data-dartsx-abc123] { font-size: 2em; }
+h1[data-scope~="abc123"] { font-size: 2em; }
 ```
 
 ### Multiple Components Per File
@@ -308,7 +308,7 @@ component CardBody() {
 }
 ```
 
-`CardHeader` → `data-dartsx-aaa111`, `CardBody` → `data-dartsx-bbb222`. Completely independent scopes.
+`CardHeader` → `data-scope="aaa111"`, `CardBody` → `data-scope="bbb222"`. Completely independent scopes.
 
 ### Component With No Root Element
 
@@ -332,7 +332,7 @@ component List() {
 }
 ```
 
-All `<li>` elements get `data-dartsx-hash`.
+All `<li>` elements get `data-scope="hash"`.
 
 ### Children / Slots
 
@@ -349,7 +349,7 @@ component Parent() {
 }
 ```
 
-The `<p>` has `data-dartsx-parent` and the CSS `p[data-dartsx-parent]` targets it.
+The `<p>` has `data-scope="parent"` and the CSS `p[data-scope~="parent"]` targets it.
 
 ### Component-as-Prop / Render Props
 
@@ -370,7 +370,7 @@ component Dashboard() {
 }
 ```
 
-`<th>` and `<td>` get `data-dartsx-dashboard`.
+`<th>` and `<td>` get `data-scope="dashboard"`.
 
 ### `<style global>` — Unscoped Styles
 
@@ -420,7 +420,7 @@ The compiler strips the `:global()` wrapper and emits the inner selector without
 
 ```css
 /* Scoped */
-p[data-dartsx-abc123] { color: red; }
+p[data-scope~="abc123"] { color: red; }
 
 /* Global */
 body { margin: 0; }
@@ -451,9 +451,9 @@ The compiler moves the data attribute to the selector **before** `:deep()` and l
 
 | Authored | Compiled |
 |---|---|
-| `.wrapper :deep(.child-title)` | `.wrapper[data-dartsx-abc123] .child-title` |
-| `:deep(.child-title)` | `[data-dartsx-abc123] .child-title` |
-| `.card :deep(p > span)` | `.card[data-dartsx-abc123] p > span` |
+| `.wrapper :deep(.child-title)` | `.wrapper[data-scope~="abc123"] .child-title` |
+| `:deep(.child-title)` | `[data-scope~="abc123"] .child-title` |
+| `.card :deep(p > span)` | `.card[data-scope~="abc123"] p > span` |
 
 This is the same semantics as Vue's `:deep()`. The scoping boundary stops at the `:deep()` call — everything inside it matches globally within that subtree.
 
@@ -480,7 +480,7 @@ Compiles to:
   from { opacity: 0; }
   to { opacity: 1; }
 }
-div[data-dartsx-a1b2c3] { animation: a1b2c3-fadeIn 0.3s; }
+div[data-scope~="a1b2c3"] { animation: a1b2c3-fadeIn 0.3s; }
 ```
 
 The compiler rewrites both the `@keyframes` name and any `animation` / `animation-name` references.
@@ -493,11 +493,11 @@ These wrap the scoped selectors normally:
 
 ```css
 @media (max-width: 768px) {
-  p[data-dartsx-abc123] { font-size: 12px; }
+  p[data-scope~="abc123"] { font-size: 12px; }
 }
 
 @container (min-width: 400px) {
-  div[data-dartsx-abc123] { display: grid; }
+  div[data-scope~="abc123"] { display: grid; }
 }
 ```
 
@@ -530,7 +530,7 @@ component Card() {
 Pseudo-elements are attached to the element they belong to:
 
 ```css
-p[data-dartsx-abc123]::before { content: '→ '; }
+p[data-scope~="abc123"]::before { content: '→ '; }
 ```
 
 ### Third-Party Component Styling
@@ -551,7 +551,7 @@ In `'injected'` mode during SSR, `$.style()` collects CSS into a buffer. The col
 ```html
 <head>
   <style data-dartsx="a1b2c3">
-    h2[data-dartsx-a1b2c3] { color: red; }
+    h2[data-scope~="a1b2c3"] { color: red; }
   </style>
 </head>
 ```
@@ -570,13 +570,13 @@ In `'injected'` mode during development:
 
 ### Specificity
 
-Appending `[data-dartsx-abc123]` adds `(0, 1, 0)` specificity (one attribute selector). This is the same tradeoff Vue makes with `[data-v-*]`. Svelte adds `(0, 1, 0)` via a class instead.
+Appending `[data-scope~="abc123"]` adds `(0, 1, 0)` specificity (one attribute selector). This is the same tradeoff Vue makes with `[data-v-*]`. Svelte adds `(0, 1, 0)` via a class instead.
 
 | Authored | Compiled | Specificity |
 |---|---|---|
-| `p { ... }` | `p[data-dartsx-abc123] { ... }` | `(0, 1, 1)` |
-| `.card { ... }` | `.card[data-dartsx-abc123] { ... }` | `(0, 2, 0)` |
-| `#main { ... }` | `#main[data-dartsx-abc123] { ... }` | `(1, 1, 0)` |
+| `p { ... }` | `p[data-scope~="abc123"] { ... }` | `(0, 1, 1)` |
+| `.card { ... }` | `.card[data-scope~="abc123"] { ... }` | `(0, 2, 0)` |
+| `#main { ... }` | `#main[data-scope~="abc123"] { ... }` | `(1, 1, 0)` |
 
 This means scoped styles are slightly more specific than equivalent global styles. In practice this is desirable — component styles should win over generic global rules.
 
@@ -600,36 +600,43 @@ component Button(color: string) {
 }
 ```
 
-The compiler transforms each `{expression}` into a CSS custom property and sets it reactively on the element:
+The compiler transforms each `{expression}` into a CSS custom property with a human-readable name, and injects the values as a reactive `style` attribute on the root element:
 
 ```css
-button[data-dartsx-abc123] {
-  color: var(--dartsx-abc123-0);
-  font-size: var(--dartsx-abc123-1);
-  padding: var(--dartsx-abc123-2) var(--dartsx-abc123-3);
+button[data-scope~="abc123"] {
+  color: var(--color);
+  font-size: var(--size);
+  padding: var(--size-n83f) var(--size);
 }
 ```
 
 ```js
 function Button($$props) {
-  const color = { get value() { return $$props.color; } };
-  let size = $.signal(16);
+  const color = $.prop($$props, 'color');
+  let size = $.state(16);
 
-  // Set CSS custom properties reactively on the root element(s)
-  $.cssVars(root, {
-    "--dartsx-abc123-0": () => color.value,
-    "--dartsx-abc123-1": () => $.get(size) + "px",
-    "--dartsx-abc123-2": () => $.get(size) / 2 + "px",
-    "--dartsx-abc123-3": () => $.get(size) + "px",
+  return $.jsx("button", {
+    "data-scope": "abc123",
+    style: () => ({
+      "--color": $.get(color),
+      "--size": $.get(size) + "px",
+      "--size-n83f": $.get(size) / 2 + "px",
+    }),
+    children: ["Click me"]
   });
 }
 ```
 
-`$.cssVars()` sets `style.setProperty()` inside an effect, so values update reactively. The custom properties are set on the component's root element(s) and inherit down via the CSS cascade.
+The reactive `style` attribute sets CSS custom properties via `style.setProperty()` inside an effect, so values update automatically. The custom properties are set on the component's root element(s) and inherit down via the CSS cascade.
+
+**Naming rules for CSS custom properties:**
+- Simple identifier: `{color}` → `--color`, `{accentColor}` → `--accent-color` (camelCase → kebab-case)
+- Complex expression: `{size / 2}` → `--size-<hash>` (identifiers + short hash for uniqueness)
+- Duplicate expressions reuse the same custom property name
 
 **Rules:**
 - `{expression}` can appear anywhere a CSS value is expected
-- Each unique expression gets its own `--dartsx-hash-N` custom property
+- Each unique expression gets its own readable CSS custom property
 - The suffix after `}` (like `px`) is included in the runtime value, not the CSS variable
 - If the expression is reactive (state, prop, derived), the custom property updates automatically
 - Static expressions are still compiled the same way for consistency

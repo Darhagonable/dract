@@ -20,7 +20,7 @@ import type {
 	JSXExpressionIR,
 } from '../2-analyze';
 import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from './expr';
-import { scopeHash, scopeAttr, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
+import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 
 // Module-level proxy vars for current transform context (avoids threading through every function)
 let currentProxyVars: Set<string> | undefined;
@@ -267,9 +267,8 @@ function processScopeStyles(blocks: StyleBlockIR[], componentName: string, filen
 			results.push({ hash, attr: '', css, scopePath: block.scopePath, cssVars: extracted.cssVars });
 			continue;
 		}
-		const attr = scopeAttr(hash);
 		const rewrittenCSS = rewriteScopedCSS(css, hash);
-		results.push({ hash, attr, css: rewrittenCSS, scopePath: block.scopePath, cssVars: extracted.cssVars });
+		results.push({ hash, attr: hash, css: rewrittenCSS, scopePath: block.scopePath, cssVars: extracted.cssVars });
 	}
 	return results;
 }
@@ -388,7 +387,7 @@ function navigateToNode(node: JSXNodeIR, path: number[]): JSXNodeIR | null {
 function injectAttrsRecursive(node: JSXNodeIR, hashes: string[]): void {
 	if (node.type === 'element' && !(node as JSXElementIR).isComponent) {
 		const el = node as JSXElementIR;
-		// Merge hashes into a single data-comp attribute
+		// Merge hashes into a single data-scope attribute
 		const existing = el.attributes.find(a => a.kind === 'static' && a.name === SCOPE_ATTR);
 		if (existing) {
 			const current = (existing.value || '').split(/\s+/).filter(Boolean);
@@ -749,7 +748,7 @@ function wrapArrowBody(expr: string): string {
 
 /**
  * Inject scope data attributes into JSX opening tags within a source expression.
- * Handles JSX like `<th>Name</th>` → `<th data-comp="abc">Name</th>`.
+ * Handles JSX like `<th>Name</th>` → `<th data-scope="abc">Name</th>`.
  * Only injects into HTML element tags (lowercase), not component tags (uppercase).
  */
 function injectScopeAttrsIntoJSXSource(source: string, scopeAttrs: string[]): string {
