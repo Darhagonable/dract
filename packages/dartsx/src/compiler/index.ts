@@ -10,6 +10,8 @@ import { transform } from './phases/3-transform';
 export interface CompileResult {
 	/** The generated JavaScript code */
 	code: string;
+	/** Extracted CSS from scoped style blocks (for external CSS mode) */
+	css: string;
 	/** Names of exported state/derived variables (for cross-file reactivity) */
 	reactiveExports: string[];
 	/**
@@ -24,6 +26,13 @@ export interface CompileResult {
 export interface CompileOptions {
 	/** Filename (used for error messages and source maps) */
 	filename?: string;
+	/**
+	 * CSS delivery mode.
+	 * - `'injected'`: emit `$.style()` calls in JS (styles bundled in JS)
+	 * - `'external'`: omit `$.style()` calls, collect CSS for external delivery
+	 * Default: `'injected'`
+	 */
+	css?: 'injected' | 'external';
 	/**
 	 * Cross-file reactive imports.
 	 * Maps import specifiers (e.g., './store') to arrays of reactive variable names.
@@ -41,7 +50,6 @@ export interface CompileOptions {
  */
 export function compile(source: string, options: CompileOptions = {}): CompileResult {
 	const filename = options.filename || 'input.tsx';
-
 	// Phase 1: Pre-process custom syntax + parse with OXC
 	const preprocessed = preprocess(source);
 	const parseResult = parse(filename, preprocessed.code);
@@ -61,10 +69,11 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 	);
 
 	// Phase 3: Transform — generate output JavaScript
-	const code = transform(analysis);
+	const result = transform(analysis, filename, options.css);
 
 	return {
-		code,
+		code: result.code,
+		css: result.css,
 		reactiveExports: analysis.reactiveExports,
 		reactiveCalls: analysis.reactiveCalls,
 		importSpecifiers: analysis.importSpecifiers,

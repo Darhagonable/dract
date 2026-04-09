@@ -20,9 +20,21 @@ function extractImportSpecifiers(code: string): string[] {
 	return [...specifiers];
 }
 
-export default function dartsx(): Plugin {
+export interface DarTsxPluginOptions {
+	/**
+	 * CSS delivery mode.
+	 * - `'injected'`: emit `$.style()` calls in JS (default)
+	 * - `'external'`: extract CSS to separate `.css` files
+	 */
+	css?: 'injected' | 'external';
+}
+
+export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
+	const cssMode = options.css || 'injected';
 	/** Maps resolved module IDs to their reactive export names */
 	const reactiveRegistry = new Map<string, string[]>();
+	/** Maps virtual CSS module IDs to their CSS content (for external mode) */
+	const cssModuleMap = new Map<string, string>();
 	/**
 	 * Per-caller reactive call contributions.
 	 * Maps callerId → targetId → { fnName → indices }.
@@ -98,6 +110,15 @@ export default function dartsx(): Plugin {
 				}
 			}
 		},
+		resolveId(id) {
+			// Resolve virtual CSS modules created in external mode
+			if (cssModuleMap.has(id)) return id;
+		},
+		load(id) {
+			// Serve virtual CSS module content
+			const css = cssModuleMap.get(id);
+			if (css !== undefined) return css;
+		},
 		async transform(code, id) {
 			const isTsx = id.endsWith('.tsx');
 			const isJsx = id.endsWith('.jsx');
@@ -144,6 +165,7 @@ export default function dartsx(): Plugin {
 
 				const result = compile(code, {
 					filename: id,
+					css: cssMode,
 					reactiveImports,
 					reactiveCallImports: reactiveCallRegistry.get(id),
 				});
@@ -205,8 +227,17 @@ export default function dartsx(): Plugin {
 					}
 				}
 
+				let outputCode = result.code;
+
+				// In external mode, append CSS as a virtual import so Vite can extract it
+				if (cssMode === 'external' && result.css) {
+					const cssId = id + '.css';
+					cssModuleMap.set(cssId, result.css);
+					outputCode += `\nimport ${JSON.stringify(cssId)};`;
+				}
+
 				return {
-					code: result.code,
+					code: outputCode,
 					map: null,
 				};
 			} catch (e: any) {

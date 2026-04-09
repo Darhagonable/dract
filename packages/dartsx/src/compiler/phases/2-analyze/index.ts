@@ -4,7 +4,7 @@
  * Walks the OXC AST and, using metadata from the pre-processor,
  * produces an Intermediate Representation (IR) for each component.
  */
-import type { ComponentMeta, PreprocessResult } from '../1-parse';
+import type { ComponentMeta, PreprocessResult, ExtractedStyleBlock } from '../1-parse';
 import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
 
 // ── IR Types ───────────────────────────────────────────────────────
@@ -28,6 +28,20 @@ export interface ComponentIR {
 	bodyStatements: string[];
 	/** All declarations in source order */
 	orderedDecls: DeclEntry[];
+	/** Style blocks extracted from the render output */
+	styleBlocks: StyleBlockIR[];
+}
+
+export interface StyleBlockIR {
+	/** Raw CSS text from the <style> block */
+	css: string;
+	/** Whether this is a <style global> block (no scoping) */
+	isGlobal: boolean;
+	/** Path from root JSX node to the parent element (child indices at each level).
+	 *  Empty array = root-level (scopes to all elements). */
+	scopePath: number[];
+	/** Index of this style block within the component (for hash generation) */
+	index: number;
 }
 
 export interface ParamIR {
@@ -280,7 +294,13 @@ export function analyze(
 		const fn = extractFunctionDecl(node);
 		if (fn && componentNames.has(fn.name)) {
 			const compMeta = meta.components.find((c) => c.name === fn.name)!;
-			const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams);
+			// Associate style blocks with this component by source position
+			const compStart = node.start;
+			const compEnd = node.end;
+			const compStyleBlocks = (meta.styleBlocks || []).filter(
+				(sb) => sb.sourceOffset >= compStart && sb.sourceOffset < compEnd,
+			);
+			const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams, compStyleBlocks);
 			components.push(ir);
 			continue;
 		}
@@ -349,7 +369,10 @@ export function analyze(
 		findNestedFunctionDecls(node, componentNames, nested);
 		for (const { fnInfo: nestedFn, start, end } of nested) {
 			const compMeta = meta.components.find(c => c.name === nestedFn.name)!;
-			const ir = analyzeComponent(nestedFn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams);
+			const compStyleBlocks = (meta.styleBlocks || []).filter(
+				(sb) => sb.sourceOffset >= start && sb.sourceOffset < end,
+			);
+			const ir = analyzeComponent(nestedFn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams, compStyleBlocks);
 			nestedComponents.push({
 				statementIndex: stmtIndex,
 				localStart: start - node.start,
@@ -620,6 +643,7 @@ function analyzeComponent(
 	derivedSet: Set<string>,
 	crossFileReactiveVars: Set<string>,
 	renamedParams: Record<string, Record<string, string>>,
+	extractedStyleBlocks: ExtractedStyleBlock[] = [],
 ): ComponentIR {
 	const params: ParamIR[] = [];
 	const stateVars: { name: string; initExpr: string }[] = [];
@@ -629,6 +653,7 @@ function analyzeComponent(
 	const bodyStatements: string[] = [];
 	const orderedDecls: DeclEntry[] = [];
 	let jsx: JSXNodeIR | null = null;
+	let jsxRootNode: any = null; // OXC AST node for depth computation
 
 	// Get per-component rename map
 	const componentRenames = renamedParams[compMeta.name] || {};
@@ -686,6 +711,7 @@ function analyzeComponent(
 				while (jsxNode.type === 'ParenthesizedExpression') {
 					jsxNode = jsxNode.expression;
 				}
+				jsxRootNode = jsxNode;
 				jsx = analyzeJSXNode(jsxNode, source);
 			} else {
 				// Other statements — preserve as-is
@@ -699,7 +725,48 @@ function analyzeComponent(
 		jsx = { type: 'fragment', children: [] };
 	}
 
-	return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, proxyVars, jsx, bodyStatements, orderedDecls };
+	// Build style blocks from preprocessor extraction, computing JSX scope paths
+	const styleBlocks: StyleBlockIR[] = extractedStyleBlocks.map((sb, index) => ({
+		css: sb.css,
+		isGlobal: sb.isGlobal,
+		scopePath: jsxRootNode ? computeStyleBlockScopePath(jsxRootNode, sb.sourceOffset) : [],
+		index,
+	}));
+
+	return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, proxyVars, jsx, bodyStatements, orderedDecls, styleBlocks };
+}
+
+/**
+ * Compute the path of element indices from the root JSX node to the JSXElement
+ * that directly contains a style block at `offset`.
+ * Empty path = root-level (sibling of render's root elements).
+ * Each index counts only JSXElement children (not text or expression nodes).
+ */
+function computeStyleBlockScopePath(rootNode: any, offset: number): number[] {
+	const path: number[] = [];
+
+	function walk(node: any): boolean {
+		if (!node || offset < node.start || offset >= node.end) return false;
+
+		const children = node.children || [];
+		let elementIdx = 0;
+		for (let i = 0; i < children.length; i++) {
+			const child = children[i];
+			if (child.type === 'JSXElement') {
+				if (offset >= child.start && offset < child.end) {
+					path.push(elementIdx);
+					walk(child);
+					return true;
+				}
+				elementIdx++;
+			}
+		}
+		// offset is within this node's range but not inside any child JSXElement
+		return true;
+	}
+
+	walk(rootNode);
+	return path;
 }
 
 function analyzeParam(param: any, source: string, renamedParams: Record<string, string>): ParamIR {

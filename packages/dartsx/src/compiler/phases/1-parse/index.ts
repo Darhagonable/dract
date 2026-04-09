@@ -31,6 +31,17 @@ export interface PreprocessResult {
 	derivedVars: string[];
 	/** Renamed params: componentName → { localName → externalName } */
 	renamedParams: Record<string, Record<string, string>>;
+	/** Style blocks extracted from render, keyed by component name */
+	styleBlocks: ExtractedStyleBlock[];
+}
+
+export interface ExtractedStyleBlock {
+	/** Raw CSS content */
+	css: string;
+	/** Whether this is a `<style global>` block */
+	isGlobal: boolean;
+	/** Source offset where the style block was found (for component association) */
+	sourceOffset: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -130,6 +141,11 @@ export function preprocess(source: string): PreprocessResult {
 	// 4b. Transform inline renders: `render <jsx>` → `return (<>jsx</>)`
 	code = transformInlineRenders(code);
 
+	// 4c. Extract <style> blocks from JSX before OXC parsing
+	//     CSS braces { } would confuse the JSX parser, so remove them here.
+	const styleBlocks: ExtractedStyleBlock[] = [];
+	code = extractStyleBlocks(code, styleBlocks);
+
 	// 5. Transform `bind:{x}` shorthand → `bind:value={x}`
 	code = code.replace(/bind:\{(\w+)\}/g, 'bind:value={$1}');
 
@@ -140,10 +156,55 @@ export function preprocess(source: string): PreprocessResult {
 	// 7. Transform control flow blocks ({if}, {for}) into parseable __if()/__for() calls
 	code = transformControlFlowBlocks(code);
 
-	return { code, components, stateVars, derivedVars, renamedParams };
+	return { code, components, stateVars, derivedVars, renamedParams, styleBlocks };
 }
 
 // ── Function binding wrapper ───────────────────────────────────────
+
+// ── Style block extraction ─────────────────────────────────────────
+
+/**
+ * Extract `<style>` and `<style global>` blocks from the source code.
+ * Removes them and replaces with whitespace to preserve offsets.
+ * Returns the modified code and populates the blocks array.
+ */
+function extractStyleBlocks(code: string, blocks: ExtractedStyleBlock[]): string {
+	// Match <style> or <style global> tags
+	const styleOpenRegex = /<style(\s+global)?\s*>/g;
+	let match;
+	let result = '';
+	let lastIndex = 0;
+
+	while ((match = styleOpenRegex.exec(code)) !== null) {
+		const isGlobal = !!match[1];
+		const openTagStart = match.index;
+		const openTagEnd = openTagStart + match[0].length;
+
+		// Find the closing </style> tag
+		const closeTag = '</style>';
+		const closeIdx = code.indexOf(closeTag, openTagEnd);
+		if (closeIdx === -1) continue;
+
+		const css = code.slice(openTagEnd, closeIdx);
+		const fullEnd = closeIdx + closeTag.length;
+
+		blocks.push({
+			css,
+			isGlobal,
+			sourceOffset: openTagStart,
+		});
+
+		// Replace the entire <style>...</style> with whitespace to preserve offsets
+		result += code.slice(lastIndex, openTagStart);
+		// Use spaces to avoid shifting offsets for subsequent matches
+		result += ' '.repeat(fullEnd - openTagStart);
+		lastIndex = fullEnd;
+		styleOpenRegex.lastIndex = fullEnd;
+	}
+
+	result += code.slice(lastIndex);
+	return result;
+}
 
 /**
  * Finds `bind:prop={expr1, expr2}` and wraps as `bind:prop={[expr1, expr2]}`
