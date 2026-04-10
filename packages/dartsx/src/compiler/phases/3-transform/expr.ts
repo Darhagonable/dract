@@ -120,8 +120,8 @@ export function wrapReadsInGet(
 			if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) {
 				return;
 			}
-			// Skip the key side of a shorthand property — we handle it via the value side
-			if (parent?.type === 'Property' && parent.shorthand && key === 'key') {
+			// Skip non-computed property keys in object literals: { count: 42 }
+			if (parent?.type === 'Property' && key === 'key' && !parent.computed) {
 				return;
 			}
 			const id = node;
@@ -468,6 +468,8 @@ export function transformBodyStatement(
 		if (parent?.type === 'MemberExpression' && key === 'object' && allDirectMemberAccessVars.has(node.name)) return;
 		// Skip non-computed member property (obj.x)
 		if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) return;
+		// Skip non-computed property keys in object literals: { count: 42 }
+		if ((parent?.type === 'ObjectProperty' || parent?.type === 'Property') && key === 'key' && !parent.computed) return;
 		// Skip function param declarations (BindingIdentifier)
 		if (parent?.type === 'FormalParameter' || parent?.type === 'FormalParameters') return;
 		// Skip variable declarator id (LHS of let/const)
