@@ -137,11 +137,11 @@ export function preprocess(source: string): PreprocessResult {
 		},
 	);
 
-	// 4. Transform `render (` blocks → `return (<>` ... `</>)`
-	code = transformRenderBlocks(code);
-
-	// 4b. Transform inline renders: `render <jsx>` → `return (<>jsx</>)`
-	code = transformInlineRenders(code);
+	// 4. Transform all `render` forms into `return` statements:
+	//    - `render (jsx)` → `return (<>jsx</>)`
+	//    - `render <jsx>` → `return (<>jsx</>)`
+	//    - `render expr`  → `return expr`
+	code = transformRenders(code);
 
 	// 4c. Extract <style> blocks from JSX before OXC parsing
 	//     CSS braces { } would confuse the JSX parser, so remove them here.
@@ -252,42 +252,35 @@ function hasTopLevelComma(expr: string): boolean {
 	return false;
 }
 
-// ── Render block transformation ────────────────────────────────────
-
-function transformRenderBlocks(code: string): string {
-	const renderRegex = /(?<!\.)\brender\s*\(/g;
-	let match;
-	let result = '';
-	let lastIndex = 0;
-
-	while ((match = renderRegex.exec(code)) !== null) {
-		const renderStart = match.index;
-		const openParenPos = renderStart + match[0].length - 1;
-		const closeParenPos = findMatchingParen(code, openParenPos);
-
-		const content = code.slice(openParenPos + 1, closeParenPos);
-
-		result += code.slice(lastIndex, renderStart);
-		result += `return (<>${content}</>)`;
-		lastIndex = closeParenPos + 1;
-	}
-
-	result += code.slice(lastIndex);
-	return result;
-}
-
-// ── Inline render transformation ───────────────────────────────────
+// ── Render transformation ──────────────────────────────────────────
 
 /**
- * Transforms `render <jsx>` (non-parenthesized) into `return (<>jsx</>)`.
- * Finds the exact end of the JSX element by tracking opening/closing tags.
+ * Unified render transformer. Handles all three forms:
+ *   render (jsx)   → return (<>jsx</>)
+ *   render <jsx>   → return (<>jsx</>)
+ *   render expr    → return expr
+ *
+ * Single character-walking pass, skipping strings/templates.
  */
-function transformInlineRenders(code: string): string {
+function transformRenders(code: string): string {
 	let result = '';
 	let i = 0;
 
 	while (i < code.length) {
-		// Skip strings
+		// Skip comments
+		if (code[i] === '/' && code[i + 1] === '/') {
+			const end = skipLineComment(code, i);
+			result += code.slice(i, end);
+			i = end;
+			continue;
+		}
+		if (code[i] === '/' && code[i + 1] === '*') {
+			const end = skipBlockComment(code, i);
+			result += code.slice(i, end);
+			i = end;
+			continue;
+		}
+		// Skip strings and templates
 		if (code[i] === "'" || code[i] === '"') {
 			const end = skipString(code, i);
 			result += code.slice(i, end);
@@ -301,23 +294,39 @@ function transformInlineRenders(code: string): string {
 			continue;
 		}
 
-		// Check for `render` keyword followed by horizontal whitespace then `<`
+		// Look for `render` keyword (word boundary, not member access)
 		if (
 			code.slice(i, i + 6) === 'render' &&
-			(i === 0 || (!/\w/.test(code[i - 1]) && code[i - 1] !== '.')) && // word boundary before, not member access
-			/[ \t]/.test(code[i + 6] || '')
+			(i === 0 || (!/\w/.test(code[i - 1]) && code[i - 1] !== '.')) &&
+			/[\s(<]/.test(code[i + 6] || '')
 		) {
 			let j = i + 6;
+			// Skip whitespace between `render` and the expression
 			while (j < code.length && /[ \t]/.test(code[j])) j++;
 
-			if (code[j] === '<') {
+			if (code[j] === '(') {
+				// render (...) → return (<>...</>)
+				const closePos = findMatchingParen(code, j);
+				const content = code.slice(j + 1, closePos);
+				result += `return (<>${transformRenders(content)}</>)`;
+				i = closePos + 1;
+				continue;
+			} else if (code[j] === '<') {
+				// render <jsx> → return (<>jsx</>)
 				const jsxEnd = findJSXElementEnd(code, j);
 				if (jsxEnd > j) {
 					const jsx = code.slice(j, jsxEnd);
-					result += `return (<>${jsx}</>)`;
+					result += `return (<>${transformRenders(jsx)}</>)`;
 					i = jsxEnd;
 					continue;
 				}
+			} else if (code[j] && code[j] !== '{') {
+				// render expr → return expr
+				const exprEnd = findExpressionEnd(code, j);
+				let expr = code.slice(j, exprEnd).replace(/[\s;]+$/, '');
+				result += `return ${expr}`;
+				i = exprEnd;
+				continue;
 			}
 		}
 
@@ -326,6 +335,27 @@ function transformInlineRenders(code: string): string {
 	}
 
 	return result;
+}
+
+/**
+ * Find the end of an expression statement for `render expr`.
+ * Tracks parens/brackets depth; ends at `;` or newline at depth 0.
+ */
+function findExpressionEnd(code: string, start: number): number {
+	let i = start;
+	let depth = 0;
+
+	while (i < code.length) {
+		const ch = code[i];
+		if (ch === '(' || ch === '[') { depth++; i++; continue; }
+		if (ch === ')' || ch === ']') { depth--; i++; continue; }
+		if (ch === "'" || ch === '"') { i = skipString(code, i); continue; }
+		if (ch === '`') { i = skipTemplateLiteral(code, i); continue; }
+		if (ch === ';') return i + 1;
+		if (ch === '\n' && depth === 0) return i;
+		i++;
+	}
+	return i;
 }
 
 /**
@@ -726,8 +756,16 @@ function buildCFCallback(body: string, params?: string): string {
 		return `${arrow} { ${body} }`;
 	}
 
-	// Default: pure inline JSX body
-	return `${arrow} (<>${body}</>)`;
+	// JSX body: starts with `<` (element/fragment) or contains JSX tags
+	// → wrap in fragment so OXC parses as JSX children
+	const trimmed = body.trim();
+	if (trimmed.startsWith('<')) {
+		return `${arrow} (<>${body}</>)`;
+	}
+
+	// Bare JS expression (count, "text", 6, {name: "John"}.name, etc.)
+	// → return directly without wrapping in JSX fragment
+	return `${arrow} (${body})`;
 }
 
 interface ControlFlowResult {
@@ -792,6 +830,38 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 		if (pc === '>' && k > 0 && code[k - 1] === '=') return null;    // arrow body
 		if (pc === ':') return null;                                      // case/label body
 		if (/\belse$/.test(code.slice(Math.max(0, k - 4), k + 1))) return null;
+
+		// Return type annotation: `): Type {` or `): Type<T> {`
+		// Scan backward past the type (identifiers, dots, generics, arrays, unions)
+		// and check if we ultimately find `)` which indicates a function body.
+		if (/[\w\]>]/.test(pc)) {
+			let t = k;
+			while (t >= 0) {
+				if (/[\w.$]/.test(code[t])) { t--; continue; }
+				if (code[t] === '|' || code[t] === '&') { t--; continue; }  // union/intersection
+				if (/\s/.test(code[t])) { t--; continue; }
+				if (code[t] === ']' && t > 0 && code[t - 1] === '[') { t -= 2; continue; } // array type
+				if (code[t] === '>') {
+					// Skip generic angle brackets: find matching <
+					let depth = 1;
+					t--;
+					while (t >= 0 && depth > 0) {
+						if (code[t] === '>') depth++;
+						else if (code[t] === '<') depth--;
+						t--;
+					}
+					continue;
+				}
+				break;
+			}
+			// After scanning past the type, check for `: )` pattern (return type annotation)
+			while (t >= 0 && /\s/.test(code[t])) t--;
+			if (t >= 0 && code[t] === ':') {
+				t--;
+				while (t >= 0 && /\s/.test(code[t])) t--;
+				if (t >= 0 && code[t] === ')') return null;              // function body with return type
+			}
+		}
 	}
 
 	const outerClose = findMatchingBrace(code, openBrace);

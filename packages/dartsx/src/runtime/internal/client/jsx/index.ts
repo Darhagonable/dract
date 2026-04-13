@@ -48,6 +48,12 @@ export function jsx(
 
 		if (result instanceof Node) return result;
 		if (result != null && typeof result.then === 'function') return result;
+		if (typeof result === 'function') {
+			// Reactive component return (e.g. fragment with single reactive child)
+			const frag = document.createDocumentFragment();
+			appendChild(frag, result);
+			return frag;
+		}
 		if (result == null) return document.createComment('');
 		return document.createTextNode(String(result));
 	}

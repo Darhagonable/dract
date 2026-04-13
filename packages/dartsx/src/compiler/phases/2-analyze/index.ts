@@ -7,6 +7,16 @@
 import type { ComponentMeta, PreprocessResult, ExtractedStyleBlock } from '../1-parse';
 import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
 
+// ── Helpers ────────────────────────────────────────────────────────
+
+/** Unwrap TypeScript type assertion nodes to get the underlying expression */
+function unwrapTSExpression(node: any): any {
+	while (node && (node.type === 'TSAsExpression' || node.type === 'TSSatisfiesExpression' || node.type === 'TSNonNullExpression' || node.type === 'TSTypeAssertion')) {
+		node = node.expression;
+	}
+	return node;
+}
+
 // ── IR Types ───────────────────────────────────────────────────────
 
 export type DeclEntry =
@@ -164,6 +174,8 @@ export interface JSXAttrIR {
 	bindGetter?: string;
 	/** For function bindings: explicit setter expression */
 	bindSetter?: string;
+	/** JSX nodes found inside the attribute expression (positions relative to value string) */
+	nestedJSX?: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }>;
 }
 
 // ── Analysis Result (full module) ──────────────────────────────────
@@ -212,6 +224,17 @@ export interface AnalysisResult {
 		localEnd: number;
 		/** Component IR */
 		ir: ComponentIR;
+	}>;
+	/** JSX nodes found in module-level statements */
+	moduleJSXNodes: Array<{
+		/** Index into moduleStatements array */
+		statementIndex: number;
+		/** Start offset within the statement text */
+		localStart: number;
+		/** End offset within the statement text */
+		localEnd: number;
+		/** Analyzed JSX IR */
+		ir: JSXNodeIR;
 	}>;
 }
 
@@ -319,14 +342,16 @@ export function analyze(
 					const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
 
 					if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
-						const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
+						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
 						moduleStateVars.push({ name, initExpr, exported });
 						moduleReactiveVars.add(name);
 						if (decl.init && isProxyInit(decl.init)) moduleProxyVars.add(name);
 						if (exported) reactiveExports.push(name);
 						handled = true;
 					} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
-						const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
+						const expr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
 						moduleDerivedVars.push({ name, expr, exported });
 						moduleReactiveVars.add(name);
 						if (exported) reactiveExports.push(name);
@@ -362,23 +387,57 @@ export function analyze(
 
 	// Process pending non-function statements
 	const nestedComponents: AnalysisResult['nestedComponents'] = [];
+	const moduleJSXNodes: AnalysisResult['moduleJSXNodes'] = [];
 
 	/** Discover and analyze component declarations nested inside a statement node */
 	function collectNestedComponents(node: any, stmtIndex: number): void {
 		const nested: Array<{ fnInfo: FnInfo; start: number; end: number }> = [];
 		findNestedFunctionDecls(node, componentNames, nested);
+		if (nested.length === 0) return;
+
 		for (const { fnInfo: nestedFn, start, end } of nested) {
 			const compMeta = meta.components.find(c => c.name === nestedFn.name)!;
 			const compStyleBlocks = (meta.styleBlocks || []).filter(
 				(sb) => sb.sourceOffset >= start && sb.sourceOffset < end,
 			);
-			const ir = analyzeComponent(nestedFn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams, compStyleBlocks);
+
+			// Build reactive var set: module-level + state/derived vars in the direct parent function
+			const enclosingReactiveVars = new Set(moduleReactiveVars);
+			const parentFn = findDirectParentFunction(node, start, componentNames);
+			if (parentFn) {
+				const parentSource = source.slice(parentFn.start, parentFn.end);
+				const stateRe = /let\s+(\w+)\s*\/\*@s\*\//g;
+				const derivedRe = /const\s+(\w+)\s*\/\*@d\*\//g;
+				let m: RegExpExecArray | null;
+				while ((m = stateRe.exec(parentSource)) !== null) enclosingReactiveVars.add(m[1]);
+				while ((m = derivedRe.exec(parentSource)) !== null) enclosingReactiveVars.add(m[1]);
+			}
+
+			const ir = analyzeComponent(nestedFn, compMeta, source, stateSet, derivedSet, enclosingReactiveVars, meta.renamedParams, compStyleBlocks);
 			nestedComponents.push({
 				statementIndex: stmtIndex,
 				localStart: start - node.start,
 				localEnd: end - node.start,
 				ir,
 			});
+		}
+	}
+
+	/** Discover and analyze JSX nodes in a module-level statement */
+	function collectModuleJSX(node: any, stmtIndex: number): void {
+		const jsxNodes: Array<{ start: number; end: number }> = [];
+		findTopLevelJSX(node, componentNames, jsxNodes);
+		for (const { start, end } of jsxNodes) {
+			const jsxAST = findASTNodeAt(node, start);
+			if (jsxAST) {
+				const ir = analyzeJSXNode(jsxAST, source);
+				moduleJSXNodes.push({
+					statementIndex: stmtIndex,
+					localStart: start - node.start,
+					localEnd: end - node.start,
+					ir,
+				});
+			}
 		}
 	}
 
@@ -411,6 +470,7 @@ export function analyze(
 			const stmtIndex = moduleStatements.length;
 			moduleStatements.push(source.slice(node.start, node.end));
 			collectNestedComponents(node, stmtIndex);
+			collectModuleJSX(node, stmtIndex);
 		}
 	}
 
@@ -419,6 +479,7 @@ export function analyze(
 		const stmtIndex = moduleStatements.length;
 		moduleStatements.push(source.slice(node.start, node.end));
 		collectNestedComponents(node, stmtIndex);
+		collectModuleJSX(node, stmtIndex);
 	}
 
 	// Convert Set<number> to number[] for the result
@@ -481,6 +542,7 @@ export function analyze(
 		reactiveCallTargets,
 		importSpecifiers,
 		nestedComponents,
+		moduleJSXNodes,
 	};
 }
 
@@ -567,6 +629,44 @@ function walkCallSites(
  * known component names. Used to discover components nested inside expression
  * statements (e.g. inside describe/it test blocks).
  */
+/**
+ * Find the nearest enclosing function that contains `targetStart`, skipping component functions.
+ */
+function findDirectParentFunction(
+	node: any,
+	targetStart: number,
+	componentNames: Set<string>,
+): any {
+	if (!node || typeof node !== 'object') return null;
+	if (node.start > targetStart || node.end <= targetStart) return null;
+
+	const isFn = node.type === 'FunctionDeclaration'
+		|| node.type === 'FunctionExpression'
+		|| node.type === 'ArrowFunctionExpression';
+	const isComponent = isFn && node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name);
+
+	// Recurse into children first to find the nearest parent
+	for (const field of AST_CHILD_FIELDS) {
+		const child = node[field];
+		if (child == null) continue;
+		if (Array.isArray(child)) {
+			for (const item of child) {
+				if (item && typeof item === 'object' && item.type) {
+					const found = findDirectParentFunction(item, targetStart, componentNames);
+					if (found) return found;
+				}
+			}
+		} else if (typeof child === 'object' && child.type) {
+			const found = findDirectParentFunction(child, targetStart, componentNames);
+			if (found) return found;
+		}
+	}
+
+	// If this is a non-component function containing the target, return it
+	if (isFn && !isComponent) return node;
+	return null;
+}
+
 function findNestedFunctionDecls(
 	node: any,
 	componentNames: Set<string>,
@@ -597,6 +697,82 @@ function findNestedFunctionDecls(
 			findNestedFunctionDecls(child, componentNames, results);
 		}
 	}
+}
+
+/**
+ * Find top-level JSX nodes in an AST subtree (not inside component functions or other JSX).
+ */
+function findTopLevelJSX(
+	node: any,
+	componentNames: Set<string>,
+	results: Array<{ start: number; end: number }>,
+): void {
+	if (!node || typeof node !== 'object') return;
+
+	// Stop at component function bodies — their JSX is handled by the component pipeline
+	if (node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name)) return;
+
+	// Found a top-level JSX node — collect it and don't recurse (children are handled by analyzeJSXNode)
+	if (node.type === 'JSXElement' || node.type === 'JSXFragment') {
+		results.push({ start: node.start, end: node.end });
+		return;
+	}
+
+	for (const field of AST_CHILD_FIELDS) {
+		const child = node[field];
+		if (child == null) continue;
+		if (Array.isArray(child)) {
+			for (const item of child) {
+				if (item && typeof item === 'object' && item.type) {
+					findTopLevelJSX(item, componentNames, results);
+				}
+			}
+		} else if (typeof child === 'object' && child.type) {
+			findTopLevelJSX(child, componentNames, results);
+		}
+	}
+}
+
+/** Find an AST node by its start position */
+function findASTNodeAt(node: any, start: number): any {
+	if (!node || typeof node !== 'object') return null;
+	if ((node.type === 'JSXElement' || node.type === 'JSXFragment') && node.start === start) return node;
+	for (const field of AST_CHILD_FIELDS) {
+		const child = node[field];
+		if (child == null) continue;
+		if (Array.isArray(child)) {
+			for (const item of child) {
+				if (item && typeof item === 'object' && item.type) {
+					const found = findASTNodeAt(item, start);
+					if (found) return found;
+				}
+			}
+		} else if (typeof child === 'object' && child.type) {
+			const found = findASTNodeAt(child, start);
+			if (found) return found;
+		}
+	}
+	return null;
+}
+
+/** Collect JSX nodes inside an attribute expression and return them with positions relative to the expression start */
+function collectNestedJSXInExpr(exprNode: any, source: string): Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> {
+	const hits: Array<{ start: number; end: number }> = [];
+	findTopLevelJSX(exprNode, new Set(), hits);
+	if (hits.length === 0) return [];
+	const exprStart = exprNode.start;
+	const result: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> = [];
+	for (const { start, end } of hits) {
+		const jsxAST = findASTNodeAt(exprNode, start);
+		if (jsxAST) {
+			result.push({
+				localStart: start - exprStart,
+				localEnd: end - exprStart,
+				ir: analyzeJSXNode(jsxAST, source),
+			});
+		}
+	}
+	return result;
 }
 
 /** Known AST fields that contain child nodes — avoids iterating all object keys */
@@ -684,13 +860,15 @@ function analyzeComponent(
 					const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
 
 					if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
-						const initExpr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
+						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
 						stateVars.push({ name, initExpr });
 						orderedDecls.push({ kind: 'state', name, initExpr });
 						reactiveVars.add(name);
 						if (decl.init && isProxyInit(decl.init)) proxyVars.add(name);
 					} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
-						const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
+						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
+						const expr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
 						derivedVars.push({ name, expr });
 						orderedDecls.push({ kind: 'derived', name, expr });
 						reactiveVars.add(name);
@@ -711,8 +889,15 @@ function analyzeComponent(
 				while (jsxNode.type === 'ParenthesizedExpression') {
 					jsxNode = jsxNode.expression;
 				}
-				jsxRootNode = jsxNode;
-				jsx = analyzeJSXNode(jsxNode, source);
+				// Only treat as JSX render if the argument is actually JSX
+				if (jsxNode.type === 'JSXElement' || jsxNode.type === 'JSXFragment') {
+					jsxRootNode = jsxNode;
+					jsx = analyzeJSXNode(jsxNode, source);
+				} else {
+					// Non-JSX return (e.g. `render null`, `render getValue()`)
+					bodyStatements.push(source.slice(stmt.start, stmt.end));
+					orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
+				}
 			} else {
 				// Other statements — preserve as-is
 				bodyStatements.push(source.slice(stmt.start, stmt.end));
@@ -983,10 +1168,12 @@ function analyzeJSXElement(node: any, source: string): JSXElementIR {
 
 		// Dynamic vs static
 		if (attr.value?.type === 'JSXExpressionContainer') {
+			const nestedJSX = collectNestedJSXInExpr(attr.value.expression, source);
 			attributes.push({
 				kind: 'dynamic',
 				name: attrName,
 				value: attrValue,
+				...(nestedJSX.length > 0 ? { nestedJSX } : {}),
 			});
 		} else {
 			attributes.push({
@@ -1082,8 +1269,12 @@ function extractJSXChildren(node: any, source: string): JSXNodeIR[] {
 	if (jsx.type === 'JSXFragment') {
 		return (jsx.children || []).map((c: any) => analyzeJSXNode(c, source));
 	}
-	const analyzed = analyzeJSXNode(jsx, source);
-	return analyzed.type === 'fragment' ? analyzed.children : [analyzed];
+	if (jsx.type === 'JSXElement') {
+		const analyzed = analyzeJSXNode(jsx, source);
+		return analyzed.type === 'fragment' ? analyzed.children : [analyzed];
+	}
+	// Non-JSX expression (bare expression like count, "text", 6, etc.)
+	return [{ type: 'expression', raw: source.slice(jsx.start, jsx.end) }];
 }
 
 function analyzeIfBlock(callExpr: any, source: string): JSXIfBlockIR {

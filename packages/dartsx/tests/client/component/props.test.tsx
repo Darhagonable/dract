@@ -298,4 +298,25 @@ describe('component > callback props', () => {
 		await tick();
 		expect(container.querySelector('span').textContent).toBe('cancelled');
 	});
+
+	it('passes a callback prop that returns JSX', async () => {
+		component Fallback() {
+			render <span>fallback content</span>
+		}
+
+		component Wrapper(fallback?: () => any) {
+			render (
+				<div>
+					{fallback ? fallback() : 'no fallback'}
+				</div>
+			);
+		}
+
+		component App() {
+			render <Wrapper fallback={() => <Fallback />} />
+		}
+
+		mountComponent(App);
+		expect(container.querySelector('span').textContent).toBe('fallback content');
+	});
 });

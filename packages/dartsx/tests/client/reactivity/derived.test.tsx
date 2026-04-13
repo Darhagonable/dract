@@ -103,3 +103,48 @@ describe('reactivity > derived skip propagation', () => {
 		expect(runtime.isProxy(runtime.get(counter))).toBe(true);
 	});
 });
+
+describe('reactivity > derived object literal', () => {
+	it('derives an object literal from state', async () => {
+		component App() {
+			state count = 1;
+			derived obj = { count, doubled: count * 2 };
+
+			render (
+				<span class="c">{obj.count}</span>
+				<span class="d">{obj.doubled}</span>
+				<button onclick={() => count++}>inc</button>
+			);
+		}
+
+		mountComponent(App);
+		expect(container.querySelector('.c').textContent).toBe('1');
+		expect(container.querySelector('.d').textContent).toBe('2');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('.c').textContent).toBe('2');
+		expect(container.querySelector('.d').textContent).toBe('4');
+	});
+
+	it('derives a module-level object literal from state', async () => {
+		state x = 10;
+		derived info = { value: x, label: 'test' };
+
+		component Display() {
+			render (
+				<span class="v">{info.value}</span>
+				<span class="l">{info.label}</span>
+				<button onclick={() => x = 20}>set</button>
+			);
+		}
+
+		mountComponent(Display);
+		expect(container.querySelector('.v').textContent).toBe('10');
+		expect(container.querySelector('.l').textContent).toBe('test');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('.v').textContent).toBe('20');
+	});
+});

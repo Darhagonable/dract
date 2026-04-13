@@ -15,6 +15,14 @@ import type {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+/** Unwrap TypeScript type assertion nodes to get the underlying expression */
+function unwrapTSExpression(node: any): any {
+	while (node && (node.type === 'TSAsExpression' || node.type === 'TSSatisfiesExpression' || node.type === 'TSNonNullExpression' || node.type === 'TSTypeAssertion')) {
+		node = node.expression;
+	}
+	return node;
+}
+
 interface Replacement {
 	start: number;
 	end: number;
@@ -386,11 +394,12 @@ export function transformBodyStatement(
 				const markerText = stmt.slice(s(decl.id.end), s(decl.init?.start ?? decl.id.end));
 				if (localStateVars.has(name) && markerText.includes(STATE_MARKER)) {
 					// let name /*@s*/ = expr → let name = $.state(expr)
-					const initStart = s(decl.init.start);
-					const initEnd = s(decl.init.end);
-					const initExpr = stmt.slice(initStart, initEnd);
+					// Strip TS type assertions (as any, satisfies T, etc.) from the initializer
+					const initNode = unwrapTSExpression(decl.init);
+					const initStart = s(initNode.start);
+					const initEnd = s(initNode.end);
 					replacements.push({ start: s(decl.id.end), end: initStart, text: ' = $.state(' });
-					replacements.push({ start: initEnd, end: initEnd, text: ')' });
+					replacements.push({ start: initEnd, end: s(decl.init.end), text: ')' });
 					coveredSpans.push({ start: decl.id.start, end: decl.init.end });
 				} else if (localDerivedVars.has(name) && markerText.includes(DERIVED_MARKER)) {
 					// const name /*@d*/ = expr → const name = $.derived(() => expr)
@@ -398,7 +407,8 @@ export function transformBodyStatement(
 					const initEnd = s(decl.init.end);
 					const initExpr = stmt.slice(initStart, initEnd);
 					const wrappedInit = wrapReadsInGet(initExpr, allReactiveVars, proxyVars, allDirectMemberAccessVars);
-					replacements.push({ start: s(decl.id.end), end: initEnd, text: ` = $.derived(() => ${wrappedInit})` });
+					const derivedBody = wrappedInit.trimStart().startsWith('{') ? `(${wrappedInit})` : wrappedInit;
+					replacements.push({ start: s(decl.id.end), end: initEnd, text: ` = $.derived(() => ${derivedBody})` });
 					coveredSpans.push({ start: decl.id.start, end: decl.init.end });
 				}
 			}

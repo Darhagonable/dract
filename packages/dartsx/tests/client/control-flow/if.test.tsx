@@ -158,3 +158,53 @@ describe('control-flow > if with block render', () => {
 		expect(container.querySelector('span').textContent).toBe('visible');
 	});
 });
+
+describe('control-flow > if bare expressions', () => {
+	it('renders bare expressions in if-block branches', async () => {
+		component App() {
+			state count = 5;
+
+			render (
+				<button onclick={() => count = 0}>zero</button>
+				<div>
+					{if (count > 0) {
+						count
+					} else {
+						0
+					}}
+				</div>
+			);
+		}
+
+		mountComponent(App);
+		expect(container.querySelector('div').textContent.trim()).toBe('5');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('div').textContent.trim()).toBe('0');
+	});
+
+	it('renders string expressions in if-block branches', async () => {
+		component App() {
+			state count = 0;
+
+			render (
+				<button onclick={() => count = 3}>set</button>
+				<div>
+					{if (count > 0) {
+						"has items"
+					} else {
+						"no items"
+					}}
+				</div>
+			);
+		}
+
+		mountComponent(App);
+		expect(container.querySelector('div').textContent.trim()).toBe('no items');
+
+		container.querySelector('button').click();
+		await tick();
+		expect(container.querySelector('div').textContent.trim()).toBe('has items');
+	});
+});

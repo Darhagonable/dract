@@ -25,6 +25,7 @@ import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } 
 // Module-level proxy vars for current transform context (avoids threading through every function)
 let currentProxyVars: Set<string> | undefined;
 let currentDirectMemberAccessVars: Set<string> | undefined;
+let moduleDirectMemberAccess: Set<string> | undefined;
 /** Scope data attribute strings for the component currently being transformed (for render prop injection) */
 let currentScopeAttrs: string[] | undefined;
 
@@ -40,8 +41,9 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 	const lines: string[] = [];
 	const cssFragments: string[] = [];
 	const emitStyleCalls = cssMode !== 'external'; // default: injected
-	const moduleDirectMemberAccessVars = new Set<string>(analysis.moduleProxyVars);
-	for (const d of analysis.moduleDerivedVars) moduleDirectMemberAccessVars.add(d.name);
+	const moduleDMA = new Set<string>(analysis.moduleProxyVars);
+	for (const d of analysis.moduleDerivedVars) moduleDMA.add(d.name);
+	moduleDirectMemberAccess = moduleDMA;
 
 	const needsRuntime =
 		analysis.components.length > 0 ||
@@ -65,8 +67,8 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 
 	for (const d of analysis.moduleDerivedVars) {
 		const prefix = d.exported ? 'export ' : '';
-		const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDirectMemberAccessVars);
-		lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrappedExpr});`);
+		const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA);
+		lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrapArrowBody(wrappedExpr)});`);
 	}
 
 	if (analysis.moduleStateVars.length > 0 || analysis.moduleDerivedVars.length > 0) {
@@ -78,13 +80,13 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 		for (const p of fn.reactiveParams) mergedReactive.add(p);
 		lines.push(fn.signature);
 		for (const stmt of fn.bodyStatements) {
-			lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDirectMemberAccessVars)}`);
+			lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA)}`);
 		}
 		lines.push('}');
 	}
 	if (analysis.moduleFunctions.length > 0) lines.push('');
 
-	// Group nested components by their parent statement index
+	// Group nested components and JSX nodes by their parent statement index
 	const nestedByIndex = new Map<number, typeof analysis.nestedComponents>();
 	for (const nc of analysis.nestedComponents) {
 		if (!nestedByIndex.has(nc.statementIndex)) {
@@ -92,16 +94,24 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 		}
 		nestedByIndex.get(nc.statementIndex)!.push(nc);
 	}
+	const jsxByIndex = new Map<number, typeof analysis.moduleJSXNodes>();
+	for (const jn of analysis.moduleJSXNodes) {
+		if (!jsxByIndex.has(jn.statementIndex)) {
+			jsxByIndex.set(jn.statementIndex, []);
+		}
+		jsxByIndex.get(jn.statementIndex)!.push(jn);
+	}
 
 	for (let i = 0; i < analysis.moduleStatements.length; i++) {
 		let stmt = analysis.moduleStatements[i];
 		const nested = nestedByIndex.get(i);
+		const jsxNodes = jsxByIndex.get(i);
+
+		// Replace nested component and JSX spans with placeholders before reactive transforms
+		const placeholders: Array<{ placeholder: string; compiled: string }> = [];
 
 		if (nested) {
-			// Replace nested component source spans with placeholders, then splice in compiled code after
 			const sorted = [...nested].sort((a, b) => b.localStart - a.localStart);
-			const placeholders: Array<{ placeholder: string; compiled: string }> = [];
-
 			for (let j = 0; j < sorted.length; j++) {
 				const nc = sorted[j];
 				const compiled = transformComponent(nc.ir, analysis.reactiveCallTargets, filename, cssFragments, emitStyleCalls);
@@ -109,19 +119,28 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 				placeholders.push({ placeholder, compiled });
 				stmt = stmt.slice(0, nc.localStart) + placeholder + stmt.slice(nc.localEnd);
 			}
-
-			// Apply reactive var transformations to the non-component parts
-			stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDirectMemberAccessVars);
-
-			// Replace placeholders with compiled component code
-			for (const { placeholder, compiled } of placeholders) {
-				stmt = stmt.replace(placeholder, compiled);
-			}
-
-			lines.push(stmt);
-		} else {
-			lines.push(transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDirectMemberAccessVars));
 		}
+
+		if (jsxNodes) {
+			const sorted = [...jsxNodes].sort((a, b) => b.localStart - a.localStart);
+			for (let j = 0; j < sorted.length; j++) {
+				const jn = sorted[j];
+				const emitted = emitJSXNode(jn.ir, new Set(), '\t');
+				const placeholder = `__DARTSX_JSX_${j}__`;
+				placeholders.push({ placeholder, compiled: emitted });
+				stmt = stmt.slice(0, jn.localStart) + placeholder + stmt.slice(jn.localEnd);
+			}
+		}
+
+		// Apply reactive var transformations
+		stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA);
+
+		// Replace placeholders with compiled code
+		for (const { placeholder, compiled } of placeholders) {
+			stmt = stmt.replace(placeholder, compiled);
+		}
+
+		lines.push(stmt);
 	}
 	if (analysis.moduleStatements.length > 0) lines.push('');
 
@@ -146,6 +165,10 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	for (const d of comp.derivedVars) directMemberAccessVars.add(d.name);
 	for (const p of comp.params) {
 		if (!p.isRest) directMemberAccessVars.add(p.name);
+	}
+	// Include module-level proxy/derived vars so obj.prop stays as direct access
+	if (moduleDirectMemberAccess) {
+		for (const v of moduleDirectMemberAccess) directMemberAccessVars.add(v);
 	}
 	currentDirectMemberAccessVars = directMemberAccessVars.size > 0 ? directMemberAccessVars : undefined;
 
@@ -214,7 +237,7 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 				lines.push(`    const ${decl.name} = ${wrappedExpr};`);
 			} else {
 				const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-				lines.push(`    const ${decl.name} = $.derived(() => ${wrappedExpr});`);
+				lines.push(`    const ${decl.name} = $.derived(() => ${wrapArrowBody(wrappedExpr)});`);
 			}
 		} else {
 			lines.push(`    ${transformBodyStatement(decl.text, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars)}`);
@@ -228,7 +251,11 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	}
 
 	const jsxCode = emitJSXNode(comp.jsx, comp.reactiveVars, '    ');
-	lines.push(`    return ${jsxCode};`);
+	// Only emit `return null;` if there's actual JSX to render or no expression renders
+	const hasExpressionReturn = comp.bodyStatements.some(s => /\breturn\b/.test(s));
+	if (jsxCode !== 'null' || !hasExpressionReturn) {
+		lines.push(`    return ${jsxCode};`);
+	}
 	lines.push('}');
 	currentDirectMemberAccessVars = undefined;
 	currentScopeAttrs = undefined;
@@ -524,6 +551,21 @@ function emitComponentCall(node: JSXElementIR, reactiveVars: Set<string>, indent
 
 function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>, isComponent: boolean): void {
 	const key = formatObjectKey(attr.name);
+
+	// Compile any nested JSX inside the attribute value before further processing
+	if (attr.nestedJSX && attr.nestedJSX.length > 0 && attr.value) {
+		const sorted = [...attr.nestedJSX].sort((a, b) => b.localStart - a.localStart);
+		let val = attr.value;
+		for (const { localStart, localEnd, ir } of sorted) {
+			// Inject scope attributes into nested JSX IR when in a scoped component
+			if (currentScopeAttrs && currentScopeAttrs.length > 0) {
+				injectAttrsRecursive(ir, currentScopeAttrs);
+			}
+			val = val.slice(0, localStart) + emitJSXNode(ir, reactiveVars, '\t') + val.slice(localEnd);
+		}
+		attr = { ...attr, value: val, nestedJSX: undefined };
+	}
+
 	switch (attr.kind) {
 		case 'static': {
 			const val = attr.value === 'true' ? 'true' : JSON.stringify(attr.value || '');
@@ -721,6 +763,12 @@ function emitAnonymousBlock(node: JSXAnonymousBlockIR, reactiveVars: Set<string>
 // ── Branch helpers ─────────────────────────────────────────────────
 
 function emitBranchReturn(children: JSXNodeIR[], reactiveVars: Set<string>, indent: string): string {
+	// Single expression child: emit with reactive wrapping but without the extra arrow,
+	// since the branch callback already provides the reactive context
+	if (children.length === 1 && children[0].type === 'expression') {
+		const expr = children[0] as JSXExpressionIR;
+		return wrapReadsInGet(expr.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+	}
 	const childStrs = emitChildrenArray(children, reactiveVars, indent);
 	if (childStrs.length === 0) return 'null';
 	if (childStrs.length === 1) return childStrs[0];
