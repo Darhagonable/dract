@@ -5,6 +5,7 @@ import { RenamedPropsDemo } from "./RenamedPropsDemo";
 import { ContextDemo } from "./ContextDemo";
 import { ReactiveContextDemo } from "./ReactiveContextDemo";
 import { StyleShowcase } from "./styling/StyleShowcase";
+import { RouterDemo } from "./RouterDemo";
 import { test } from "./helper-test";
 
 export default component App() {
@@ -39,6 +40,8 @@ export default component App() {
       <ReactiveContextDemo />
       <hr />
       <StyleShowcase />
+      <hr />
+      <RouterDemo />
     </div>
   )
 }

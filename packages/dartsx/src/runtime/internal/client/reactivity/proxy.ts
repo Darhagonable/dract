@@ -136,7 +136,9 @@ function shouldProxy(value: any): boolean {
 		isPlainObject(value) ||
 		value instanceof Map ||
 		value instanceof Set ||
-		value instanceof Date
+		value instanceof Date ||
+		value instanceof URL ||
+		value instanceof URLSearchParams
 	);
 }
 
@@ -155,6 +157,10 @@ export function proxy<T>(value: T, _parentRoot?: State): T {
 		result = proxySet(value, _parentRoot);
 	} else if (value instanceof Date) {
 		result = proxyDate(value, _parentRoot);
+	} else if (value instanceof URL) {
+		result = new ReactiveURL(value);
+	} else if (value instanceof URLSearchParams) {
+		result = new ReactiveURLSearchParams(value);
 	} else {
 		result = proxyObject(value, _parentRoot);
 	}
@@ -463,4 +469,255 @@ function proxyDate(target: Date, parentRoot?: State): Date {
 
 	proxySignals.set(result, sig);
 	return result;
+}
+
+// ── URL / URLSearchParams reactive wrappers ────────────────────────
+
+export const REPLACE = Symbol();
+
+let current_url: ReactiveURL | null = null;
+
+export class ReactiveURLSearchParams extends URLSearchParams {
+	[STATE_SYMBOL] = true;
+	#version = source(0);
+	#url = current_url;
+	#updating = false;
+
+	constructor(init?: string | URLSearchParams | Record<string, string> | [string, string][]) {
+		super(init as any);
+		proxySignals.set(this, this.#version);
+	}
+
+	#increment() {
+		this.#version.v++; notify(this.#version);
+	}
+
+	#update_url() {
+		if (!this.#url || this.#updating) return;
+		this.#updating = true;
+		const search = super.toString();
+		this.#url.search = search ? `?${search}` : '';
+		this.#updating = false;
+	}
+
+	/** @internal — bulk replace (used by ReactiveURL) */
+	[REPLACE](params: URLSearchParams): void {
+		if (this.#updating) return;
+		this.#updating = true;
+		for (const key of [...super.keys()]) {
+			super.delete(key);
+		}
+		for (const [key, value] of params) {
+			super.append(key, value);
+		}
+		this.#increment();
+		this.#updating = false;
+	}
+
+	// ── Write methods ──────────────────────────────────────────────
+
+	append(name: string, value: string): void {
+		super.append(name, value);
+		this.#update_url();
+		this.#increment();
+	}
+
+	delete(name: string, value?: string): void {
+		const had = super.has(name, value);
+		super.delete(name, value);
+		if (had) {
+			this.#update_url();
+			this.#increment();
+		}
+	}
+
+	set(name: string, value: string): void {
+		const previous = super.getAll(name).join('');
+		super.set(name, value);
+		if (previous !== super.getAll(name).join('')) {
+			this.#update_url();
+			this.#increment();
+		}
+	}
+
+	sort(): void {
+		super.sort();
+		this.#update_url();
+		this.#increment();
+	}
+
+	// ── Read methods ───────────────────────────────────────────────
+
+	get(name: string): string | null {
+		trackRead(this.#version);
+		return super.get(name);
+	}
+
+	getAll(name: string): string[] {
+		trackRead(this.#version);
+		return super.getAll(name);
+	}
+
+	has(name: string, value?: string): boolean {
+		trackRead(this.#version);
+		return super.has(name, value);
+	}
+
+	toString(): string {
+		trackRead(this.#version);
+		return super.toString();
+	}
+
+	get size(): number {
+		trackRead(this.#version);
+		return super.size;
+	}
+
+	// ── Iterators ──────────────────────────────────────────────────
+
+	keys() { trackRead(this.#version); return super.keys(); }
+	values() { trackRead(this.#version); return super.values(); }
+	entries() { trackRead(this.#version); return super.entries(); }
+
+	forEach(callback: (value: string, key: string, parent: URLSearchParams) => void, thisArg?: any): void {
+		trackRead(this.#version);
+		super.forEach(callback, thisArg);
+	}
+
+	[Symbol.iterator]() { return this.entries(); }
+}
+
+export class ReactiveURL extends URL {
+	[STATE_SYMBOL] = true;
+	#root = source(0);
+	#protocol = source(super.protocol);
+	#username = source(super.username);
+	#password = source(super.password);
+	#hostname = source(super.hostname);
+	#port = source(super.port);
+	#pathname = source(super.pathname);
+	#hash = source(super.hash);
+	#search = source(super.search);
+	#searchParams: ReactiveURLSearchParams;
+
+	constructor(url: string | URL, base?: string | URL) {
+		url = new URL(url, base);
+		super(url);
+		current_url = this;
+		this.#searchParams = new ReactiveURLSearchParams(url.searchParams);
+		current_url = null;
+		proxySignals.set(this, this.#root);
+	}
+
+	#notifyRoot() {
+		this.#root.v++; notify(this.#root);
+	}
+
+	// ── Properties ─────────────────────────────────────────────────
+
+	get hash() { trackRead(this.#hash); return this.#hash.v as string; }
+	set hash(value: string) {
+		super.hash = value;
+		this.#hash.v = super.hash; notify(this.#hash);
+		this.#notifyRoot();
+	}
+
+	get host() {
+		trackRead(this.#hostname);
+		trackRead(this.#port);
+		return super.host;
+	}
+	set host(value: string) {
+		super.host = value;
+		this.#hostname.v = super.hostname; notify(this.#hostname);
+		this.#port.v = super.port; notify(this.#port);
+		this.#notifyRoot();
+	}
+
+	get hostname() { trackRead(this.#hostname); return this.#hostname.v as string; }
+	set hostname(value: string) {
+		super.hostname = value;
+		this.#hostname.v = super.hostname; notify(this.#hostname);
+		this.#notifyRoot();
+	}
+
+	get href() {
+		trackRead(this.#protocol);
+		trackRead(this.#username);
+		trackRead(this.#password);
+		trackRead(this.#hostname);
+		trackRead(this.#port);
+		trackRead(this.#pathname);
+		trackRead(this.#hash);
+		trackRead(this.#search);
+		return super.href;
+	}
+	set href(value: string) {
+		super.href = value;
+		this.#protocol.v = super.protocol; notify(this.#protocol);
+		this.#username.v = super.username; notify(this.#username);
+		this.#password.v = super.password; notify(this.#password);
+		this.#hostname.v = super.hostname; notify(this.#hostname);
+		this.#port.v = super.port; notify(this.#port);
+		this.#pathname.v = super.pathname; notify(this.#pathname);
+		this.#hash.v = super.hash; notify(this.#hash);
+		this.#search.v = super.search; notify(this.#search);
+		this.#searchParams[REPLACE](super.searchParams);
+		this.#notifyRoot();
+	}
+
+	get password() { trackRead(this.#password); return this.#password.v as string; }
+	set password(value: string) {
+		super.password = value;
+		this.#password.v = super.password; notify(this.#password);
+		this.#notifyRoot();
+	}
+
+	get pathname() { trackRead(this.#pathname); return this.#pathname.v as string; }
+	set pathname(value: string) {
+		super.pathname = value;
+		this.#pathname.v = super.pathname; notify(this.#pathname);
+		this.#notifyRoot();
+	}
+
+	get port() { trackRead(this.#port); return this.#port.v as string; }
+	set port(value: string) {
+		super.port = value;
+		this.#port.v = super.port; notify(this.#port);
+		this.#notifyRoot();
+	}
+
+	get protocol() { trackRead(this.#protocol); return this.#protocol.v as string; }
+	set protocol(value: string) {
+		super.protocol = value;
+		this.#protocol.v = super.protocol; notify(this.#protocol);
+		this.#notifyRoot();
+	}
+
+	get search() { trackRead(this.#search); return this.#search.v as string; }
+	set search(value: string) {
+		super.search = value;
+		this.#search.v = super.search; notify(this.#search);
+		this.#searchParams[REPLACE](super.searchParams);
+		this.#notifyRoot();
+	}
+
+	get username() { trackRead(this.#username); return this.#username.v as string; }
+	set username(value: string) {
+		super.username = value;
+		this.#username.v = super.username; notify(this.#username);
+		this.#notifyRoot();
+	}
+
+	get origin() {
+		trackRead(this.#protocol);
+		trackRead(this.#hostname);
+		trackRead(this.#port);
+		return super.origin;
+	}
+
+	get searchParams() { return this.#searchParams; }
+
+	toString() { return this.href; }
+	toJSON() { return this.href; }
 }
