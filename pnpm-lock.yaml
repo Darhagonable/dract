@@ -32,13 +32,13 @@ importers:
       oxc-parser:
         specifier: ^0.66.0
         version: 0.66.0
-    devDependencies:
       postcss:
         specifier: ^8.5.9
         version: 8.5.9
       postcss-selector-parser:
         specifier: ^7.1.1
         version: 7.1.1
+    devDependencies:
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
@@ -96,6 +96,9 @@ importers:
 
   playground:
     dependencies:
+      '@dartsx-toolkit/router':
+        specifier: workspace:*
+        version: link:../toolkit/router
       dartsx:
         specifier: workspace:*
         version: link:../packages/dartsx
@@ -112,6 +115,19 @@ importers:
       vite:
         specifier: ^8.0.0
         version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)
+
+  toolkit/router:
+    dependencies:
+      dartsx:
+        specifier: workspace:*
+        version: link:../../packages/dartsx
+    devDependencies:
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.1
+        version: 3.2.4(@types/node@25.5.0)(jsdom@29.0.1)(lightningcss@1.32.0)
 
 packages:
 

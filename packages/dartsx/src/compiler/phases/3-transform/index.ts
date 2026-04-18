@@ -60,32 +60,6 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 	}
 	if (lines.length > 0) lines.push('');
 
-	for (const s of analysis.moduleStateVars) {
-		const prefix = s.exported ? 'export ' : '';
-		lines.push(`${prefix}let ${s.name} = $.state(${s.initExpr});`);
-	}
-
-	for (const d of analysis.moduleDerivedVars) {
-		const prefix = d.exported ? 'export ' : '';
-		const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA);
-		lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrapArrowBody(wrappedExpr)});`);
-	}
-
-	if (analysis.moduleStateVars.length > 0 || analysis.moduleDerivedVars.length > 0) {
-		lines.push('');
-	}
-
-	for (const fn of analysis.moduleFunctions) {
-		const mergedReactive = new Set(analysis.moduleReactiveVars);
-		for (const p of fn.reactiveParams) mergedReactive.add(p);
-		lines.push(fn.signature);
-		for (const stmt of fn.bodyStatements) {
-			lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA)}`);
-		}
-		lines.push('}');
-	}
-	if (analysis.moduleFunctions.length > 0) lines.push('');
-
 	// Group nested components and JSX nodes by their parent statement index
 	const nestedByIndex = new Map<number, typeof analysis.nestedComponents>();
 	for (const nc of analysis.nestedComponents) {
@@ -102,55 +76,106 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 		jsxByIndex.get(jn.statementIndex)!.push(jn);
 	}
 
-	for (let i = 0; i < analysis.moduleStatements.length; i++) {
-		let stmt = analysis.moduleStatements[i];
-		const nested = nestedByIndex.get(i);
-		const jsxNodes = jsxByIndex.get(i);
+	// Merge all top-level items and emit in source order
+	type TopLevelItem =
+		| { kind: 'state'; item: (typeof analysis.moduleStateVars)[0]; sourceStart: number }
+		| { kind: 'derived'; item: (typeof analysis.moduleDerivedVars)[0]; sourceStart: number }
+		| { kind: 'function'; item: (typeof analysis.moduleFunctions)[0]; sourceStart: number }
+		| { kind: 'statement'; index: number; sourceStart: number }
+		| { kind: 'component'; item: ComponentIR; sourceStart: number };
 
-		// Replace nested component and JSX spans with placeholders before reactive transforms
-		const placeholders: Array<{ placeholder: string; compiled: string }> = [];
+	const topLevel: TopLevelItem[] = [
+		...analysis.moduleStateVars.map((s) => ({ kind: 'state' as const, item: s, sourceStart: s.sourceStart })),
+		...analysis.moduleDerivedVars.map((d) => ({ kind: 'derived' as const, item: d, sourceStart: d.sourceStart })),
+		...analysis.moduleFunctions.map((f) => ({ kind: 'function' as const, item: f, sourceStart: f.sourceStart })),
+		...analysis.moduleStatements.map((_, i) => ({ kind: 'statement' as const, index: i, sourceStart: _.sourceStart })),
+		...analysis.components.map((c) => ({ kind: 'component' as const, item: c, sourceStart: c.sourceStart ?? 0 })),
+	];
+	topLevel.sort((a, b) => a.sourceStart - b.sourceStart);
 
-		if (nested) {
-			const sorted = [...nested].sort((a, b) => b.localStart - a.localStart);
-			for (let j = 0; j < sorted.length; j++) {
-				const nc = sorted[j];
-				const compiled = transformComponent(nc.ir, analysis.reactiveCallTargets, filename, cssFragments, emitStyleCalls);
-				const placeholder = `__DARTSX_NC_${j}__`;
-				placeholders.push({ placeholder, compiled });
-				stmt = stmt.slice(0, nc.localStart) + placeholder + stmt.slice(nc.localEnd);
+	const multiLine = new Set(['component', 'function']);
+	for (let idx = 0; idx < topLevel.length; idx++) {
+		const entry = topLevel[idx];
+		// Add blank line separator before/after multi-line blocks (component, function)
+		if (idx > 0 && (multiLine.has(entry.kind) || multiLine.has(topLevel[idx - 1].kind))) {
+			lines.push('');
+		}
+		switch (entry.kind) {
+			case 'state': {
+				const s = entry.item;
+				const prefix = s.exported ? 'export ' : '';
+				lines.push(`${prefix}let ${s.name} = $.state(${s.initExpr});`);
+				break;
+			}
+			case 'derived': {
+				const d = entry.item;
+				const prefix = d.exported ? 'export ' : '';
+				const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA);
+				lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrapArrowBody(wrappedExpr)});`);
+				break;
+			}
+			case 'function': {
+				const fn = entry.item;
+				const mergedReactive = new Set(analysis.moduleReactiveVars);
+				for (const p of fn.reactiveParams) mergedReactive.add(p);
+				lines.push(fn.signature);
+				for (const stmt of fn.bodyStatements) {
+					lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA)}`);
+				}
+				lines.push('}');
+				break;
+			}
+			case 'component': {
+				lines.push(transformComponent(entry.item, analysis.reactiveCallTargets, filename, cssFragments, emitStyleCalls));
+				break;
+			}
+			case 'statement': {
+				const i = entry.index;
+				let stmt = analysis.moduleStatements[i].text;
+				const nested = nestedByIndex.get(i);
+				const jsxNodes = jsxByIndex.get(i);
+
+				const placeholders: Array<{ placeholder: string; compiled: string }> = [];
+
+				if (nested) {
+					const sorted = [...nested].sort((a, b) => b.localStart - a.localStart);
+					for (let j = 0; j < sorted.length; j++) {
+						const nc = sorted[j];
+						const compiled = transformComponent(nc.ir, analysis.reactiveCallTargets, filename, cssFragments, emitStyleCalls);
+						const placeholder = `__DARTSX_NC_${j}__`;
+						placeholders.push({ placeholder, compiled });
+						stmt = stmt.slice(0, nc.localStart) + placeholder + stmt.slice(nc.localEnd);
+					}
+				}
+
+				if (jsxNodes) {
+					const sorted = [...jsxNodes].sort((a, b) => b.localStart - a.localStart);
+					for (let j = 0; j < sorted.length; j++) {
+						const jn = sorted[j];
+						const emitted = emitJSXNode(jn.ir, new Set(), '\t');
+						const placeholder = `__DARTSX_JSX_${j}__`;
+						placeholders.push({ placeholder, compiled: emitted });
+						stmt = stmt.slice(0, jn.localStart) + placeholder + stmt.slice(jn.localEnd);
+					}
+				}
+
+				stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA);
+
+				for (const { placeholder, compiled } of placeholders) {
+					stmt = stmt.replace(placeholder, compiled);
+				}
+
+				lines.push(stmt);
+				break;
 			}
 		}
-
-		if (jsxNodes) {
-			const sorted = [...jsxNodes].sort((a, b) => b.localStart - a.localStart);
-			for (let j = 0; j < sorted.length; j++) {
-				const jn = sorted[j];
-				const emitted = emitJSXNode(jn.ir, new Set(), '\t');
-				const placeholder = `__DARTSX_JSX_${j}__`;
-				placeholders.push({ placeholder, compiled: emitted });
-				stmt = stmt.slice(0, jn.localStart) + placeholder + stmt.slice(jn.localEnd);
-			}
-		}
-
-		// Apply reactive var transformations
-		stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA);
-
-		// Replace placeholders with compiled code
-		for (const { placeholder, compiled } of placeholders) {
-			stmt = stmt.replace(placeholder, compiled);
-		}
-
-		lines.push(stmt);
 	}
-	if (analysis.moduleStatements.length > 0) lines.push('');
 
-	for (const comp of analysis.components) {
-		lines.push(transformComponent(comp, analysis.reactiveCallTargets, filename, cssFragments, emitStyleCalls));
-		lines.push('');
-	}
+	// Strip trailing blank lines
+	while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
 
 	return {
-		code: lines.join('\n'),
+		code: lines.join('\n') + '\n',
 		css: cssFragments.join('\n'),
 	};
 }
@@ -255,6 +280,19 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	const hasExpressionReturn = comp.bodyStatements.some(s => /\breturn\b/.test(s));
 	if (jsxCode !== 'null' || !hasExpressionReturn) {
 		lines.push(`    return ${jsxCode};`);
+	} else if (hasExpressionReturn && comp.reactiveVars.size > 0) {
+		// Expression-only component render: wrap return values in closures for reactivity.
+		// `return expr` → `return () => expr` when expr references reactive vars.
+		for (let i = 0; i < lines.length; i++) {
+			const m = lines[i].match(/^(\s*)return\s+(.+)$/);
+			if (!m) continue;
+			const [, indent, expr] = m;
+			// Check if the expression references any reactive var
+			const hasReactive = [...comp.reactiveVars].some(v => new RegExp(`\\b${v}\\b`).test(expr));
+			if (hasReactive) {
+				lines[i] = `${indent}return () => ${expr}`;
+			}
+		}
 	}
 	lines.push('}');
 	currentDirectMemberAccessVars = undefined;

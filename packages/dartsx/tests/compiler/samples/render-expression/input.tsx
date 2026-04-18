@@ -18,3 +18,13 @@ component Conditional(show: boolean) {
   }
   render "hidden"
 }
+
+component ReactiveExpr() {
+  state count = 0
+  render count
+}
+
+component ReactiveComplexExpr() {
+  state match = { route: null }
+  render match?.route ?? "no route"
+}

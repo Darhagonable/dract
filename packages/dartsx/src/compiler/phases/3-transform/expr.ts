@@ -321,6 +321,22 @@ export function transformBodyStatement(
 		unwrapOffset = 'function __(){'.length;
 	}
 
+	// Detect local proxy-backed state vars (object/array/new inits) and add to directMemberAccessVars
+	if (localStateVars.size > 0) {
+		walk(result.program, (node) => {
+			if (node.type !== 'VariableDeclaration') return;
+			for (const decl of node.declarations || []) {
+				const name = decl.id?.name;
+				if (!name || !localStateVars.has(name) || !decl.init) continue;
+				const init = unwrapTSExpression(decl.init);
+				const t = init.type;
+				if (t === 'ObjectExpression' || t === 'ArrayExpression' || t === 'NewExpression') {
+					allDirectMemberAccessVars.add(name);
+				}
+			}
+		});
+	}
+
 	const replacements: Replacement[] = [];
 	const coveredSpans: { start: number; end: number }[] = [];
 
@@ -345,15 +361,31 @@ export function transformBodyStatement(
 		}
 	}
 
+	// Pre-compute derived init spans to avoid conflicting replacements with Pass 0
+	const derivedInitSpans: { start: number; end: number }[] = [];
+	if (localDerivedVars.size > 0) {
+		walk(result.program, (node) => {
+			if (node.type !== 'VariableDeclaration') return;
+			for (const decl of node.declarations || []) {
+				if (localDerivedVars.has(decl.id?.name) && decl.init) {
+					derivedInitSpans.push({ start: decl.init.start, end: decl.init.end });
+				}
+			}
+		});
+	}
+
 	// Collect exclusion zones: first argument of effect() calls
 	// (deps must remain as Signal objects, not unwrapped via $.get())
 	// and args at reactive positions for functions with reactive params.
 	// For any exclusion-zone arg that is a member expression on a reactive root,
 	// wrap it in $.derived(() => ...) so the callee receives a Derived signal.
+	// Skip wrapping for args inside derived inits (Pass 0 handles those).
 	const exclusionZones: { start: number; end: number }[] = [];
 
 	function addExclusionArg(arg: ASTNode): void {
 		exclusionZones.push({ start: arg.start, end: arg.end });
+		// Skip wrapping if inside a derived init (Pass 0 handles the entire expression)
+		if (derivedInitSpans.some(d => arg.start >= d.start && arg.end <= d.end)) return;
 		// Array literal of deps: wrap each element individually
 		if (arg.type === 'ArrayExpression' && arg.elements) {
 			for (const elem of arg.elements) {
@@ -392,15 +424,25 @@ export function transformBodyStatement(
 				const name = decl.id?.name;
 				if (!name) continue;
 				const markerText = stmt.slice(s(decl.id.end), s(decl.init?.start ?? decl.id.end));
-				if (localStateVars.has(name) && markerText.includes(STATE_MARKER)) {
-					// let name /*@s*/ = expr → let name = $.state(expr)
-					// Strip TS type assertions (as any, satisfies T, etc.) from the initializer
-					const initNode = unwrapTSExpression(decl.init);
-					const initStart = s(initNode.start);
-					const initEnd = s(initNode.end);
-					replacements.push({ start: s(decl.id.end), end: initStart, text: ' = $.state(' });
-					replacements.push({ start: initEnd, end: s(decl.init.end), text: ')' });
-					coveredSpans.push({ start: decl.id.start, end: decl.init.end });
+				if (localStateVars.has(name) && (markerText.includes(STATE_MARKER) || !decl.init)) {
+					if (decl.init) {
+						// let name /*@s*/ = expr → let name = $.state(expr)
+						// Strip TS type assertions (as any, satisfies T, etc.) from the initializer
+						const initNode = unwrapTSExpression(decl.init);
+						const initStart = s(initNode.start);
+						const initEnd = s(initNode.end);
+						replacements.push({ start: s(decl.id.end), end: initStart, text: ' = $.state(' });
+						replacements.push({ start: initEnd, end: s(decl.init.end), text: ')' });
+						coveredSpans.push({ start: decl.id.start, end: decl.init.end });
+					} else {
+						// let name /*@s*/ → let name = $.state()
+						// Find end of trailing marker comment + whitespace
+						const afterId = s(decl.id.end);
+						const lineEnd = stmt.indexOf('\n', afterId);
+						const trailingEnd = lineEnd === -1 ? stmt.length : lineEnd;
+						replacements.push({ start: afterId, end: trailingEnd, text: ' = $.state()' });
+						coveredSpans.push({ start: decl.id.start, end: decl.id.end });
+					}
 				} else if (localDerivedVars.has(name) && markerText.includes(DERIVED_MARKER)) {
 					// const name /*@d*/ = expr → const name = $.derived(() => expr)
 					const initStart = s(decl.init.start);

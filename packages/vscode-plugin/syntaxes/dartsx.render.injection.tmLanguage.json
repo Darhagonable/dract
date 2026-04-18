@@ -28,7 +28,7 @@
 			]
 		},
 		"state": {
-			"match": "\\b(state)\\s+([A-Za-z_$][\\w$]*)\\s*(?==)",
+			"match": "\\b(state)\\s+([A-Za-z_$][\\w$]*)",
 			"captures": {
 				"1": { "name": "storage.type.state.dartsx" },
 				"2": { "name": "variable.other.readwrite.tsx" }

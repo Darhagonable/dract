@@ -110,13 +110,13 @@ export function preprocess(source: string): PreprocessResult {
 	//     so OXC can parse it as a valid identifier, and the analyzer can detect it.
 	code = code.replace(/\bbind\s+(\w+)/g, '__bind__$1');
 
-	// 2. Transform `state varName = expr` or `state varName: Type = expr` → `let varName /*@s*/ = expr`
+	// 2. Transform `state varName = expr`, `state varName: Type = expr`, or `state varName: Type` → `let varName /*@s*/ ...`
 	//    The /*@s*/ marker lets the analyzer identify this as a state declaration
 	//    regardless of scope, without relying on name matching alone.
 	//    Optional type annotations (`: Type`) are stripped — the runtime $.state()
 	//    call infers the type from the initializer.
 	code = code.replace(
-		/(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)(?:\s*:[\s\S]*?)?(?=\s*=(?!>))/g,
+		/(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)(?:\s*:[\s\S]*?)?(?=\s*=(?!>)|\s*[\n;]|\s*$)/gm,
 		(_match, exportKw, name) => {
 			stateVars.push(name);
 			return `${exportKw || ''}let ${name} ${STATE_MARKER} `;

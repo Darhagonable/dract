@@ -83,22 +83,23 @@ function bridgeProxyToSignal(proxyValue: any, sig: State): void {
 	proxySig.subs.add(bridge);
 }
 
-export function state<T>(initialValue: T): State<T> {
-	const sig: State<T> = { v: undefined as T, version: 0, subs: new Set(), [SIGNAL]: true };
-
+export function state<T = undefined>(): State<T | undefined>
+export function state<T>(initialValue: T): State<T>
+export function state<T>(initialValue?: T): State<T> {
 	// Object/array: create proxy, then share subs between proxy root & State signal
-	const v = (typeof initialValue === 'object' && initialValue !== null && !isProxy(initialValue))
+	const value = (typeof initialValue === 'object' && initialValue !== null && !isProxy(initialValue))
 		? proxy(initialValue)
 		: initialValue;
-	sig.v = v;
+
+	const sig: State<T> = { v: value as T, version: 0, subs: new Set(), [SIGNAL]: true };
 
 	// Bridge: proxy root mutations should notify the State signal
-	if (typeof v === 'object' && v !== null && isProxy(v)) {
-		bridgeProxyToSignal(v, sig);
+	if (typeof value === 'object' && value !== null && isProxy(value)) {
+		bridgeProxyToSignal(value, sig);
 	}
 
 	// Object/array state: wrap in signalProxy so deep access works directly
-	if (typeof v === 'object' && v !== null) {
+	if (typeof value === 'object' && value !== null) {
 		return signalProxy(sig, (raw) => {
 			// Track the read so effects/deriveds subscribe to root changes
 			const sub = currentSubscriber;

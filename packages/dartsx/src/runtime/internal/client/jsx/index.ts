@@ -204,7 +204,7 @@ function appendChildren(parent: Node, children: any): void {
 	}
 }
 
-function appendChild(parent: Node, child: any): void {
+export function appendChild(parent: Node, child: any): void {
 	if (child == null || child === false || child === true) return;
 
 	if (child instanceof Node) {

@@ -11,7 +11,7 @@ export { type ComponentContext, getCurrentComponent, setCurrentComponent } from 
 
 // ── Re-exports from jsx ────────────────────────────────────────────
 
-export { jsx, Fragment } from './jsx';
+export { jsx, Fragment, appendChild } from './jsx';
 export { style } from './jsx/style-inject';
 export { if_block } from './blocks/if';
 export { for_block } from './blocks/for';

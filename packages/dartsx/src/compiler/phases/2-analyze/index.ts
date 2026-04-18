@@ -40,6 +40,8 @@ export interface ComponentIR {
 	orderedDecls: DeclEntry[];
 	/** Style blocks extracted from the render output */
 	styleBlocks: StyleBlockIR[];
+	/** Source position of the component declaration (for source-order output) */
+	sourceStart?: number;
 }
 
 export interface StyleBlockIR {
@@ -185,13 +187,13 @@ export interface AnalysisResult {
 	/** Source text of user import declarations to preserve */
 	userImports: string[];
 	/** Module-level state variable declarations */
-	moduleStateVars: { name: string; initExpr: string; exported: boolean }[];
+	moduleStateVars: { name: string; initExpr: string; exported: boolean; sourceStart: number }[];
 	/** Module-level derived variable declarations */
-	moduleDerivedVars: { name: string; expr: string; exported: boolean }[];
+	moduleDerivedVars: { name: string; expr: string; exported: boolean; sourceStart: number }[];
 	/** Module-level functions with reactive params */
-	moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[] }[];
+	moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[]; sourceStart: number }[];
 	/** Other module-level statements (not imports, not components, not state/derived, not reactive-param functions) */
-	moduleStatements: string[];
+	moduleStatements: { text: string; sourceStart: number }[];
 	/** Module-level reactive var names (state + derived + cross-file imports) */
 	moduleReactiveVars: Set<string>;
 	/** Module-level proxy vars (object/array state) — skip $.get/$.set */
@@ -253,10 +255,10 @@ export function analyze(
 	const derivedSet = new Set(meta.derivedVars);
 
 	const userImports: string[] = [];
-	const moduleStateVars: { name: string; initExpr: string; exported: boolean }[] = [];
-	const moduleDerivedVars: { name: string; expr: string; exported: boolean }[] = [];
-	const moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[] }[] = [];
-	const moduleStatements: string[] = [];
+	const moduleStateVars: { name: string; initExpr: string; exported: boolean; sourceStart: number }[] = [];
+	const moduleDerivedVars: { name: string; expr: string; exported: boolean; sourceStart: number }[] = [];
+	const moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[]; sourceStart: number }[] = [];
+	const moduleStatements: { text: string; sourceStart: number }[] = [];
 	const moduleReactiveVars = new Set<string>();
 	const moduleProxyVars = new Set<string>();
 	const reactiveExports: string[] = [];
@@ -324,6 +326,7 @@ export function analyze(
 				(sb) => sb.sourceOffset >= compStart && sb.sourceOffset < compEnd,
 			);
 			const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams, compStyleBlocks);
+			ir.sourceStart = node.start;
 			components.push(ir);
 			continue;
 		}
@@ -339,20 +342,22 @@ export function analyze(
 					const name = decl.id?.name;
 					if (!name) continue;
 
-					const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
+					const marker = source.slice(decl.id.end, decl.init?.start ?? node.end);
+					const isState = stateSet.has(name) && (marker.includes(STATE_MARKER) || !decl.init);
+					const isDerived = derivedSet.has(name) && marker.includes(DERIVED_MARKER);
 
-					if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
+					if (isState) {
 						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
-						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
-						moduleStateVars.push({ name, initExpr, exported });
+						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : '';
+						moduleStateVars.push({ name, initExpr, exported, sourceStart: node.start });
 						moduleReactiveVars.add(name);
 						if (decl.init && isProxyInit(decl.init)) moduleProxyVars.add(name);
 						if (exported) reactiveExports.push(name);
 						handled = true;
-					} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
+					} else if (isDerived) {
 						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
 						const expr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
-						moduleDerivedVars.push({ name, expr, exported });
+						moduleDerivedVars.push({ name, expr, exported, sourceStart: node.start });
 						moduleReactiveVars.add(name);
 						if (exported) reactiveExports.push(name);
 						handled = true;
@@ -464,11 +469,11 @@ export function analyze(
 			for (const s of stmts) {
 				bodyStmts.push(source.slice(s.start, s.end));
 			}
-			moduleFunctions.push({ signature, bodyStatements: bodyStmts, reactiveParams });
+			moduleFunctions.push({ signature, bodyStatements: bodyStmts, reactiveParams, sourceStart: node.start });
 		} else {
 			// No reactive params — preserve as-is
 			const stmtIndex = moduleStatements.length;
-			moduleStatements.push(source.slice(node.start, node.end));
+			moduleStatements.push({ text: source.slice(node.start, node.end), sourceStart: node.start });
 			collectNestedComponents(node, stmtIndex);
 			collectModuleJSX(node, stmtIndex);
 		}
@@ -477,7 +482,7 @@ export function analyze(
 	// Process pending non-function statements
 	for (const node of pendingStatements) {
 		const stmtIndex = moduleStatements.length;
-		moduleStatements.push(source.slice(node.start, node.end));
+		moduleStatements.push({ text: source.slice(node.start, node.end), sourceStart: node.start });
 		collectNestedComponents(node, stmtIndex);
 		collectModuleJSX(node, stmtIndex);
 	}
@@ -857,16 +862,18 @@ function analyzeComponent(
 						break;
 					}
 
-					const marker = decl.init ? source.slice(decl.id.end, decl.init.start) : '';
+					const marker = source.slice(decl.id.end, decl.init?.start ?? stmt.end);
+					const isState = stateSet.has(name) && (marker.includes(STATE_MARKER) || !decl.init);
+					const isDerived = derivedSet.has(name) && marker.includes(DERIVED_MARKER);
 
-					if (stateSet.has(name) && marker.includes(STATE_MARKER)) {
+					if (isState) {
 						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
-						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
+						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : '';
 						stateVars.push({ name, initExpr });
 						orderedDecls.push({ kind: 'state', name, initExpr });
 						reactiveVars.add(name);
 						if (decl.init && isProxyInit(decl.init)) proxyVars.add(name);
-					} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
+					} else if (isDerived) {
 						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
 						const expr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
 						derivedVars.push({ name, expr });
@@ -1204,9 +1211,7 @@ function getTagName(nameNode: any): string {
 function isProxyInit(initNode: any): boolean {
 	if (!initNode) return false;
 	const t = initNode.type;
-	return t === 'ObjectExpression' || t === 'ArrayExpression' ||
-		(t === 'NewExpression' && initNode.callee?.type === 'Identifier' &&
-			['Map', 'Set', 'WeakMap', 'WeakSet'].includes(initNode.callee.name));
+	return t === 'ObjectExpression' || t === 'ArrayExpression' || t === 'NewExpression';
 }
 
 function getAttrName(nameNode: any): string {

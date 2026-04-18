@@ -26,8 +26,7 @@ describe('isDarTsxFile', () => {
 describe('dartsxToTsx', () => {
 	it('transforms component → function', () => {
 		const { code } = dartsxToTsx('component Counter() {}');
-		expect(code).toContain('function Counter(props: {}): Node;');
-		expect(code).toContain('function Counter() {}');
+		expect(code).toBe('function Counter() {}');
 	});
 
 	it('transforms export default component → export default function', () => {
@@ -37,21 +36,18 @@ describe('dartsxToTsx', () => {
 
 	it('transforms async component', () => {
 		const { code } = dartsxToTsx('async component Loader() {}');
-		expect(code).toContain('function Loader(props: {}): Promise<Node>;');
-		expect(code).toContain('async function Loader() {}');
+		expect(code).toBe('async function Loader() {}');
 	});
 
-	it('adds a JSX props overload for exported components', () => {
+	it('transforms exported component with params', () => {
 		const source = 'export component UserCard(bind name: string, age: number, active: boolean = true) {}';
 		const { code } = dartsxToTsx(source);
-		expect(code).toContain('export function UserCard(props: { name?: string; "bind:name"?: any; age: number; active?: boolean; }): Node;');
-		expect(code).toContain('export function UserCard(name: string, age: number, active: boolean = true) {}');
+		expect(code).toBe('export function UserCard(name: string, age: number, active: boolean = true) {}');
 	});
 
-	it('adds renamed prop keys to the JSX props overload', () => {
+	it('transforms renamed props', () => {
 		const source = "export component UserBadge(bind 'display-name' as displayName: string, status: string = 'offline') {}";
 		const { code } = dartsxToTsx(source);
-		expect(code).toContain('export function UserBadge(props: { "display-name"?: string; "bind:display-name"?: any; status?: string; }): Node;');
 		expect(code).toContain("export function UserBadge(displayName: string, status: string = 'offline') {}");
 	});
 
@@ -141,7 +137,6 @@ describe('dartsxToTsx', () => {
 	it('transforms bind used with renamed props to the local parameter name', () => {
 		const source = "component UserBadge(bind 'display-name' as displayName: string) {}";
 		const { code } = dartsxToTsx(source);
-		expect(code).toContain('function UserBadge(props: { "display-name"?: string; "bind:display-name"?: any; }): Node;');
 		expect(code).toContain('function UserBadge(displayName: string)');
 		expect(code).not.toContain("'display-name' as");
 	});

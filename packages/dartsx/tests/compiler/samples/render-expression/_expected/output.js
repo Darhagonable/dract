@@ -20,3 +20,13 @@ function Conditional($$props) {
   }
     return "hidden"
 }
+
+function ReactiveExpr() {
+    let count = $.state(0);
+    return () => $.get(count)
+}
+
+function ReactiveComplexExpr() {
+    let match = $.state({ route: null });
+    return () => match?.route ?? "no route"
+}

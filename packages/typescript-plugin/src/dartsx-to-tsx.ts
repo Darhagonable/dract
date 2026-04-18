@@ -33,8 +33,8 @@ export interface TransformResult {
 export function isDarTsxFile(content: string): boolean {
 	const sample = content.slice(0, 4096);
 	return /\bcomponent\s+\w+\s*\(/.test(sample)
-		|| /\bstate\s+\w+\s*=/.test(sample)
-		|| /\bderived\s+\w+\s*=/.test(sample)
+		|| /\bstate\s+\w+/.test(sample)
+		|| /\bderived\s+\w+/.test(sample)
 		|| /\bderived\s+[{[]/.test(sample)
 		|| /\brender\s*[(<]/.test(sample)
 		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
@@ -45,12 +45,13 @@ export function isDarTsxFile(content: string): boolean {
  */
 export function dartsxToTsx(source: string): TransformResult {
 	const ms = new MagicString(source);
+	const commentRanges = buildCommentRanges(source);
 
-	transformComponentDeclarations(ms, source);
+	transformComponentDeclarations(ms, source, commentRanges);
 	transformRenamedParams(ms, source);
 	transformBindInParams(ms, source);
-	transformStateDeclarations(ms, source);
-	transformDerivedDeclarations(ms, source);
+	transformStateDeclarations(ms, source, commentRanges);
+	transformDerivedDeclarations(ms, source, commentRanges);
 	transformRenderBlocks(ms, source);
 	transformBindShorthand(ms, source);
 	transformBindAttributes(ms, source);
@@ -58,29 +59,71 @@ export function dartsxToTsx(source: string): TransformResult {
 	return { code: ms.toString(), ms };
 }
 
+// ── Comment detection ──────────────────────────────────────────────
+
+type CommentRange = { start: number; end: number };
+
+function buildCommentRanges(source: string): CommentRange[] {
+	const ranges: CommentRange[] = [];
+	let i = 0;
+	while (i < source.length) {
+		const ch = source[i];
+		if (ch === '/' && source[i + 1] === '/') {
+			const start = i;
+			i = source.indexOf('\n', i);
+			if (i === -1) i = source.length;
+			ranges.push({ start, end: i });
+		} else if (ch === '/' && source[i + 1] === '*') {
+			const start = i;
+			i = source.indexOf('*/', i + 2);
+			i = i === -1 ? source.length : i + 2;
+			ranges.push({ start, end: i });
+		} else if (ch === '\'' || ch === '"' || ch === '`') {
+			i = skipString(source, i);
+		} else {
+			i++;
+		}
+	}
+	return ranges;
+}
+
+function isInComment(ranges: CommentRange[], pos: number): boolean {
+	for (const r of ranges) {
+		if (pos >= r.start && pos < r.end) return true;
+		if (r.start > pos) break;
+	}
+	return false;
+}
+
+function skipString(source: string, start: number): number {
+	const quote = source[start];
+	let i = start + 1;
+	while (i < source.length) {
+		if (source[i] === '\\') { i += 2; continue; }
+		if (source[i] === quote) return i + 1;
+		if (quote === '`' && source[i] === '$' && source[i + 1] === '{') {
+			// Skip template expression — simplified (doesn't handle nested templates)
+			let depth = 1;
+			i += 2;
+			while (i < source.length && depth > 0) {
+				if (source[i] === '{') depth++;
+				else if (source[i] === '}') depth--;
+				i++;
+			}
+			continue;
+		}
+		i++;
+	}
+	return i;
+}
+
 // ── component → function ───────────────────────────────────────────
 
-function transformComponentDeclarations(ms: MagicString, source: string): void {
+function transformComponentDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
 	const re = /\b((?:export\s+)?(?:default\s+)?(?:async\s+)?)component(\s+\w+)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
-		const prefix = match[1] ?? '';
-		const name = match[2].trim();
-		const hasDefaultExport = /\bdefault\b/.test(prefix);
-		const hasNamedExport = /\bexport\b/.test(prefix) && !hasDefaultExport;
-		const isAsync = /\basync\b/.test(prefix);
-		const openParen = source.indexOf('(', match.index + match[0].length - 1);
-		if (openParen !== -1) {
-			const closeParen = findMatchingParen(source, openParen);
-			if (closeParen !== -1 && !hasDefaultExport) {
-				const paramsSource = source.slice(openParen + 1, closeParen);
-				const overload = buildComponentPropsOverload(name, paramsSource, hasNamedExport, isAsync);
-				if (overload) {
-					ms.appendLeft(match.index, `${overload}\n`);
-				}
-			}
-		}
-
+		if (isInComment(commentRanges, match.index)) continue;
 		const prefixEnd = match.index + match[1].length;
 		const componentStart = prefixEnd;
 		const componentEnd = componentStart + 'component'.length;
@@ -88,142 +131,7 @@ function transformComponentDeclarations(ms: MagicString, source: string): void {
 	}
 }
 
-function buildComponentPropsOverload(
-	name: string,
-	paramsSource: string,
-	isExported: boolean,
-	isAsync: boolean,
-): string | null {
-	const params = splitTopLevelParams(paramsSource)
-		.map((param) => param.trim())
-		.filter(Boolean);
 
-	const members: string[] = [];
-	for (const param of params) {
-		const propInfo = parseComponentParam(param);
-		if (!propInfo) continue;
-
-		const propKey = formatPropKey(propInfo.externalName);
-		const optional = propInfo.isBind || propInfo.hasDefault ? '?' : '';
-		members.push(`${propKey}${optional}: ${propInfo.typeText};`);
-
-		if (propInfo.isBind) {
-			members.push(`${formatPropKey(`bind:${propInfo.externalName}`)}?: any;`);
-		}
-	}
-
-	const exportPrefix = isExported ? 'export ' : '';
-	const returnType = isAsync ? 'Promise<Node>' : 'Node';
-	const propsType = members.length > 0 ? `{ ${members.join(' ')} }` : '{}';
-	return `${exportPrefix}function ${name}(props: ${propsType}): ${returnType};`;
-}
-
-function splitTopLevelParams(paramsSource: string): string[] {
-	const parts: string[] = [];
-	let start = 0;
-	let parenDepth = 0;
-	let bracketDepth = 0;
-	let braceDepth = 0;
-	let i = 0;
-
-	while (i < paramsSource.length) {
-		const ch = paramsSource[i];
-		if (ch === "'" || ch === '"') {
-			i = skipString(paramsSource, i);
-			continue;
-		}
-		if (ch === '`') {
-			i = skipTemplateLiteral(paramsSource, i);
-			continue;
-		}
-		if (ch === '(') parenDepth++;
-		else if (ch === ')') parenDepth--;
-		else if (ch === '[') bracketDepth++;
-		else if (ch === ']') bracketDepth--;
-		else if (ch === '{') braceDepth++;
-		else if (ch === '}') braceDepth--;
-		else if (ch === ',' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
-			parts.push(paramsSource.slice(start, i));
-			start = i + 1;
-		}
-		i++;
-	}
-
-	parts.push(paramsSource.slice(start));
-	return parts;
-}
-
-function parseComponentParam(paramSource: string): {
-	externalName: string;
-	typeText: string;
-	isBind: boolean;
-	hasDefault: boolean;
-} | null {
-	if (!paramSource || paramSource.startsWith('...')) return null;
-
-	let source = paramSource.trim();
-	let isBind = false;
-	if (source.startsWith('bind ')) {
-		isBind = true;
-		source = source.slice(5).trim();
-	}
-
-	let externalName: string;
-	let remainder: string;
-	const renamedMatch = source.match(/^(['"])([^'"]+)\1\s+as\s+([A-Za-z_$][\w$]*)(.*)$/);
-	if (renamedMatch) {
-		externalName = renamedMatch[2];
-		remainder = `${renamedMatch[3]}${renamedMatch[4]}`;
-	} else {
-		const plainMatch = source.match(/^([A-Za-z_$][\w$]*)(.*)$/);
-		if (!plainMatch) return null;
-		externalName = plainMatch[1];
-		remainder = plainMatch[2];
-	}
-
-	const defaultIndex = findTopLevelChar(remainder, '=');
-	const hasDefault = defaultIndex !== -1;
-	const beforeDefault = (hasDefault ? remainder.slice(0, defaultIndex) : remainder).trim();
-	const colonIndex = findTopLevelChar(beforeDefault, ':');
-	const typeText = colonIndex === -1 ? 'any' : beforeDefault.slice(colonIndex + 1).trim() || 'any';
-
-	return { externalName, typeText, isBind, hasDefault };
-}
-
-function findTopLevelChar(source: string, target: string): number {
-	let parenDepth = 0;
-	let bracketDepth = 0;
-	let braceDepth = 0;
-	let i = 0;
-
-	while (i < source.length) {
-		const ch = source[i];
-		if (ch === "'" || ch === '"') {
-			i = skipString(source, i);
-			continue;
-		}
-		if (ch === '`') {
-			i = skipTemplateLiteral(source, i);
-			continue;
-		}
-		if (ch === '(') parenDepth++;
-		else if (ch === ')') parenDepth--;
-		else if (ch === '[') bracketDepth++;
-		else if (ch === ']') bracketDepth--;
-		else if (ch === '{') braceDepth++;
-		else if (ch === '}') braceDepth--;
-		else if (ch === target && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
-			return i;
-		}
-		i++;
-	}
-
-	return -1;
-}
-
-function formatPropKey(name: string): string {
-	return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
-}
 
 // ── 'ext-name' as localName → localName ───────────────────────────
 
@@ -258,10 +166,11 @@ function transformBindInParams(ms: MagicString, source: string): void {
 
 // ── state x = → let x = ───────────────────────────────────────────
 
-function transformStateDeclarations(ms: MagicString, source: string): void {
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+\w+\s*)(?==)/g;
+function transformStateDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+\w+)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
+		if (isInComment(commentRanges, match.index)) continue;
 		const stateStart = match.index + (match[1]?.length ?? 0);
 		const stateEnd = stateStart + 'state'.length;
 		ms.overwrite(stateStart, stateEnd, 'let');
@@ -270,11 +179,12 @@ function transformStateDeclarations(ms: MagicString, source: string): void {
 
 // ── derived x = → const x = ───────────────────────────────────────
 
-function transformDerivedDeclarations(ms: MagicString, source: string): void {
+function transformDerivedDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
 	// Simple: derived varName = expr
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(\s+\w+\s*)(?==)/g;
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(\s+\w+)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
+		if (isInComment(commentRanges, match.index)) continue;
 		const derivedStart = match.index + (match[1]?.length ?? 0);
 		const derivedEnd = derivedStart + 'derived'.length;
 		ms.overwrite(derivedStart, derivedEnd, 'const');
@@ -284,6 +194,7 @@ function transformDerivedDeclarations(ms: MagicString, source: string): void {
 	// Only the keyword needs rewriting here; TS can parse the rest natively.
 	const reDestructure = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[{[])/g;
 	while ((match = reDestructure.exec(source)) !== null) {
+		if (isInComment(commentRanges, match.index)) continue;
 		const derivedStart = match.index + (match[1]?.length ?? 0);
 		const derivedEnd = derivedStart + 'derived'.length;
 		ms.overwrite(derivedStart, derivedEnd, 'const');
@@ -358,17 +269,6 @@ function findMatchingParen(code: string, openPos: number): number {
 		if (depth > 0) i++;
 	}
 	return depth === 0 ? i : -1;
-}
-
-function skipString(code: string, start: number): number {
-	const quote = code[start];
-	let i = start + 1;
-	while (i < code.length) {
-		if (code[i] === '\\') { i += 2; continue; }
-		if (code[i] === quote) return i + 1;
-		i++;
-	}
-	return i;
 }
 
 function skipTemplateLiteral(code: string, start: number): number {

@@ -1,4 +1,4 @@
-import { setCurrentComponent, type ComponentContext } from '../internal/client';
+import { setCurrentComponent, appendChild, type ComponentContext } from '../internal/client';
 import type { Component } from './types';
 
 export interface MountResult {
@@ -26,6 +26,10 @@ export function mount<P extends Record<string, unknown>>(component: Component<P>
 
 	if (dom instanceof Node) {
 		target.appendChild(dom);
+	} else if (typeof dom === 'function') {
+		appendChild(target, dom);
+	} else if (dom != null) {
+		target.appendChild(document.createTextNode(String(dom)));
 	}
 
 	// Flush onMount callbacks after the component is in the DOM.
