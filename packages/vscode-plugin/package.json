@@ -49,7 +49,10 @@
 		"package": "vsce package --no-dependencies"
 	},
 	"dependencies": {
-		"dartsx-typescript-plugin": "workspace:*"
+		"dartsx-typescript-plugin": "workspace:*",
+		"@volar/language-server": "~2.4.28",
+		"volar-service-css": "0.0.70",
+		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
 		"@types/vscode": "^1.85.0",

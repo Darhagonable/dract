@@ -9,6 +9,9 @@
  */
 
 import * as vscode from 'vscode';
+import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
+
+let client: LanguageClient | undefined;
 
 const semanticLegend = new vscode.SemanticTokensLegend([
 	'keyword',
@@ -114,6 +117,28 @@ function isSupportedEditor(editor: vscode.TextEditor | undefined): boolean {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	// Start the Volar language server for CSS features in <style> blocks
+	const serverModule = require.resolve('./server');
+	client = new LanguageClient(
+		'dartsx',
+		'DarTsx Language Server',
+		{
+			run: { module: serverModule, transport: TransportKind.ipc },
+			debug: { module: serverModule, transport: TransportKind.ipc },
+		},
+		{
+			documentSelector: [
+				{ language: 'javascript' },
+				{ language: 'javascriptreact' },
+				{ language: 'typescript' },
+				{ language: 'typescriptreact' },
+			],
+		},
+	);
+	client.start().catch(err => {
+		console.error('[DarTsx] Language server failed to start:', err);
+	});
+
 	const selector: vscode.DocumentSelector = [
 		{ language: 'javascript' },
 		{ language: 'javascriptreact' },
@@ -148,4 +173,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	updateStatusBar(vscode.window.activeTextEditor);
 }
 
-export function deactivate(): void { }
+export async function deactivate(): Promise<void> {
+	if (client) {
+		await client.stop();
+	}
+}

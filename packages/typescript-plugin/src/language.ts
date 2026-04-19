@@ -62,6 +62,9 @@ class DarTsxVirtualCode implements VirtualCode {
 			getLength: () => code.length,
 			getChangeRange: () => undefined,
 		};
+
+		// Extract embedded CSS virtual codes from <style> blocks
+		this.embeddedCodes = extractCssVirtualCodes(source);
 	}
 }
 
@@ -289,6 +292,56 @@ function decodeMappings(mappings: string): number[][][] {
 	return lines;
 }
 
+// ── Embedded CSS Virtual Codes ─────────────────────────────────────
+
+function extractCssVirtualCodes(source: string): VirtualCode[] {
+	const codes: VirtualCode[] = [];
+	const re = /<style(\s+global)?\s*>/gi;
+	let match;
+	let idx = 0;
+
+	while ((match = re.exec(source)) !== null) {
+		const cssStart = match.index + match[0].length;
+		const closeIdx = source.indexOf('</style>', cssStart);
+		if (closeIdx === -1) continue;
+
+		// Replace {expr} interpolations with same-length placeholders
+		// so the CSS parser sees valid CSS while preserving offsets.
+		const rawCss = source.slice(cssStart, closeIdx);
+		const css = rawCss.replace(
+			/\{[a-zA-Z_$][a-zA-Z0-9_$.]*\}/g,
+			m => '_'.repeat(m.length),
+		);
+
+		codes.push({
+			id: `style_${idx}`,
+			languageId: 'css',
+			snapshot: {
+				getText: (start, end) => css.substring(start, end),
+				getLength: () => css.length,
+				getChangeRange: () => undefined,
+			},
+			mappings: [{
+				sourceOffsets: [cssStart],
+				generatedOffsets: [0],
+				lengths: [css.length],
+				data: {
+					completion: true,
+					semantic: true,
+					navigation: true,
+					structure: true,
+					format: true,
+				},
+			}],
+			embeddedCodes: [],
+		});
+
+		idx++;
+	}
+
+	return codes;
+}
+
 // ── Language Plugin ────────────────────────────────────────────────
 
 export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirtualCode> {
@@ -324,7 +377,17 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 		},
 
 		createVirtualCode(_uri, languageId, snapshot) {
-			if (languageId !== 'dartsx') return undefined;
+			// In TS plugin context, languageId is 'dartsx' (from getLanguageId).
+			// In language server context, languageId is the document's original
+			// languageId (e.g. 'typescriptreact') since the server passes it directly.
+			const accepted = new Set(['dartsx', 'typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
+			if (!accepted.has(languageId)) return undefined;
+
+			// For non-dartsx languageIds, verify content is actually DarTsx
+			if (languageId !== 'dartsx') {
+				const source = snapshot.getText(0, Math.min(snapshot.getLength(), 4096));
+				if (!isDarTsxFile(source)) return undefined;
+			}
 
 			const fileName = typeof _uri === 'string' ? _uri : String(_uri);
 			return new DarTsxVirtualCode(fileName, snapshot);
