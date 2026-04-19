@@ -613,17 +613,7 @@ function walkCallSites(
 		}
 
 		// Recurse into known AST child fields (avoids Object.keys() on every node)
-		for (const key of AST_CHILD_FIELDS) {
-			const child = node[key];
-			if (child == null) continue;
-			if (Array.isArray(child)) {
-				for (const item of child) {
-					if (item && typeof item === 'object' && item.type) visit(item);
-				}
-			} else if (typeof child === 'object' && child.type) {
-				visit(child);
-			}
-		}
+		forEachChild(node, visit);
 	}
 
 	visit(ast);
@@ -651,21 +641,9 @@ function findDirectParentFunction(
 	const isComponent = isFn && node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name);
 
 	// Recurse into children first to find the nearest parent
-	for (const field of AST_CHILD_FIELDS) {
-		const child = node[field];
-		if (child == null) continue;
-		if (Array.isArray(child)) {
-			for (const item of child) {
-				if (item && typeof item === 'object' && item.type) {
-					const found = findDirectParentFunction(item, targetStart, componentNames);
-					if (found) return found;
-				}
-			}
-		} else if (typeof child === 'object' && child.type) {
-			const found = findDirectParentFunction(child, targetStart, componentNames);
-			if (found) return found;
-		}
-	}
+	let found: any = null;
+	forEachChild(node, child => { if (!found) found = findDirectParentFunction(child, targetStart, componentNames); });
+	if (found) return found;
 
 	// If this is a non-component function containing the target, return it
 	if (isFn && !isComponent) return node;
@@ -689,19 +667,7 @@ function findNestedFunctionDecls(
 	}
 
 	// Recurse into children
-	for (const field of AST_CHILD_FIELDS) {
-		const child = node[field];
-		if (child == null) continue;
-		if (Array.isArray(child)) {
-			for (const item of child) {
-				if (item && typeof item === 'object' && item.type) {
-					findNestedFunctionDecls(item, componentNames, results);
-				}
-			}
-		} else if (typeof child === 'object' && child.type) {
-			findNestedFunctionDecls(child, componentNames, results);
-		}
-	}
+	forEachChild(node, child => findNestedFunctionDecls(child, componentNames, results));
 }
 
 /**
@@ -723,41 +689,16 @@ function findTopLevelJSX(
 		return;
 	}
 
-	for (const field of AST_CHILD_FIELDS) {
-		const child = node[field];
-		if (child == null) continue;
-		if (Array.isArray(child)) {
-			for (const item of child) {
-				if (item && typeof item === 'object' && item.type) {
-					findTopLevelJSX(item, componentNames, results);
-				}
-			}
-		} else if (typeof child === 'object' && child.type) {
-			findTopLevelJSX(child, componentNames, results);
-		}
-	}
+	forEachChild(node, child => findTopLevelJSX(child, componentNames, results));
 }
 
 /** Find an AST node by its start position */
 function findASTNodeAt(node: any, start: number): any {
 	if (!node || typeof node !== 'object') return null;
 	if ((node.type === 'JSXElement' || node.type === 'JSXFragment') && node.start === start) return node;
-	for (const field of AST_CHILD_FIELDS) {
-		const child = node[field];
-		if (child == null) continue;
-		if (Array.isArray(child)) {
-			for (const item of child) {
-				if (item && typeof item === 'object' && item.type) {
-					const found = findASTNodeAt(item, start);
-					if (found) return found;
-				}
-			}
-		} else if (typeof child === 'object' && child.type) {
-			const found = findASTNodeAt(child, start);
-			if (found) return found;
-		}
-	}
-	return null;
+	let found: any = null;
+	forEachChild(node, child => { if (!found) found = findASTNodeAt(child, start); });
+	return found;
 }
 
 /** Collect JSX nodes inside an attribute expression and return them with positions relative to the expression start */
@@ -790,6 +731,21 @@ const AST_CHILD_FIELDS = [
 	'openingElement', 'closingElement', 'attributes', 'specifiers',
 	'source', 'key', 'id', 'label', 'tag', 'quasi', 'quasis',
 ];
+
+/** Visit all AST child nodes of a given node */
+function forEachChild(node: any, fn: (child: any) => void): void {
+	for (const key of AST_CHILD_FIELDS) {
+		const child = node[key];
+		if (child == null) continue;
+		if (Array.isArray(child)) {
+			for (const item of child) {
+				if (item && typeof item === 'object' && item.type) fn(item);
+			}
+		} else if (typeof child === 'object' && child.type) {
+			fn(child);
+		}
+	}
+}
 
 interface FnInfo {
 	name: string;

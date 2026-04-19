@@ -396,17 +396,17 @@ function injectCSSVarsAsStyle(node: JSXNodeIR, cssVars: CSSVar[], reactiveVars: 
 	const styleExpr = `{ ${styleEntries.join(', ')} }`;
 
 	function injectOnRoot(n: JSXNodeIR): void {
-		if (n.type === 'element' && !(n as JSXElementIR).isComponent) {
-			(n as JSXElementIR).attributes.push({
+		if (n.type === 'element' && !n.isComponent) {
+			n.attributes.push({
 				kind: 'dynamic',
 				name: 'style',
 				value: styleExpr,
 			});
 		} else if (n.type === 'fragment') {
 			// For fragments, inject on each root-level element child
-			for (const child of (n as JSXFragmentIR).children) {
-				if (child.type === 'element' && !(child as JSXElementIR).isComponent) {
-					(child as JSXElementIR).attributes.push({
+			for (const child of n.children) {
+				if (child.type === 'element' && !child.isComponent) {
+					child.attributes.push({
 						kind: 'dynamic',
 						name: 'style',
 						value: styleExpr,
@@ -449,11 +449,24 @@ function navigateToNode(node: JSXNodeIR, path: number[]): JSXNodeIR | null {
 	return current;
 }
 
+/** Get all child node arrays from any JSX IR node type */
+function getIRChildren(node: JSXNodeIR): JSXNodeIR[][] {
+	switch (node.type) {
+		case 'element': return [node.children];
+		case 'fragment': return [node.children];
+		case 'if_block': { const b = node; return [b.trueBranch, ...(b.falseBranch ? [b.falseBranch] : [])]; }
+		case 'for_block': return [node.body];
+		case 'switch_block': return node.cases.map(c => c.body);
+		case 'try_block': { const b = node; return [b.tryBranch, ...(b.catchBranch ? [b.catchBranch] : []), ...(b.pendingBranch ? [b.pendingBranch] : [])]; }
+		case 'anonymous_block': return [node.children];
+		default: return [];
+	}
+}
+
 function injectAttrsRecursive(node: JSXNodeIR, hashes: string[]): void {
-	if (node.type === 'element' && !(node as JSXElementIR).isComponent) {
-		const el = node as JSXElementIR;
+	if (node.type === 'element' && !node.isComponent) {
 		// Merge hashes into a single data-scope attribute
-		const existing = el.attributes.find(a => a.kind === 'static' && a.name === SCOPE_ATTR);
+		const existing = node.attributes.find(a => a.kind === 'static' && a.name === SCOPE_ATTR);
 		if (existing) {
 			const current = (existing.value || '').split(/\s+/).filter(Boolean);
 			for (const h of hashes) {
@@ -461,48 +474,11 @@ function injectAttrsRecursive(node: JSXNodeIR, hashes: string[]): void {
 			}
 			existing.value = current.join(' ');
 		} else {
-			el.attributes.push({ kind: 'static', name: SCOPE_ATTR, value: hashes.join(' ') });
+			node.attributes.push({ kind: 'static', name: SCOPE_ATTR, value: hashes.join(' ') });
 		}
-		for (const child of el.children) {
-			injectAttrsRecursive(child, hashes);
-		}
-	} else if (node.type === 'element' && (node as JSXElementIR).isComponent) {
-		// Recurse into children of component elements — they were authored by
-		// the parent and should receive the parent's scope attribute.
-		const el = node as JSXElementIR;
-		for (const child of el.children) {
-			injectAttrsRecursive(child, hashes);
-		}
-	} else if (node.type === 'fragment') {
-		for (const child of (node as JSXFragmentIR).children) {
-			injectAttrsRecursive(child, hashes);
-		}
-	} else if (node.type === 'if_block') {
-		const block = node as JSXIfBlockIR;
-		for (const child of block.trueBranch) injectAttrsRecursive(child, hashes);
-		if (block.falseBranch) {
-			for (const child of block.falseBranch) injectAttrsRecursive(child, hashes);
-		}
-	} else if (node.type === 'for_block') {
-		const block = node as JSXForBlockIR;
-		for (const child of block.body) injectAttrsRecursive(child, hashes);
-	} else if (node.type === 'switch_block') {
-		const block = node as JSXSwitchBlockIR;
-		for (const c of block.cases) {
-			for (const child of c.body) injectAttrsRecursive(child, hashes);
-		}
-	} else if (node.type === 'try_block') {
-		const block = node as JSXTryBlockIR;
-		for (const child of block.tryBranch) injectAttrsRecursive(child, hashes);
-		if (block.catchBranch) {
-			for (const child of block.catchBranch) injectAttrsRecursive(child, hashes);
-		}
-		if (block.pendingBranch) {
-			for (const child of block.pendingBranch) injectAttrsRecursive(child, hashes);
-		}
-	} else if (node.type === 'anonymous_block') {
-		const block = node as JSXAnonymousBlockIR;
-		for (const child of block.children) injectAttrsRecursive(child, hashes);
+	}
+	for (const group of getIRChildren(node)) {
+		for (const child of group) injectAttrsRecursive(child, hashes);
 	}
 }
 
@@ -544,45 +520,17 @@ function emitFragment(node: JSXFragmentIR, reactiveVars: Set<string>, indent: st
 }
 
 function emitElement(node: JSXElementIR, reactiveVars: Set<string>, indent: string): string {
-	if (node.isComponent) return emitComponentCall(node, reactiveVars, indent);
-
 	const propEntries: string[] = [];
-
 	for (const attr of node.attributes) {
-		emitAttr(attr, propEntries, reactiveVars, false);
+		emitAttr(attr, propEntries, reactiveVars, node.isComponent);
 	}
-
 	if (!node.selfClosing) {
 		const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
-		if (childStrs.length > 0) {
-			propEntries.push(`children: [${childStrs.join(', ')}]`);
-		}
+		if (childStrs.length > 0) propEntries.push(`children: [${childStrs.join(', ')}]`);
 	}
-
-	if (propEntries.length === 0) {
-		return `$.jsx("${node.tag}")`;
-	}
-	return `$.jsx("${node.tag}", { ${propEntries.join(', ')} })`;
-}
-
-function emitComponentCall(node: JSXElementIR, reactiveVars: Set<string>, indent: string): string {
-	const propEntries: string[] = [];
-
-	for (const attr of node.attributes) {
-		emitAttr(attr, propEntries, reactiveVars, true);
-	}
-
-	if (!node.selfClosing) {
-		const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
-		if (childStrs.length > 0) {
-			propEntries.push(`children: [${childStrs.join(', ')}]`);
-		}
-	}
-
-	if (propEntries.length === 0) {
-		return `$.jsx(${node.tag})`;
-	}
-	return `$.jsx(${node.tag}, { ${propEntries.join(', ')} })`;
+	const tag = node.isComponent ? node.tag : `"${node.tag}"`;
+	if (propEntries.length === 0) return `$.jsx(${tag})`;
+	return `$.jsx(${tag}, { ${propEntries.join(', ')} })`;
 }
 
 // ── Attribute emission ─────────────────────────────────────────────
