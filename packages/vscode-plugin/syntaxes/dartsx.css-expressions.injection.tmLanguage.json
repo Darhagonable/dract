@@ -1,0 +1,15 @@
+{
+	"scopeName": "source.dartsx.css-expressions.injection",
+	"injectionSelector": "L:source.css -comment",
+	"patterns": [
+		{
+			"comment": "Reactive interpolation {expr} inside DarTsx CSS",
+			"match": "(\\{)([a-zA-Z_$][a-zA-Z0-9_$.]*)(\\})",
+			"captures": {
+				"1": { "name": "punctuation.section.embedded.begin.tsx" },
+				"2": { "name": "variable.other.readwrite.tsx" },
+				"3": { "name": "punctuation.section.embedded.end.tsx" }
+			}
+		}
+	]
+}

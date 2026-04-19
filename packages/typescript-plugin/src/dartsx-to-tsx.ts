@@ -55,6 +55,7 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformRenderBlocks(ms, source);
 	transformBindShorthand(ms, source);
 	transformBindAttributes(ms, source);
+	blankStyleBlocks(ms, source);
 
 	return { code: ms.toString(), ms };
 }
@@ -289,4 +290,35 @@ function skipTemplateLiteral(code: string, start: number): number {
 		i++;
 	}
 	return i;
+}
+
+// ── <style> block blanking ─────────────────────────────────────────
+
+function blankStyleBlocks(ms: MagicString, source: string): void {
+	const openTag = /<style\b[^>]*>/gi;
+	const interpRe = /\{[a-zA-Z_$][a-zA-Z0-9_$.]*\}/g;
+	let match;
+	while ((match = openTag.exec(source)) !== null) {
+		const contentStart = match.index + match[0].length;
+		const closeIdx = source.indexOf('</style>', contentStart);
+		if (closeIdx === -1) continue;
+
+		// Blank CSS but preserve {expr} interpolations (valid JSX expressions)
+		interpRe.lastIndex = contentStart;
+		let pos = contentStart;
+		let m;
+		while ((m = interpRe.exec(source)) !== null && m.index < closeIdx) {
+			if (pos < m.index) blankRange(ms, source, pos, m.index);
+			pos = m.index + m[0].length;
+		}
+		if (pos < closeIdx) blankRange(ms, source, pos, closeIdx);
+	}
+}
+
+function blankRange(ms: MagicString, source: string, start: number, end: number): void {
+	let blanked = '';
+	for (let i = start; i < end; i++) {
+		blanked += source[i] === '\n' ? '\n' : ' ';
+	}
+	ms.overwrite(start, end, blanked);
 }

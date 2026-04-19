@@ -28,6 +28,19 @@
 				"scopeName": "source.dartsx.render.injection",
 				"path": "./syntaxes/dartsx.render.injection.tmLanguage.json",
 				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"]
+			},
+			{
+				"scopeName": "source.dartsx.style.injection",
+				"path": "./syntaxes/dartsx.style.injection.tmLanguage.json",
+				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"],
+				"embeddedLanguages": {
+					"source.css": "css"
+				}
+			},
+			{
+				"scopeName": "source.dartsx.css-expressions.injection",
+				"path": "./syntaxes/dartsx.css-expressions.injection.tmLanguage.json",
+				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"]
 			}
 		]
 	},
