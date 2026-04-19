@@ -294,7 +294,24 @@ function tryRewriteKeyword(
 	source: string,
 	identStart: number,
 ): boolean {
-	const before = source.substring(Math.max(0, identStart - 20), identStart);
+	// For destructured bindings, scan back past `{ ..., ` or `[ ..., ` to find the keyword
+	let scanStart = identStart;
+	const charBefore = source[scanStart - 1];
+	if (charBefore === ' ' || charBefore === '\t' || charBefore === ',' || charBefore === '\n') {
+		// Walk backward to find the opening { or [
+		let k = scanStart - 1;
+		let depth = 0;
+		while (k >= 0) {
+			const ch = source[k];
+			if (ch === '}' || ch === ']') depth++;
+			else if (ch === '{' || ch === '[') {
+				if (depth === 0) { scanStart = k; break; }
+				depth--;
+			}
+			k--;
+		}
+	}
+	const before = source.substring(Math.max(0, scanStart - 20), scanStart);
 	if (part.text === 'function' && /\bcomponent\s+$/.test(before)) {
 		part.text = 'component';
 		return true;
