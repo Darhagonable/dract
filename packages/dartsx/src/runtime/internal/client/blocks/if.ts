@@ -1,34 +1,34 @@
 import { effect } from '../reactivity/effect';
 
 export function if_block(
-    condFn: () => unknown,
-    trueFn: () => unknown,
-    falseFn?: () => unknown,
+	condFn: () => unknown,
+	trueFn: () => unknown,
+	falseFn?: () => unknown,
 ): Node {
-    const start = document.createComment('');
-    const end = document.createComment('');
-    const frag = document.createDocumentFragment();
-    frag.appendChild(start);
-    frag.appendChild(end);
+	const start = document.createComment('');
+	const end = document.createComment('');
+	const frag = document.createDocumentFragment();
+	frag.appendChild(start);
+	frag.appendChild(end);
 
-    let currentBranch: boolean | null = null;
+	let currentBranch: boolean | null = null;
 
-    effect(() => {
-        const cond = !!condFn();
-        if (cond === currentBranch) return;
-        currentBranch = cond;
+	effect(() => {
+		const cond = !!condFn();
+		if (cond === currentBranch) return;
+		currentBranch = cond;
 
-        while (start.nextSibling !== end) {
-            start.nextSibling!.remove();
-        }
+		while (start.nextSibling !== end) {
+			start.nextSibling!.remove();
+		}
 
-        const result = cond ? trueFn() : (falseFn ? falseFn() : null);
-        if (result instanceof Node) {
-            end.parentNode!.insertBefore(result, end);
-        } else if (result != null && result !== false && result !== true) {
-            end.parentNode!.insertBefore(document.createTextNode(String(result)), end);
-        }
-    });
+		const result = cond ? trueFn() : (falseFn ? falseFn() : null);
+		if (result instanceof Node) {
+			end.parentNode!.insertBefore(result, end);
+		} else if (result != null && result !== false && result !== true) {
+			end.parentNode!.insertBefore(document.createTextNode(String(result)), end);
+		}
+	});
 
-    return frag;
+	return frag;
 }

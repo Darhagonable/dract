@@ -5,5 +5,5 @@ import { getFlushPromise } from '../internal/client/reactivity/scheduler';
  * If no changes are pending, resolves in the next microtask.
  */
 export function tick(): Promise<void> {
-    return getFlushPromise() || Promise.resolve();
+	return getFlushPromise() || Promise.resolve();
 }
