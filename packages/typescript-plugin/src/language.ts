@@ -17,6 +17,7 @@ import type {
 import type { } from '@volar/typescript';
 import { forEachEmbeddedCode } from '@volar/language-core';
 import { dartsxToTsx, isDarTsxFile } from './dartsx-to-tsx';
+import { skipBracedExpression } from './unused-css';
 import * as fs from 'fs';
 
 type IScriptSnapshot = import('@volar/language-core').IScriptSnapshot;
@@ -64,7 +65,10 @@ class DarTsxVirtualCode implements VirtualCode {
 		};
 
 		// Extract embedded CSS virtual codes from <style> blocks
-		this.embeddedCodes = extractCssVirtualCodes(source);
+		this.embeddedCodes = [
+			...extractCssVirtualCodes(source),
+			...extractHtmlVirtualCode(source),
+		];
 	}
 }
 
@@ -340,6 +344,150 @@ function extractCssVirtualCodes(source: string): VirtualCode[] {
 	}
 
 	return codes;
+}
+
+// ── Embedded HTML Virtual Code ─────────────────────────────────────
+
+function extractHtmlVirtualCode(source: string): VirtualCode[] {
+	// Find render(...) blocks and collect their JSX content regions
+	const renderRe = /\brender\s*\(/g;
+	const regions: { start: number; end: number }[] = [];
+	let m;
+	while ((m = renderRe.exec(source)) !== null) {
+		const open = source.indexOf('(', m.index);
+		if (open === -1) continue;
+		const close = findMatchingParen(source, open);
+		if (close <= open) continue;
+		regions.push({ start: open + 1, end: close });
+	}
+	if (regions.length === 0) return [];
+
+	// Start with everything blanked, then copy in render regions
+	const chars: string[] = [];
+	for (let i = 0; i < source.length; i++) {
+		chars[i] = source[i] === '\n' ? '\n' : ' ';
+	}
+	for (const r of regions) {
+		for (let i = r.start; i < r.end; i++) chars[i] = source[i];
+	}
+
+	let html = chars.join('');
+
+	// Blank <style> blocks (CSS service handles those)
+	html = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, m => m.replace(/[^\n]/g, ' '));
+	// Blank {expressions}, but preserve HTML inside control-flow blocks
+	const out = html.split('');
+	for (const r of regions) {
+		blankExpressions(html, out, r.start, r.end);
+	}
+	html = out.join('');
+	// Blank component tags (capitalized) — HTML service doesn't know them
+	html = html.replace(/<\/?[A-Z][a-zA-Z0-9_$]*/g, m => ' '.repeat(m.length));
+
+	return [{
+		id: 'html',
+		languageId: 'html',
+		snapshot: {
+			getText: (start, end) => html.substring(start, end),
+			getLength: () => html.length,
+			getChangeRange: () => undefined,
+		},
+		mappings: [{
+			sourceOffsets: [0],
+			generatedOffsets: [0],
+			lengths: [source.length],
+			data: {
+				completion: true,
+				semantic: true,
+				navigation: true,
+				structure: true,
+				format: false,
+			},
+		}],
+		embeddedCodes: [],
+	}];
+}
+
+/**
+ * Blank {expression} blocks within a render region.
+ * Control-flow blocks (containing `render`) are handled recursively:
+ * the JS syntax is blanked but the HTML after `render` is preserved.
+ */
+function blankExpressions(source: string, out: string[], start: number, end: number): void {
+	let i = start;
+	while (i < end) {
+		if (source[i] === '{') {
+			const braceEnd = skipBracedExpression(source, i);
+			if (/\brender[\s\n]/.test(source.slice(i, braceEnd))) {
+				// Control flow: blank everything, then restore HTML after render keywords
+				for (let j = i; j < braceEnd; j++) if (out[j] !== '\n') out[j] = ' ';
+				restoreRenderContent(source, out, i + 1, braceEnd - 1);
+			} else {
+				// Pure expression like {count}: blank entirely
+				for (let j = i; j < braceEnd; j++) if (out[j] !== '\n') out[j] = ' ';
+			}
+			i = braceEnd;
+		} else {
+			i++;
+		}
+	}
+}
+
+/**
+ * Within a blanked control-flow block, find `render` keywords and
+ * restore the HTML/JSX that follows each one. Recursively blanks
+ * any nested {expressions} inside the restored content.
+ */
+function restoreRenderContent(source: string, out: string[], start: number, end: number): void {
+	const renderRe = /\brender[\s\n]/g;
+	renderRe.lastIndex = start;
+	let m;
+	while ((m = renderRe.exec(source)) !== null && m.index < end) {
+		let jsxStart = m.index + m[0].length;
+		while (jsxStart < end && /\s/.test(source[jsxStart])) jsxStart++;
+
+		// Find the closing } for this clause, skipping nested {…} blocks
+		let jsxEnd = end;
+		for (let k = jsxStart; k < end; k++) {
+			const ch = source[k];
+			if (ch === '{') { k = skipBracedExpression(source, k) - 1; }
+			else if (ch === '}') { jsxEnd = k; break; }
+		}
+
+		// Restore JSX characters
+		for (let k = jsxStart; k < jsxEnd; k++) out[k] = source[k];
+		// Recursively blank {expressions} within the restored JSX
+		blankExpressions(source, out, jsxStart, jsxEnd);
+
+		renderRe.lastIndex = jsxEnd;
+	}
+}
+
+/** Find the index of the closing `)` matching the `(` at openIdx. */
+function findMatchingParen(source: string, openIdx: number): number {
+	let depth = 1;
+	for (let i = openIdx + 1; i < source.length; i++) {
+		const ch = source[i];
+		if (ch === '(') depth++;
+		else if (ch === ')') { if (--depth === 0) return i; }
+		else if (ch === '{') { i = skipBracedExpression(source, i) - 1; }
+		else if (ch === '"' || ch === "'" || ch === '`') { i = skipString(source, i); }
+		else if (ch === '/' && source[i + 1] === '/') { i = source.indexOf('\n', i) ?? source.length; }
+		else if (ch === '/' && source[i + 1] === '*') { i = (source.indexOf('*/', i + 2) + 1) || source.length; }
+	}
+	return -1;
+}
+
+function skipString(source: string, start: number): number {
+	const q = source[start];
+	for (let i = start + 1; i < source.length; i++) {
+		if (source[i] === '\\') { i++; continue; }
+		if (source[i] === q) return i;
+		if (q === '`' && source[i] === '$' && source[i + 1] === '{') {
+			i = skipBracedExpression(source, i + 1) - 1;
+		}
+	}
+	return source.length;
 }
 
 // ── Language Plugin ────────────────────────────────────────────────

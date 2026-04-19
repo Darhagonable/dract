@@ -57,9 +57,6 @@ importers:
       magic-string:
         specifier: ^0.30.21
         version: 0.30.21
-      vscode-html-languageservice:
-        specifier: ^5.6.2
-        version: 5.6.2
     devDependencies:
       typescript:
         specifier: ^5.8.2
@@ -90,6 +87,9 @@ importers:
         specifier: workspace:*
         version: link:../typescript-plugin
       volar-service-css:
+        specifier: 0.0.70
+        version: 0.0.70(@volar/language-service@2.4.28)
+      volar-service-html:
         specifier: 0.0.70
         version: 0.0.70(@volar/language-service@2.4.28)
       vscode-languageclient:
@@ -1357,6 +1357,14 @@ packages:
       '@volar/language-service':
         optional: true
 
+  volar-service-html@0.0.70:
+    resolution: {integrity: sha512-eR6vCgMdmYAo4n+gcT7DSyBQbwB8S3HZZvSagTf0sxNaD4WppMCFfpqWnkrlGStPKMZvMiejRRVmqsX9dYcTvQ==}
+    peerDependencies:
+      '@volar/language-service': ~2.4.0
+    peerDependenciesMeta:
+      '@volar/language-service':
+        optional: true
+
   vscode-css-languageservice@6.3.10:
     resolution: {integrity: sha512-eq5N9Er3fC4vA9zd9EFhyBG90wtCCuXgRSpAndaOgXMh1Wgep5lBgRIeDgjZBW9pa+332yC9+49cZMW8jcL3MA==}
 
@@ -2429,6 +2437,14 @@ snapshots:
   volar-service-css@0.0.70(@volar/language-service@2.4.28):
     dependencies:
       vscode-css-languageservice: 6.3.10
+      vscode-languageserver-textdocument: 1.0.12
+      vscode-uri: 3.1.0
+    optionalDependencies:
+      '@volar/language-service': 2.4.28
+
+  volar-service-html@0.0.70(@volar/language-service@2.4.28):
+    dependencies:
+      vscode-html-languageservice: 5.6.2
       vscode-languageserver-textdocument: 1.0.12
       vscode-uri: 3.1.0
     optionalDependencies:
