@@ -15,6 +15,7 @@ import { getDarTsxLanguagePlugin } from './language';
 import { isDarTsxFile } from './dartsx-to-tsx';
 import * as fs from 'fs';
 import { htmlData } from 'vscode-html-languageservice/lib/umd/languageFacts/data/webCustomData';
+import { analyzeUnusedCss, DARTSX_UNUSED_CSS_CODE } from './unused-css';
 
 /** Prebuilt lookup: HTML/SVG tag name → { description, references, baseline } */
 interface HtmlTagDoc {
@@ -30,8 +31,8 @@ const htmlTagDocs = new Map<string, HtmlTagDoc>();
 for (const tag of htmlData.tags ?? []) {
 	const desc = typeof tag.description === 'string'
 		? tag.description
-		: (tag.description as { kind: string; value: string })?.value ?? '';
-	const status = (tag as any).status as { baseline?: string; baseline_low_date?: string; baseline_high_date?: string } | undefined;
+		: tag.description?.value ?? '';
+	const status = tag.status;
 	let baseline = '';
 	if (status?.baseline === 'high' && status.baseline_low_date) {
 		const year = status.baseline_low_date.substring(0, 4);
@@ -42,7 +43,7 @@ for (const tag of htmlData.tags ?? []) {
 	}
 	htmlTagDocs.set(tag.name, {
 		description: desc,
-		references: (tag.references ?? []) as { name: string; url: string }[],
+		references: tag.references ?? [],
 		baseline,
 	});
 }
@@ -52,6 +53,7 @@ const baseInit = createLanguageServicePlugin(() => ({
 }));
 
 const init: typeof baseInit = (modules) => {
+	const ts = modules.typescript;
 	const base = baseInit(modules);
 	return {
 		...base,
@@ -69,8 +71,12 @@ const init: typeof baseInit = (modules) => {
 					if (prop === 'getSyntacticDiagnostics' || prop === 'getSemanticDiagnostics' || prop === 'getSuggestionDiagnostics') {
 						const original = target[prop];
 						return (fileName: string) => {
-							const diags = original.call(target, fileName);
-							return filterDarTsxDiagnostics(diags, fileName);
+							let diags = original.call(target, fileName);
+							diags = filterDarTsxDiagnostics(diags, fileName);
+							if (prop === 'getSemanticDiagnostics') {
+								diags = [...diags, ...getUnusedCssDiagnostics(fileName, ts)];
+							}
+							return diags;
 						};
 					}
 					return Reflect.get(target, prop, receiver);
@@ -397,6 +403,32 @@ function filterDarTsxDiagnostics(
 	}
 	if (!isDarTsxFile(content)) return diags;
 	return diags.filter(d => !d.code || !SUPPRESS_CODES.has(d.code));
+}
+
+// ── Unused CSS selector detection ──────────────────────────────────
+
+function getUnusedCssDiagnostics(fileName: string, ts: typeof import('typescript')): import('typescript').Diagnostic[] {
+	let content: string;
+	try {
+		content = fs.readFileSync(fileName, 'utf-8');
+	} catch {
+		return [];
+	}
+	if (!isDarTsxFile(content)) return [];
+
+	const warnings = analyzeUnusedCss(content);
+	if (warnings.length === 0) return [];
+
+	const sourceFile = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+	return warnings.map(w => ({
+		file: sourceFile,
+		start: w.start,
+		length: w.length,
+		messageText: w.message,
+		category: 0 as import('typescript').DiagnosticCategory,
+		code: DARTSX_UNUSED_CSS_CODE,
+		source: 'dartsx',
+	}));
 }
 
 export = init;

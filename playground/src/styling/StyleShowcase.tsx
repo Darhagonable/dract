@@ -55,6 +55,7 @@ export component StyleShowcase() {
           <p>Inner paragraph (green from nested style)</p>
           <style>
             p { color: #16a34a; font-weight: 600; }
+            h2 { color: #dc2626; }
           </style>
         </div>
       </div>
@@ -67,6 +68,8 @@ export component StyleShowcase() {
         margin: 0 auto;
         padding: 24px;
       }
+
+      .unused { color: red; }
 
       h2 {
         margin: 0;
