@@ -187,4 +187,94 @@ describe('dartsxToTsx', () => {
 		const { code } = dartsxToTsx(source);
 		expect(code).toBe(source);
 	});
+
+	it('wraps {if} in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  state show = true;
+  render (
+    <div>{if (show) { render <p>Hi</p> }}</div>
+  )
+}`);
+		expect(code).toContain('{(() => { if (show)');
+		expect(code).toContain('})()}');
+		expect(code).toContain('return <p>Hi</p>');
+	});
+
+	it('wraps {if/else if/else} in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  state x = 1;
+  render (
+    <div>{if (x === 1) {
+      render <p>One</p>
+    } else if (x === 2) {
+      render <p>Two</p>
+    } else {
+      render <p>Other</p>
+    }}</div>
+  )
+}`);
+		expect(code).toContain('{(() => { if (x === 1)');
+		expect(code).toContain('else if (x === 2)');
+		expect(code).toContain('else {');
+		expect(code).toContain('})()}');
+	});
+
+	it('wraps {for} in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  render (
+    <ul>{for (const [item, index] of items) {
+      render <li key={index}>{item}</li>
+    }}</ul>
+  )
+}`);
+		expect(code).toContain('{(() => { for (const [item, index] of items)');
+		expect(code).toContain('})()}');
+	});
+
+	it('wraps {switch} in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  state mode = "dark";
+  render (
+    <div>{switch (mode) {
+      case "dark": render <p>Dark</p>
+      case "light": render <p>Light</p>
+    }}</div>
+  )
+}`);
+		expect(code).toContain('{(() => { switch (mode)');
+		expect(code).toContain('})()}');
+	});
+
+	it('wraps {try/catch} in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  render (
+    <div>{try {
+      render <Data />
+    } catch (e) {
+      render <p>Error</p>
+    }}</div>
+  )
+}`);
+		expect(code).toContain('{(() => { try {');
+		expect(code).toContain('} catch (e) {');
+		expect(code).toContain('})()}');
+	});
+
+	it('wraps {try/pending/catch} in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  render (
+    <div>{try {
+      render <Data />
+    } pending {
+      render <p>Loading</p>
+    } catch (e) {
+      render <p>Error</p>
+    }}</div>
+  )
+}`);
+		expect(code).toContain('{(() => { try {');
+		expect(code).toContain('} pending {');
+		expect(code).toContain('} catch (e) {');
+		expect(code).toContain('})()}');
+	});
 });

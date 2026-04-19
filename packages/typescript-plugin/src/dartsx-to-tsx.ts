@@ -53,6 +53,7 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformStateDeclarations(ms, source, commentRanges);
 	transformDerivedDeclarations(ms, source, commentRanges);
 	transformRenderBlocks(ms, source);
+	transformJsxControlFlow(ms, source);
 	transformBindShorthand(ms, source);
 	transformBindAttributes(ms, source);
 	blankStyleBlocks(ms, source);
@@ -227,6 +228,73 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 	while ((match = reInline.exec(source)) !== null) {
 		ms.overwrite(match.index, match.index + 'render'.length, 'return');
 	}
+}
+
+// ── JSX control flow → IIFE ────────────────────────────────────────
+
+/**
+ * Wraps control flow blocks inside JSX in IIFEs so TypeScript can
+ * type-check them. `{if (x) { return <div/> }}` → `{(() => { if (x) { return <div/> } })()}`
+ */
+function transformJsxControlFlow(ms: MagicString, source: string): void {
+	const re = /\brender\s*\(/g;
+	let match;
+	while ((match = re.exec(source)) !== null) {
+		const openParen = match.index + match[0].length - 1;
+		const closeParen = findMatchingParen(source, openParen);
+		if (closeParen === -1) continue;
+		wrapControlFlowBlocks(ms, source, openParen + 1, closeParen);
+	}
+}
+
+function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, end: number): void {
+	let i = start;
+	while (i < end) {
+		const ch = source[i];
+		if (ch === "'" || ch === '"' || ch === '`') {
+			i = skipString(source, i);
+			continue;
+		}
+		if (ch === '{') {
+			const closeBrace = findMatchingBrace(source, i);
+			if (closeBrace === -1 || closeBrace > end) { i++; continue; }
+
+			// Check if this brace contains a control flow keyword at the top level
+			let j = i + 1;
+			while (j < closeBrace && /\s/.test(source[j])) j++;
+			const kw = source.slice(j, j + 10);
+
+			if (/^if\s*\(/.test(kw) || /^for\s*[\s(]/.test(kw) || /^switch\s*\(/.test(kw) || /^try\s*\{/.test(kw)) {
+				ms.appendLeft(i + 1, '(() => { ');
+				ms.appendLeft(closeBrace, ' })()');
+				// Recurse inside to handle nested control flow in JSX
+				wrapControlFlowBlocks(ms, source, i + 1, closeBrace);
+			}
+
+			i = closeBrace + 1;
+			continue;
+		}
+		i++;
+	}
+}
+
+function findMatchingBrace(code: string, openPos: number): number {
+	let depth = 1;
+	let i = openPos + 1;
+	while (i < code.length && depth > 0) {
+		const ch = code[i];
+		if (ch === '{') depth++;
+		else if (ch === '}') { depth--; if (depth === 0) return i; }
+		else if (ch === "'" || ch === '"') {
+			i = skipString(code, i);
+			continue;
+		} else if (ch === '`') {
+			i = skipTemplateLiteral(code, i);
+			continue;
+		}
+		i++;
+	}
+	return -1;
 }
 
 // ── bind:{x} → __bind_value={x} ───────────────────────────────────
