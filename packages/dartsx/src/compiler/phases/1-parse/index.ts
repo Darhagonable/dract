@@ -64,6 +64,16 @@ export function preprocess(source: string): PreprocessResult {
 	const stateVars: string[] = [];
 	const derivedVars: string[] = [];
 
+	// 0. Neutralize comments so keyword regexes don't match inside them.
+	//    Replace comment content with spaces (preserving newlines for line counts).
+	//    This prevents e.g. `state variable` inside a JSDoc comment from being
+	//    transformed into `let variable /*@s*/`.
+	//    The regex skips string literals to avoid false matches on `//` or `/*` in strings.
+	code = code.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g, (match, str, comment) => {
+		if (str) return str; // preserve strings
+		return comment.replace(/[^\n]/g, ' '); // blank out comment content
+	});
+
 	// 1. Transform component declarations
 	//    Handles: [export] [default] [async] component Name(...)
 	code = code.replace(
@@ -830,6 +840,7 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 		if (pc === '>' && k > 0 && code[k - 1] === '=') return null;    // arrow body
 		if (pc === ':') return null;                                      // case/label body
 		if (/\belse$/.test(code.slice(Math.max(0, k - 4), k + 1))) return null;
+		if (/\btry$/.test(code.slice(Math.max(0, k - 2), k + 1))) return null;
 
 		// Return type annotation: `): Type {` or `): Type<T> {`
 		// Scan backward past the type (identifiers, dots, generics, arrays, unions)

@@ -28,6 +28,8 @@ let currentDirectMemberAccessVars: Set<string> | undefined;
 let moduleDirectMemberAccess: Set<string> | undefined;
 /** Scope data attribute strings for the component currently being transformed (for render prop injection) */
 let currentScopeAttrs: string[] | undefined;
+/** Reactive call targets for the current transform (exclusion zones in JSX expressions) */
+let currentReactiveCallTargets: Map<string, Set<number>> | undefined;
 
 // ── Main entry ─────────────────────────────────────────────────────
 
@@ -196,6 +198,7 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 		for (const v of moduleDirectMemberAccess) directMemberAccessVars.add(v);
 	}
 	currentDirectMemberAccessVars = directMemberAccessVars.size > 0 ? directMemberAccessVars : undefined;
+	currentReactiveCallTargets = reactiveCallTargets;
 
 	// Process style blocks — compute hashes and inject data attributes
 	const scopedStyles = processScopeStyles(comp.styleBlocks, comp.meta.name, filename || 'input.tsx');
@@ -297,6 +300,7 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 	lines.push('}');
 	currentDirectMemberAccessVars = undefined;
 	currentScopeAttrs = undefined;
+	currentReactiveCallTargets = undefined;
 
 	return lines.join('\n');
 }
@@ -559,7 +563,7 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			break;
 		}
 		case 'dynamic': {
-			let wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+			let wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars, currentReactiveCallTargets);
 			// Inject scope data attributes into JSX within render props
 			if (currentScopeAttrs && currentScopeAttrs.length > 0) {
 				wrapped = injectScopeAttrsIntoJSXSource(wrapped, currentScopeAttrs);
@@ -641,7 +645,7 @@ function emitChildrenArray(children: JSXNodeIR[], reactiveVars: Set<string>, ind
 }
 
 function emitChildExpression(node: JSXExpressionIR, reactiveVars: Set<string>): string {
-	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars, currentReactiveCallTargets);
 	if (wrapped !== node.raw || containsReactiveVar(node.raw, reactiveVars)) {
 		return `() => ${wrapArrowBody(wrapped)}`;
 	}

@@ -99,6 +99,28 @@ function walk(node: ASTNode, visitor: (n: ASTNode, parent: ASTNode | null, key: 
 
 const WRAPPER_OFFSET = 2; // "0," is 2 chars
 
+// ── Shared helpers ─────────────────────────────────────────────────
+
+/** Walk an AST and collect exclusion zones for args at reactive call positions. */
+function collectExclusionZones(ast: ASTNode, reactiveCallTargets: Map<string, Set<number>>): { start: number; end: number }[] {
+	const zones: { start: number; end: number }[] = [];
+	walk(ast, (node) => {
+		if (
+			node.type === 'CallExpression' &&
+			node.callee?.type === 'Identifier'
+		) {
+			const indices = reactiveCallTargets.get(node.callee.name);
+			if (indices) {
+				for (const idx of indices) {
+					const arg = node.arguments?.[idx];
+					if (arg) zones.push({ start: arg.start, end: arg.end });
+				}
+			}
+		}
+	});
+	return zones;
+}
+
 // ── Public API ─────────────────────────────────────────────────────
 
 /**
@@ -110,11 +132,15 @@ export function wrapReadsInGet(
 	reactiveVars: Set<string>,
 	proxyVars?: Set<string>,
 	directMemberAccessVars?: Set<string>,
+	reactiveCallTargets?: Map<string, Set<number>>,
 ): string {
 	const ast = parseExpression(expr);
 	if (!ast) return expr; // fallback: return unchanged
 
 	const replacements: Replacement[] = [];
+
+	// Build exclusion zones from reactive call targets
+	const exclusionZones = reactiveCallTargets ? collectExclusionZones(ast, reactiveCallTargets) : [];
 
 	walk(ast, (node, parent, key) => {
 		if (node.type === 'Identifier' && reactiveVars.has(node.name)) {
@@ -136,6 +162,8 @@ export function wrapReadsInGet(
 			// Offset from wrapper
 			const start = id.start - WRAPPER_OFFSET;
 			const end = id.end - WRAPPER_OFFSET;
+			// Skip if inside an exclusion zone (reactive call arg)
+			if (exclusionZones.some(z => id.start >= z.start && id.end <= z.end)) return;
 			// Expand shorthand properties: { label } → { label: $.get(label) }
 			if (parent?.type === 'Property' && parent.shorthand && key === 'value') {
 				replacements.push({ start, end, text: `${id.name}: $.get(${id.name})` });
@@ -374,46 +402,30 @@ export function transformBodyStatement(
 		});
 	}
 
-	// Collect exclusion zones: first argument of effect() calls
-	// (deps must remain as Signal objects, not unwrapped via $.get())
-	// and args at reactive positions for functions with reactive params.
-	// For any exclusion-zone arg that is a member expression on a reactive root,
-	// wrap it in $.derived(() => ...) so the callee receives a Derived signal.
-	// Skip wrapping for args inside derived inits (Pass 0 handles those).
-	const exclusionZones: { start: number; end: number }[] = [];
+	// Collect exclusion zones for args at reactive call positions.
+	// These args must remain as Signal objects (not unwrapped via $.get()).
+	// For member expression args on a reactive root, wrap in $.derived()
+	// so the callee receives a Derived signal.
+	const exclusionZones = reactiveCallTargets
+		? collectExclusionZones(result.program, reactiveCallTargets)
+		: [];
 
-	function addExclusionArg(arg: ASTNode): void {
-		exclusionZones.push({ start: arg.start, end: arg.end });
-		// Skip wrapping if inside a derived init (Pass 0 handles the entire expression)
-		if (derivedInitSpans.some(d => arg.start >= d.start && arg.end <= d.end)) return;
-		// Array literal of deps: wrap each element individually
-		if (arg.type === 'ArrayExpression' && arg.elements) {
-			for (const elem of arg.elements) {
-				if (elem) wrapDepIfNeeded(elem);
-			}
-		} else {
-			wrapDepIfNeeded(arg);
-		}
-	}
-
-	walk(result.program, (node) => {
-		// Exclude args at reactive positions for functions with reactive params
-		if (
-			reactiveCallTargets &&
-			node.type === 'CallExpression' &&
-			node.callee?.type === 'Identifier'
-		) {
-			const indices = reactiveCallTargets.get(node.callee.name);
-			if (indices) {
-				for (const idx of indices) {
-					const arg = node.arguments?.[idx];
-					if (arg) {
-						addExclusionArg(arg);
-					}
+	// For each exclusion zone arg, wrap member expressions in $.derived()
+	for (const zone of exclusionZones) {
+		// Skip if inside a derived init (Pass 0 handles the entire expression)
+		if (derivedInitSpans.some(d => zone.start >= d.start && zone.end <= d.end)) continue;
+		// Find the AST node for this zone to check its type
+		walk(result.program, (node) => {
+			if (node.start !== zone.start || node.end !== zone.end) return;
+			if (node.type === 'ArrayExpression' && node.elements) {
+				for (const elem of node.elements) {
+					if (elem) wrapDepIfNeeded(elem);
 				}
+			} else {
+				wrapDepIfNeeded(node);
 			}
-		}
-	});
+		});
+	}
 
 	// Pass 0: Transform /*@s*/ and /*@d*/ declarations in nested scopes
 	const localReactiveAll = new Set([...localStateVars, ...localDerivedVars]);
@@ -531,7 +543,7 @@ export function transformBodyStatement(
 		const end = node.end;
 		// Skip if inside a span already covered by previous passes
 		if (coveredSpans.some((c) => start >= c.start && end <= c.end)) return;
-		// Skip if inside an exclusion zone (effect dep argument or reactive call arg)
+		// Skip if inside an exclusion zone (reactive call arg)
 		if (exclusionZones.some((z) => start >= z.start && end <= z.end)) return;
 
 		// Shorthand property: { count } → { count: $.get(count) }

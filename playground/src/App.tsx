@@ -6,6 +6,8 @@ import { ContextDemo } from "./ContextDemo";
 import { ReactiveContextDemo } from "./ReactiveContextDemo";
 import { StyleShowcase } from "./styling/StyleShowcase";
 import { RouterDemo } from "./RouterDemo";
+import { EffectDemo } from "./EffectDemo";
+import { StorageSyncDemo } from "./StorageSyncDemo";
 import { test } from "./helper-test";
 
 export default component App() {
@@ -40,6 +42,10 @@ export default component App() {
       <ReactiveContextDemo />
       <hr />
       <StyleShowcase />
+      <hr />
+      <EffectDemo />
+      <hr />
+      <StorageSyncDemo />
       <hr />
       <RouterDemo />
     </div>

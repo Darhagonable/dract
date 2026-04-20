@@ -487,6 +487,34 @@ export function analyze(
 		collectModuleJSX(node, stmtIndex);
 	}
 
+	// Second-pass call-site analysis: when reactiveCallImports made function params
+	// reactive, re-scan those function bodies to detect forwarding of reactive params
+	// to imported functions (e.g. effect(value, ...) where value became reactive via
+	// cross-file tracking). This ensures reactiveCallTargets includes those imported
+	// functions so their args get exclusion zones during transformation.
+	if (reactiveCallImports) {
+		for (const { node, fnInfo } of pendingFunctions) {
+			const indices = reactiveCallImports[fnInfo.name];
+			if (!indices) continue;
+			const paramNames = functionParamMap.get(fnInfo.name) || [];
+			const fnReactiveVars = new Set(allReactiveVars);
+			for (const idx of indices) {
+				if (idx < paramNames.length) fnReactiveVars.add(paramNames[idx]);
+			}
+			// Re-walk the function body with the expanded reactive var set
+			const secondPassImportedCalls: Record<string, Record<string, Set<number>>> = {};
+			walkCallSites(node, fnReactiveVars, functionParamMap, new Map(), importSourceMap, secondPassImportedCalls);
+			// Merge any new detections into importedReactiveCalls
+			for (const [specifier, fns] of Object.entries(secondPassImportedCalls)) {
+				if (!importedReactiveCalls[specifier]) importedReactiveCalls[specifier] = {};
+				for (const [fn, idxSet] of Object.entries(fns)) {
+					if (!importedReactiveCalls[specifier][fn]) importedReactiveCalls[specifier][fn] = new Set();
+					for (const i of idxSet) importedReactiveCalls[specifier][fn].add(i);
+				}
+			}
+		}
+	}
+
 	// Convert Set<number> to number[] for the result
 	const reactiveCalls: Record<string, Record<string, number[]>> = {};
 	for (const [specifier, fns] of Object.entries(importedReactiveCalls)) {

@@ -1,9 +1,19 @@
-import type { Plugin, DevEnvironment } from 'vite';
+import type { Plugin } from 'vite';
 import { compile } from 'dartsx/compiler';
 import fs from 'node:fs';
 
+export interface DarTsxTransformContext {
+	resolve(specifier: string, importer?: string): Promise<{ id: string } | null>;
+	error(msg: string): never;
+	environment: unknown;
+}
+
 function isDarTsxSource(code: string): boolean {
-	const sample = code.slice(0, 4096);
+	// Strip comments and string literals to avoid false positives from JSDoc, etc.
+	const sample = code.slice(0, 4096).replace(
+		/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g,
+		(_, str) => str ?? ''
+	);
 	return /\bcomponent\s+\w+\s*\(/.test(sample)
 		|| /\bstate\s+\w+\s*=/.test(sample)
 		|| /\bderived\s+\w+\s*=/.test(sample)
@@ -190,6 +200,10 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				for (const [specifier, fns] of Object.entries(result.reactiveCalls)) {
 					const resolved = await this.resolve(specifier, id);
 					if (!resolved) continue;
+					// Skip pre-built output directories — compiled library files handle
+					// signals internally and must not be recompiled with reactive param
+					// injection (injecting $.get() into e.g. the effect() definition breaks it).
+					if (/[/\\]dist[/\\]/.test(resolved.id)) continue;
 					newContribs.set(resolved.id, fns);
 				}
 
@@ -218,10 +232,13 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 					if (changed) {
 						pendingInvalidations.add(targetId);
 						const env = this.environment;
-						if (env && 'moduleGraph' in env) {
-							const mod = (env as DevEnvironment).moduleGraph.getModuleById(targetId);
-							if (mod) {
-								(env as DevEnvironment).moduleGraph.invalidateModule(mod);
+						if (env && typeof env === 'object' && 'moduleGraph' in env) {
+							const mg = env.moduleGraph;
+							if (mg && typeof mg === 'object' && 'getModuleById' in mg && typeof mg.getModuleById === 'function') {
+								const mod = mg.getModuleById(targetId);
+								if (mod && 'invalidateModule' in mg && typeof mg.invalidateModule === 'function') {
+									mg.invalidateModule(mod);
+								}
 							}
 						}
 					}
