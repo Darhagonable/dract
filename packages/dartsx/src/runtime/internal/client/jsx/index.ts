@@ -6,6 +6,9 @@ import { applyBinding } from '../bindings';
 import { setValueForStyles } from './style';
 import { getCurrentComponent, setCurrentComponent, type ComponentContext } from '../context';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const MATH_NS = 'http://www.w3.org/1998/Math/MathML';
+
 // ── Fragment sentinel ──────────────────────────────────────────────
 
 export const Fragment = Symbol('Fragment');
@@ -58,9 +61,21 @@ export function jsx(
 		return document.createTextNode(String(result));
 	}
 
-	// Native element
-	const el = document.createElement(tag);
+	// Native HTML element
+	return applyProps(document.createElement(tag), props);
+}
 
+// ── Namespaced element factories (called by compiler) ──────────────
+
+export function svg(tag: string, props?: Record<string, any> | null): Element {
+	return applyProps(document.createElementNS(SVG_NS, tag), props);
+}
+
+export function math(tag: string, props?: Record<string, any> | null): Element {
+	return applyProps(document.createElementNS(MATH_NS, tag), props);
+}
+
+function applyProps<T extends Element>(el: T, props?: Record<string, any> | null): T {
 	if (props) {
 		for (const key of Object.keys(props)) {
 			if (key === 'children') continue;
@@ -70,7 +85,6 @@ export function jsx(
 			appendChildren(el, props.children);
 		}
 	}
-
 	return el;
 }
 
@@ -153,6 +167,12 @@ function applyProp(el: Element, key: string, value: any): void {
 }
 
 function setAttribute(el: Element, name: string, value: any): void {
+	// innerHTML / textContent / innerText are DOM properties, not attributes
+	if (name === 'innerHTML' || name === 'textContent' || name === 'innerText') {
+		(el as HTMLElement)[name] = value ?? '';
+		return;
+	}
+
 	// Store raw (possibly non-string) value on options/selects as __value
 	if (name === 'value' && (el.tagName === 'OPTION' || el.tagName === 'SELECT')) {
 		(el as any).__value = value;

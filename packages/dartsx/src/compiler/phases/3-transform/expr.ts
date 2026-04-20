@@ -23,6 +23,57 @@ function unwrapTSExpression(node: any): any {
 	return node;
 }
 
+/**
+ * If the expression is a no-arg IIFE like `(() => { ... })()`,
+ * return the inner function body so it can be used directly as a derived callback.
+ * This avoids the redundant `$.derived(() => (() => { ... })())` pattern.
+ */
+function unwrapIIFE(expr: string): string | null {
+	const trimmed = expr.trim();
+	if (!trimmed.startsWith('(')) return null;
+
+	// Find matching ) for the outer wrapper paren
+	let depth = 0;
+	let outerClose = -1;
+	for (let i = 0; i < trimmed.length; i++) {
+		const ch = trimmed[i];
+		if (ch === '(') depth++;
+		else if (ch === ')') {
+			depth--;
+			if (depth === 0) { outerClose = i; break; }
+		}
+	}
+	if (outerClose === -1) return null;
+
+	// After the outer ), the rest must be exactly ()
+	const rest = trimmed.slice(outerClose + 1).trim();
+	if (rest !== '()') return null;
+
+	// Inner content (without outer parens)
+	const inner = trimmed.slice(1, outerClose).trim();
+
+	// Arrow function with no params: () => BODY
+	const arrowMatch = inner.match(/^\(\s*\)\s*=>\s*([\s\S]*)$/);
+	if (arrowMatch) return arrowMatch[1].trim();
+
+	// Function expression with no params: function() { BODY }
+	const funcMatch = inner.match(/^function\s*\(\s*\)\s*(\{[\s\S]*\})$/);
+	if (funcMatch) return funcMatch[1].trim();
+
+	return null;
+}
+
+/**
+ * Wrap an expression as a `$.derived(() => expr)` call string.
+ * Automatically unwraps IIFEs and handles object-literal arrow bodies.
+ */
+export function emitDerived(expr: string): string {
+	const iife = unwrapIIFE(expr);
+	if (iife) return `$.derived(() => ${iife})`;
+	const body = expr.trimStart().startsWith('{') ? `(${expr})` : expr;
+	return `$.derived(() => ${body})`;
+}
+
 interface Replacement {
 	start: number;
 	end: number;
@@ -461,8 +512,7 @@ export function transformBodyStatement(
 					const initEnd = s(decl.init.end);
 					const initExpr = stmt.slice(initStart, initEnd);
 					const wrappedInit = wrapReadsInGet(initExpr, allReactiveVars, proxyVars, allDirectMemberAccessVars);
-					const derivedBody = wrappedInit.trimStart().startsWith('{') ? `(${wrappedInit})` : wrappedInit;
-					replacements.push({ start: s(decl.id.end), end: initEnd, text: ` = $.derived(() => ${derivedBody})` });
+					replacements.push({ start: s(decl.id.end), end: initEnd, text: ` = ${emitDerived(wrappedInit)}` });
 					coveredSpans.push({ start: decl.id.start, end: decl.init.end });
 				}
 			}

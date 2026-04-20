@@ -56,6 +56,103 @@ function findOwnerComponent(componentPositions: { name: string; start: number }[
 	return owner;
 }
 
+// ── Type annotation stripping ──────────────────────────────────────
+
+/**
+ * Given a position right after a variable name, skip a `: Type` annotation
+ * by tracking balanced `{}`, `<>`, `()`, and `[]`. Returns the index right
+ * after the type annotation ends (where `=`, `;`, newline, or EOF is).
+ */
+function skipTypeAnnotation(code: string, start: number): number {
+	// Must start with optional whitespace then `:`
+	let i = start;
+	while (i < code.length && (code[i] === ' ' || code[i] === '\t')) i++;
+	if (i >= code.length || code[i] !== ':') return start; // no type annotation
+	i++; // skip the `:`
+
+	let depth = 0; // tracks {} <> () [] nesting
+
+	while (i < code.length) {
+		const ch = code[i];
+		if (ch === '{' || ch === '(' || ch === '[') {
+			depth++;
+		} else if (ch === '}' || ch === ')' || ch === ']') {
+			if (depth === 0) break; // unbalanced close — end of type
+			depth--;
+		} else if (ch === '<') {
+			// Could be a generic type angle bracket — only count if we're in a type context
+			depth++;
+		} else if (ch === '>') {
+			if (depth === 0) break;
+			depth--;
+		} else if (depth === 0) {
+			// At top level, `=` (not `=>`) ends the type
+			if (ch === '=' && i + 1 < code.length && code[i + 1] !== '>') break;
+			// `;` or newline at top level ends the type
+			if (ch === ';' || ch === '\n') break;
+		}
+		i++;
+	}
+
+	return i;
+}
+
+/**
+ * Transform `state varName: Type = expr` → `let varName MARKER = expr`
+ * Properly handles balanced braces inside type annotations.
+ */
+function transformStateDeclarations(code: string, stateVars: string[], marker: string): string {
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)/g;
+	let result = '';
+	let lastIndex = 0;
+	let match;
+
+	while ((match = re.exec(code)) !== null) {
+		const exportKw = match[1] || '';
+		const name = match[2];
+		const matchEnd = match.index + match[0].length;
+
+		// Skip the type annotation if present
+		const afterType = skipTypeAnnotation(code, matchEnd);
+
+		stateVars.push(name);
+		result += code.slice(lastIndex, match.index);
+		result += `${exportKw}let ${name} ${marker} `;
+		lastIndex = afterType;
+	}
+
+	result += code.slice(lastIndex);
+	return result;
+}
+
+/**
+ * Transform `derived varName: Type = expr` → `const varName MARKER = expr`
+ * Properly handles balanced braces inside type annotations.
+ */
+function transformDerivedDeclarations(code: string, derivedVars: string[], marker: string): string {
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)/g;
+	let result = '';
+	let lastIndex = 0;
+	let match;
+
+	while ((match = re.exec(code)) !== null) {
+		const exportKw = match[1] || '';
+		const name = match[2];
+		const matchEnd = match.index + match[0].length;
+
+		// Skip the type annotation if present
+		const afterType = skipTypeAnnotation(code, matchEnd);
+
+		derivedVars.push(name);
+		result += code.slice(lastIndex, match.index);
+		result += `${exportKw}const ${name} ${marker} `;
+		lastIndex = afterType;
+	}
+
+	result += code.slice(lastIndex);
+	return result;
+}
+
 // ── Pre-process ────────────────────────────────────────────────────
 
 export function preprocess(source: string): PreprocessResult {
@@ -125,13 +222,9 @@ export function preprocess(source: string): PreprocessResult {
 	//    regardless of scope, without relying on name matching alone.
 	//    Optional type annotations (`: Type`) are stripped — the runtime $.state()
 	//    call infers the type from the initializer.
-	code = code.replace(
-		/(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)(?:\s*:[\s\S]*?)?(?=\s*=(?!>)|\s*[\n;]|\s*$)/gm,
-		(_match, exportKw, name) => {
-			stateVars.push(name);
-			return `${exportKw || ''}let ${name} ${STATE_MARKER} `;
-		},
-	);
+	//    Uses a function-based replacement to properly handle balanced braces
+	//    inside type annotations (e.g. `{ id: string; text: string }`).
+	code = transformStateDeclarations(code, stateVars, STATE_MARKER);
 
 	// 3a. Transform destructured derived declarations into a temp plus
 	//     one derived binding per leaf identifier. This supports nested
@@ -139,13 +232,8 @@ export function preprocess(source: string): PreprocessResult {
 	code = transformDerivedDestructuring(code, derivedVars);
 
 	// 3b. Transform `derived varName = expr` or `derived varName: Type = expr` → `const varName /*@d*/ = expr`
-	code = code.replace(
-		/(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)(?:\s*:[\s\S]*?)?(?=\s*=(?!>))/g,
-		(_match, exportKw, name) => {
-			derivedVars.push(name);
-			return `${exportKw || ''}const ${name} ${DERIVED_MARKER} `;
-		},
-	);
+	//    Uses the same balanced-brace-aware stripping as state.
+	code = transformDerivedDeclarations(code, derivedVars, DERIVED_MARKER);
 
 	// 4. Transform all `render` forms into `return` statements:
 	//    - `render (jsx)` → `return (<>jsx</>)`
@@ -761,21 +849,50 @@ function findStatementEnd(code: string, start: number): number {
 function buildCFCallback(body: string, params?: string): string {
 	const arrow = params ? `(${params}) =>` : `() =>`;
 
-	// Transformed render block: `return (...)` from step-4/4b preprocessing
-	if (/\breturn\s*\(/.test(body)) {
-		return `${arrow} { ${body} }`;
-	}
-
-	// JSX body: starts with `<` (element/fragment) or contains JSX tags
-	// → wrap in fragment so OXC parses as JSX children
+	// JSX body: starts with `<` (element/fragment)
+	// → wrap in fragment so OXC parses as JSX children.
+	// Check this FIRST: even if the body contains nested callbacks with `return`,
+	// a body that starts with `<` is JSX and needs fragment wrapping.
 	const trimmed = body.trim();
 	if (trimmed.startsWith('<')) {
 		return `${arrow} (<>${body}</>)`;
 	}
 
+	// Transformed render block: body contains `return (...)` from step-4/4b preprocessing.
+	// This matches multi-statement bodies like `const x = ...; return (<>...</>)`.
+	// Only match `return` at the top level (not inside nested `{ }` braces) to avoid
+	// false matches on nested CF callbacks.
+	if (containsTopLevelReturn(body)) {
+		return `${arrow} { ${body} }`;
+	}
+
 	// Bare JS expression (count, "text", 6, {name: "John"}.name, etc.)
 	// → return directly without wrapping in JSX fragment
 	return `${arrow} (${body})`;
+}
+
+/** Check if body contains a `return` keyword at the top brace level (not inside nested { }) */
+function containsTopLevelReturn(body: string): boolean {
+	let depth = 0;
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i];
+		if (ch === '{') depth++;
+		else if (ch === '}') depth--;
+		else if (ch === "'" || ch === '"') {
+			const q = ch;
+			i++;
+			while (i < body.length && body[i] !== q) { if (body[i] === '\\') i++; i++; }
+		} else if (ch === '`') {
+			i++;
+			while (i < body.length && body[i] !== '`') { if (body[i] === '\\') i++; i++; }
+		} else if (depth === 0 && ch === 'r') {
+			const slice = body.slice(i, i + 7);
+			if (/^return[\s(]/.test(slice) && (i === 0 || !/\w/.test(body[i - 1]))) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 interface ControlFlowResult {
@@ -838,7 +955,36 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 		const pc = code[k];
 		if (pc === ')') return null;                                     // function/if/for body
 		if (pc === '>' && k > 0 && code[k - 1] === '=') return null;    // arrow body
-		if (pc === ':') return null;                                      // case/label body
+		// case/label body: only treat `:` as non-JSX when preceded by a case expression
+		// or a bare identifier (label). Not when `:` is just text content (e.g. `{text}:`)
+		if (pc === ':') {
+			// Look before the `:` for `case ...` or a label identifier
+			let t = k - 1;
+			while (t >= 0 && /\s/.test(code[t])) t--;
+			if (t >= 0) {
+				// `'val':` or `"val":` — case with string literal
+				if (code[t] === "'" || code[t] === '"') return null;
+				// `identifier:` — could be a label. Check it's a simple identifier preceded by start/newline/;/}
+				if (/\w/.test(code[t])) {
+					let idEnd = t;
+					while (t >= 0 && /\w/.test(code[t])) t--;
+					const word = code.slice(t + 1, idEnd + 1);
+					// `case` keyword: `case expr:`
+					if (word === 'case') return null;
+					// `default:`
+					if (word === 'default') return null;
+					// Check for `case ... expr:` by scanning back further for `case` keyword
+					let s = t;
+					while (s >= 0 && /\s/.test(code[s])) s--;
+					// Label: identifier at start of line or after ; or }
+					if (s < 0 || code[s] === ';' || code[s] === '}' || code[s] === '{' || code[s] === '\n') return null;
+					// Could be `case someExpr:` — scan back for the case keyword
+					const lineStart = code.lastIndexOf('\n', k);
+					const lineBefore = code.slice(lineStart + 1, k + 1).trim();
+					if (/^case\b/.test(lineBefore)) return null;
+				}
+			}
+		}
 		if (/\belse$/.test(code.slice(Math.max(0, k - 4), k + 1))) return null;
 		if (/\btry$/.test(code.slice(Math.max(0, k - 2), k + 1))) return null;
 

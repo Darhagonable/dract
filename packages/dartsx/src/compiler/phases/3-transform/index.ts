@@ -19,7 +19,7 @@ import type {
 	JSXAttrIR,
 	JSXExpressionIR,
 } from '../2-analyze';
-import { wrapReadsInGet, transformEventHandler, transformBodyStatement } from './expr';
+import { wrapReadsInGet, transformEventHandler, transformBodyStatement, emitDerived } from './expr';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 
 // Module-level proxy vars for current transform context (avoids threading through every function)
@@ -30,6 +30,8 @@ let moduleDirectMemberAccess: Set<string> | undefined;
 let currentScopeAttrs: string[] | undefined;
 /** Reactive call targets for the current transform (exclusion zones in JSX expressions) */
 let currentReactiveCallTargets: Map<string, Set<number>> | undefined;
+/** Current namespace context for JSX emission: 'html' | 'svg' | 'math' */
+let currentNsContext: 'html' | 'svg' | 'math' = 'html';
 
 // ── Main entry ─────────────────────────────────────────────────────
 
@@ -52,7 +54,8 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 		analysis.nestedComponents.length > 0 ||
 		analysis.moduleStateVars.length > 0 ||
 		analysis.moduleDerivedVars.length > 0 ||
-		analysis.moduleFunctions.length > 0;
+		analysis.moduleFunctions.length > 0 ||
+		analysis.moduleJSXNodes.length > 0;
 	if (needsRuntime) {
 		lines.push("import $ from 'dartsx/internal/client';");
 	}
@@ -113,7 +116,7 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 				const d = entry.item;
 				const prefix = d.exported ? 'export ' : '';
 				const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA);
-				lines.push(`${prefix}const ${d.name} = $.derived(() => ${wrapArrowBody(wrappedExpr)});`);
+				lines.push(`${prefix}const ${d.name} = ${emitDerived(wrappedExpr)};`);
 				break;
 			}
 			case 'function': {
@@ -260,13 +263,8 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 		if (decl.kind === 'state') {
 			lines.push(`    let ${decl.name} = $.state(${decl.initExpr});`);
 		} else if (decl.kind === 'derived') {
-			if (decl.raw) {
-				const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-				lines.push(`    const ${decl.name} = ${wrappedExpr};`);
-			} else {
-				const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-				lines.push(`    const ${decl.name} = $.derived(() => ${wrapArrowBody(wrappedExpr)});`);
-			}
+			const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+			lines.push(`    const ${decl.name} = ${decl.raw ? wrappedExpr : emitDerived(wrappedExpr)};`);
 		} else {
 			lines.push(`    ${transformBodyStatement(decl.text, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars)}`);
 		}
@@ -528,13 +526,28 @@ function emitElement(node: JSXElementIR, reactiveVars: Set<string>, indent: stri
 	for (const attr of node.attributes) {
 		emitAttr(attr, propEntries, reactiveVars, node.isComponent);
 	}
+
+	// Namespace: svg/math enter their namespace; foreignObject is SVG but children revert to HTML
+	const prevNs = currentNsContext;
+	const selfNs = node.isComponent ? 'html'
+		: node.tag === 'svg' || node.tag === 'foreignObject' ? 'svg'
+			: node.tag === 'math' ? 'math'
+				: currentNsContext;
+	if (!node.isComponent) {
+		currentNsContext = node.tag === 'foreignObject' ? 'html' : selfNs;
+	}
+
 	if (!node.selfClosing) {
 		const childStrs = emitChildrenArray(node.children, reactiveVars, indent);
 		if (childStrs.length > 0) propEntries.push(`children: [${childStrs.join(', ')}]`);
 	}
+	currentNsContext = prevNs;
+
 	const tag = node.isComponent ? node.tag : `"${node.tag}"`;
-	if (propEntries.length === 0) return `$.jsx(${tag})`;
-	return `$.jsx(${tag}, { ${propEntries.join(', ')} })`;
+	const factory = selfNs === 'svg' ? '$.svg' : selfNs === 'math' ? '$.math' : '$.jsx';
+
+	if (propEntries.length === 0) return `${factory}(${tag})`;
+	return `${factory}(${tag}, { ${propEntries.join(', ')} })`;
 }
 
 // ── Attribute emission ─────────────────────────────────────────────

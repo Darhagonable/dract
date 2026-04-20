@@ -11,7 +11,7 @@ export { type ComponentContext, getCurrentComponent, setCurrentComponent } from 
 
 // ── Re-exports from jsx ────────────────────────────────────────────
 
-export { jsx, Fragment, appendChild } from './jsx';
+export { jsx, svg, math, Fragment, appendChild } from './jsx';
 export { style } from './jsx/style-inject';
 export { if_block } from './blocks/if';
 export { for_block } from './blocks/for';
@@ -30,7 +30,7 @@ import { if_block } from './blocks/if';
 import { for_block } from './blocks/for';
 import { switch_block } from './blocks/switch';
 import { try_block } from './blocks/try';
-import { jsx, Fragment } from './jsx';
+import { jsx, svg, math, Fragment } from './jsx';
 import { style } from './jsx/style-inject';
 
 // ── Default export ─────────────────────────────────────────────────
@@ -44,6 +44,8 @@ export default {
 	derived,
 	effect,
 	jsx,
+	svg,
+	math,
 	Fragment,
 	style,
 	if: if_block,
