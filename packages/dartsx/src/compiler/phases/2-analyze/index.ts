@@ -385,10 +385,9 @@ export function analyze(
 	// Analyze call sites to determine which params receive signals
 	const implicitReactiveParams = new Map<string, Set<string>>();
 	const importedReactiveCalls: Record<string, Record<string, Set<number>>> = {};
-	// Build a comprehensive set of ALL reactive vars (module + component-level)
-	const allReactiveVars = new Set([...moduleReactiveVars, ...stateSet, ...derivedSet]);
-	// Walk the entire AST looking for call expressions
-	walkCallSites(ast, allReactiveVars, functionParamMap, implicitReactiveParams, importSourceMap, importedReactiveCalls);
+	// Walk the entire AST looking for call expressions (scope-aware: each
+	// component sees only its own state/derived/props, not other components')
+	walkCallSites(ast, source, moduleReactiveVars, stateSet, derivedSet, componentNames, functionParamMap, implicitReactiveParams, importSourceMap, importedReactiveCalls);
 
 	// Process pending non-function statements
 	const nestedComponents: AnalysisResult['nestedComponents'] = [];
@@ -497,13 +496,13 @@ export function analyze(
 			const indices = reactiveCallImports[fnInfo.name];
 			if (!indices) continue;
 			const paramNames = functionParamMap.get(fnInfo.name) || [];
-			const fnReactiveVars = new Set(allReactiveVars);
+			const fnModuleVars = new Set(moduleReactiveVars);
 			for (const idx of indices) {
-				if (idx < paramNames.length) fnReactiveVars.add(paramNames[idx]);
+				if (idx < paramNames.length) fnModuleVars.add(paramNames[idx]);
 			}
 			// Re-walk the function body with the expanded reactive var set
 			const secondPassImportedCalls: Record<string, Record<string, Set<number>>> = {};
-			walkCallSites(node, fnReactiveVars, functionParamMap, new Map(), importSourceMap, secondPassImportedCalls);
+			walkCallSites(node, source, fnModuleVars, stateSet, derivedSet, componentNames, functionParamMap, new Map(), importSourceMap, secondPassImportedCalls);
 			// Merge any new detections into importedReactiveCalls
 			for (const [specifier, fns] of Object.entries(secondPassImportedCalls)) {
 				if (!importedReactiveCalls[specifier]) importedReactiveCalls[specifier] = {};
@@ -589,15 +588,24 @@ export function analyze(
  */
 function walkCallSites(
 	ast: any,
-	reactiveVars: Set<string>,
+	source: string,
+	moduleReactiveVars: Set<string>,
+	stateSet: Set<string>,
+	derivedSet: Set<string>,
+	componentNames: Set<string>,
 	functionParamMap: Map<string, string[]>,
 	localResult: Map<string, Set<string>>,
 	importSourceMap: Map<string, { specifier: string; exportedName: string }>,
 	importedResult: Record<string, Record<string, Set<number>>>,
 ) {
+	// Scope-aware: activeScope tracks which vars are reactive in the current scope.
+	// Module level sees only moduleReactiveVars; component scopes add their own
+	// state/derived/props; nested functions inherit their parent scope.
+	let activeScope: Set<string> = moduleReactiveVars;
+
 	/** Check if an argument contains a reactive reference */
 	function isReactiveArg(arg: any): boolean {
-		if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) return true;
+		if (arg.type === 'Identifier' && activeScope.has(arg.name)) return true;
 		// Member expression with reactive root: user.name, obj.a.b
 		if (arg.type === 'MemberExpression') return isReactiveArg(arg.object);
 		// Array of deps: [a, b] where any element is reactive
@@ -609,6 +617,24 @@ function walkCallSites(
 
 	function visit(node: any) {
 		if (!node || typeof node !== 'object') return;
+
+		// When entering a component function, create a scope with that component's
+		// reactive vars (module-level + props + local state/derived).
+		if (node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name)) {
+			const prevScope = activeScope;
+			activeScope = new Set(moduleReactiveVars);
+			// Add component params (props become signals at runtime)
+			for (const param of node.params || []) {
+				if (param.type === 'RestElement') continue;
+				const name = param.name || param.left?.name;
+				if (name) activeScope.add(name);
+			}
+			// Add state/derived vars declared in this component's body
+			collectLocalReactiveVars(node.body, source, activeScope, stateSet, derivedSet);
+			forEachChild(node, visit);
+			activeScope = prevScope;
+			return;
+		}
 
 		if (node.type === 'CallExpression' && node.callee?.type === 'Identifier') {
 			const fnName = node.callee.name;
@@ -645,6 +671,30 @@ function walkCallSites(
 	}
 
 	visit(ast);
+}
+
+/** Scan a function body's top-level variable declarations for state/derived markers */
+function collectLocalReactiveVars(
+	body: any,
+	source: string,
+	scope: Set<string>,
+	stateSet: Set<string>,
+	derivedSet: Set<string>,
+) {
+	const stmts = body?.statements || body?.body || [];
+	for (const stmt of stmts) {
+		if (stmt.type !== 'VariableDeclaration') continue;
+		for (const decl of stmt.declarations || []) {
+			const name = decl.id?.name;
+			if (!name) continue;
+			const marker = source.slice(decl.id.end, decl.init?.start ?? stmt.end);
+			if (stateSet.has(name) && (marker.includes(STATE_MARKER) || !decl.init)) {
+				scope.add(name);
+			} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
+				scope.add(name);
+			}
+		}
+	}
 }
 
 /**
