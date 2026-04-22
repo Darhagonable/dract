@@ -112,8 +112,13 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
 		const name = match[2];
 		const matchEnd = match.index + match[0].length;
 
-		// Skip the type annotation if present
+		// Validate: after `state name`, the next non-whitespace char must indicate a
+		// declaration context (=, :, ;, newline, comma, close-paren, or EOF).
+		// This prevents matching prose like "state and derived" inside strings.
 		const afterType = skipTypeAnnotation(code, matchEnd);
+		let peek = afterType;
+		while (peek < code.length && (code[peek] === ' ' || code[peek] === '\t')) peek++;
+		if (peek < code.length && !/[=;,)\n]/.test(code[peek])) continue;
 
 		stateVars.push(name);
 		result += code.slice(lastIndex, match.index);
@@ -140,8 +145,13 @@ function transformDerivedDeclarations(code: string, derivedVars: string[], marke
 		const name = match[2];
 		const matchEnd = match.index + match[0].length;
 
-		// Skip the type annotation if present
+		// Validate: after `derived name`, the next non-whitespace char must indicate a
+		// declaration context (=, :, ;, newline, comma, close-paren, or EOF).
+		// This prevents matching prose like "state and derived" inside strings.
 		const afterType = skipTypeAnnotation(code, matchEnd);
+		let peek = afterType;
+		while (peek < code.length && (code[peek] === ' ' || code[peek] === '\t')) peek++;
+		if (peek < code.length && !/[=;,)\n]/.test(code[peek])) continue;
 
 		derivedVars.push(name);
 		result += code.slice(lastIndex, match.index);
@@ -1036,7 +1046,7 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 		// Return type annotation: `): Type {` or `): Type<T> {`
 		// Scan backward past the type (identifiers, dots, generics, arrays, unions)
 		// and check if we ultimately find `)` which indicates a function body.
-		if (/[\w\]>]/.test(pc)) {
+		if (/[\w\]>}]/.test(pc)) {
 			let t = k;
 			while (t >= 0) {
 				if (/[\w.$]/.test(code[t])) { t--; continue; }
@@ -1050,6 +1060,28 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 					while (t >= 0 && depth > 0) {
 						if (code[t] === '>') depth++;
 						else if (code[t] === '<') depth--;
+						t--;
+					}
+					continue;
+				}
+				if (code[t] === '}') {
+					// Skip object type braces: find matching {
+					let depth = 1;
+					t--;
+					while (t >= 0 && depth > 0) {
+						if (code[t] === '}') depth++;
+						else if (code[t] === '{') depth--;
+						t--;
+					}
+					continue;
+				}
+				if (code[t] === ')') {
+					// Skip parenthesized types / function type params: find matching (
+					let depth = 1;
+					t--;
+					while (t >= 0 && depth > 0) {
+						if (code[t] === ')') depth++;
+						else if (code[t] === '(') depth--;
 						t--;
 					}
 					continue;

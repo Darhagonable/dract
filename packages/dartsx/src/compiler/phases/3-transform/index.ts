@@ -115,7 +115,7 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 			case 'derived': {
 				const d = entry.item;
 				const prefix = d.exported ? 'export ' : '';
-				const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA);
+				const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA, analysis.reactiveCallTargets);
 				lines.push(`${prefix}const ${d.name} = ${emitDerived(wrappedExpr)};`);
 				break;
 			}
@@ -263,7 +263,7 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 		if (decl.kind === 'state') {
 			lines.push(`    let ${decl.name} = $.state(${decl.initExpr});`);
 		} else if (decl.kind === 'derived') {
-			const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+			const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars, reactiveCallTargets);
 			lines.push(`    const ${decl.name} = ${decl.raw ? wrappedExpr : emitDerived(wrappedExpr)};`);
 		} else {
 			lines.push(`    ${transformBodyStatement(decl.text, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars)}`);
