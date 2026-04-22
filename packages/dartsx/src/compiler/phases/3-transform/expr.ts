@@ -265,7 +265,14 @@ export function transformEventHandler(
 				: wrapReadsInGet(bodySource, reactiveVars, proxyVars, directMemberAccessVars);
 			return `${prefix} ${transformedBody}`;
 		}
-		// Block body — just wrap reads
+		// Block body — extract body content and transform assignments + reads
+		if (arrow.body?.type === 'BlockStatement') {
+			const bodyStart = arrow.body.start - WRAPPER_OFFSET;
+			const bodyEnd = arrow.body.end - WRAPPER_OFFSET;
+			const bodyContent = trimmed.slice(bodyStart + 1, bodyEnd - 1).trim();
+			const transformedBody = transformBodyStatement(bodyContent, reactiveVars, undefined, proxyVars, directMemberAccessVars);
+			return `${prefix} { ${transformedBody} }`;
+		}
 		return wrapReadsInGet(trimmed, reactiveVars, proxyVars, directMemberAccessVars);
 	}
 

@@ -895,6 +895,51 @@ function containsTopLevelReturn(body: string): boolean {
 	return false;
 }
 
+/**
+ * Wraps bare-JSX brace bodies with a fragment expression so OXC can parse them.
+ * Finds `{ <jsx>... }` patterns (whose trimmed content starts with `<` and
+ * doesn't already contain a top-level `return`) and wraps the inner content
+ * in `(<>...</>)`. Skips parens (conditions) to avoid touching object literals.
+ */
+function wrapJSXBranchBodies(text: string): string {
+	let result = '';
+	let i = 0;
+	while (i < text.length) {
+		if (text[i] === "'" || text[i] === '"') {
+			const end = skipString(text, i);
+			result += text.slice(i, end);
+			i = end;
+			continue;
+		}
+		if (text[i] === '`') {
+			const end = skipTemplateLiteral(text, i);
+			result += text.slice(i, end);
+			i = end;
+			continue;
+		}
+		// Skip parentheses entirely (conditions, sub-expressions) to avoid
+		// wrapping object literals like `if ({a:1}.a) {`
+		if (text[i] === '(') {
+			const close = findMatchingParen(text, i);
+			result += text.slice(i, close + 1);
+			i = close + 1;
+			continue;
+		}
+		if (text[i] === '{') {
+			const close = findMatchingBrace(text, i);
+			const inner = text.slice(i + 1, close).trim();
+			if (inner.startsWith('<') && !containsTopLevelReturn(inner)) {
+				result += '{ (<>' + text.slice(i + 1, close) + '</>) }';
+				i = close + 1;
+				continue;
+			}
+		}
+		result += text[i];
+		i++;
+	}
+	return result;
+}
+
 interface ControlFlowResult {
 	text: string;
 	end: number;
@@ -1108,16 +1153,21 @@ function tryParseIfBlock(code: string, outerBrace: number): ControlFlowResult | 
 	// so the content becomes valid TSX that OXC can parse.
 	const transformed = transformControlFlowBlocks(content);
 
+	// Wrap bare-JSX branch bodies in fragments so OXC can parse them.
+	// E.g. `{ <A/><B/> }` → `{ (<><A/><B/></>) }` since multiple bare
+	// JSX elements in a block aren't valid JS expression statements.
+	const wrapped = wrapJSXBranchBodies(transformed);
+
 	// Parse the transformed if statement with OXC.
 	// If bodies contain `return` (from block-render), wrap in a function
 	// so the return is valid.
-	let source = transformed;
+	let source = wrapped;
 	let result = parseSync('if-block.tsx', source, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
 	if (result.errors.length > 0) {
-		source = `function __(){${transformed}}`;
+		source = `function __(){${wrapped}}`;
 		result = parseSync('if-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
 		if (result.errors.length > 0) return null;
 		const fnBody = (result.program.body[0] as any)?.body?.body;
@@ -1158,7 +1208,12 @@ function buildIfCall(source: string, stmt: any): string {
 /** Extract body text from a branch node — strips braces for BlockStatement, uses full text otherwise */
 function extractBranchBody(source: string, node: any): string {
 	if (node.type === 'BlockStatement') {
-		return source.slice(node.start + 1, node.end - 1).trim();
+		const inner = source.slice(node.start + 1, node.end - 1).trim();
+		// Unwrap fragment added by wrapJSXBranchBodies: `(<>...</>)` → inner JSX
+		if (inner.startsWith('(<>') && inner.endsWith('</>)')) {
+			return inner.slice(3, -4);
+		}
+		return inner;
 	}
 	return source.slice(node.start, node.end).trim();
 }
@@ -1281,15 +1336,18 @@ function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResul
 	// Recursively transform nested control flow blocks first
 	const transformed = transformControlFlowBlocks(content);
 
+	// Wrap bare-JSX branch bodies in fragments for OXC parsing
+	const wrapped = wrapJSXBranchBodies(transformed);
+
 	// Parse the transformed switch statement with OXC.
 	// If cases contain `return` (from block-render), wrap in a function.
-	let source = transformed;
+	let source = wrapped;
 	let result = parseSync('switch-block.tsx', source, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
 	if (result.errors.length > 0) {
-		source = `function __(){${transformed}}`;
+		source = `function __(){${wrapped}}`;
 		result = parseSync('switch-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
 		if (result.errors.length > 0) return null;
 		const fnBody = (result.program.body[0] as any)?.body?.body;
