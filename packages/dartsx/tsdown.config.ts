@@ -9,5 +9,5 @@ export default defineConfig({
 		'compiler/index': 'src/compiler/index.ts',
 	},
 	fixedExtension: false,
-	external: ['oxc-parser', 'postcss', 'postcss-selector-parser'],
+	external: ['oxc-parser', 'oxc-transform', 'postcss', 'postcss-selector-parser'],
 });

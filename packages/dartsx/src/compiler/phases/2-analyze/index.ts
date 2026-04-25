@@ -486,20 +486,35 @@ export function analyze(
 		collectModuleJSX(node, stmtIndex);
 	}
 
-	// Second-pass call-site analysis: when reactiveCallImports made function params
-	// reactive, re-scan those function bodies to detect forwarding of reactive params
-	// to imported functions (e.g. effect(value, ...) where value became reactive via
-	// cross-file tracking). This ensures reactiveCallTargets includes those imported
-	// functions so their args get exclusion zones during transformation.
-	if (reactiveCallImports) {
+	// Second-pass call-site analysis: re-scan function bodies where params became
+	// reactive (via same-file call-site detection OR cross-file reactiveCallImports).
+	// This detects forwarding of reactive params to imported functions (e.g.
+	// effect(value, ...) where value became reactive via call-site analysis).
+	{
 		for (const { node, fnInfo } of pendingFunctions) {
-			const indices = reactiveCallImports[fnInfo.name];
-			if (!indices) continue;
+			// Check same-file reactive params
+			const sameFileReactive = implicitReactiveParams.get(fnInfo.name);
+			// Check cross-file reactive params
+			const crossFileIndices = reactiveCallImports?.[fnInfo.name];
+
+			if (!sameFileReactive && !crossFileIndices) continue;
+
 			const paramNames = functionParamMap.get(fnInfo.name) || [];
 			const fnModuleVars = new Set(moduleReactiveVars);
-			for (const idx of indices) {
-				if (idx < paramNames.length) fnModuleVars.add(paramNames[idx]);
+
+			// Add same-file reactive params
+			if (sameFileReactive) {
+				for (const paramName of sameFileReactive) {
+					fnModuleVars.add(paramName);
+				}
 			}
+			// Add cross-file reactive params
+			if (crossFileIndices) {
+				for (const idx of crossFileIndices) {
+					if (idx < paramNames.length) fnModuleVars.add(paramNames[idx]);
+				}
+			}
+
 			// Re-walk the function body with the expanded reactive var set
 			const secondPassImportedCalls: Record<string, Record<string, Set<number>>> = {};
 			walkCallSites(node, source, fnModuleVars, stateSet, derivedSet, componentNames, functionParamMap, new Map(), importSourceMap, secondPassImportedCalls);

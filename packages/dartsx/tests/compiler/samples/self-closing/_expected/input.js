@@ -1,5 +1,4 @@
-import $ from 'dartsx/internal/client';
-
+import $ from "dartsx/internal/client";
 function X() {
-    return $.jsx($.Fragment, { children: [$.jsx("input", { type: "text" }), $.jsx("br")] });
+	return $.jsx($.Fragment, { children: [$.jsx("input", { type: "text" }), $.jsx("br")] });
 }

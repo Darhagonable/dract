@@ -1,11 +1,9 @@
-import $ from 'dartsx/internal/client';
-
+import $ from "dartsx/internal/client";
 let x = $.state(1);
 const info = $.derived(() => ({
-  value: $.get(x),
-  label: 'count'
+	value: $.get(x),
+	label: "count"
 }));
-
 function Display() {
-    return $.jsx("span", { children: [() => info.value] });
+	return $.jsx("span", { children: [() => info.value] });
 }

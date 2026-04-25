@@ -1,5 +1,4 @@
-import $ from 'dartsx/internal/client';
-
+import $ from "dartsx/internal/client";
 function App() {
-    return $.jsx(Wrapper, { fallback: () => $.jsx("p", { children: ["Loading..."] }) });
+	return $.jsx(Wrapper, { fallback: () => $.jsx("p", { children: ["Loading..."] }) });
 }

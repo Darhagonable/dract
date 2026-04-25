@@ -19,13 +19,13 @@ importers:
         version: 29.0.1
       tsdown:
         specifier: ^0.21.7
-        version: 0.21.7(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(typescript@5.9.3)
+        version: 0.21.7(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(typescript@5.9.3)
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
       vitest:
         specifier: ^4.1.1
-        version: 4.1.4(@types/node@25.5.0)(jsdom@29.0.1)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))
+        version: 4.1.4(@types/node@25.5.0)(jsdom@29.0.1)(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1))
 
   packages/dartsx:
     dependencies:
@@ -38,6 +38,9 @@ importers:
       oxc-parser:
         specifier: ^0.66.0
         version: 0.66.0
+      oxc-transform:
+        specifier: ^0.127.0
+        version: 0.127.0
       postcss:
         specifier: ^8.5.9
         version: 8.5.9
@@ -82,7 +85,7 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^8.0.0
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)
+        version: 8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)
 
   packages/vscode-plugin:
     dependencies:
@@ -129,7 +132,7 @@ importers:
         version: link:../packages/vite-plugin
       vite:
         specifier: ^8.0.0
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)
+        version: 8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)
 
   toolkit/router:
     dependencies:
@@ -158,7 +161,7 @@ importers:
         version: 0.5.19(tailwindcss@4.2.2)
       '@tailwindcss/vite':
         specifier: ^4.2.2
-        version: 4.2.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))
+        version: 4.2.2(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1))
       dartsx-typescript-plugin:
         specifier: workspace:*
         version: link:../packages/typescript-plugin
@@ -176,7 +179,7 @@ importers:
         version: 4.2.2
       vite:
         specifier: ^8.0.0
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)
+        version: 8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)
 
 packages:
 
@@ -255,11 +258,20 @@ packages:
   '@emnapi/core@1.9.1':
     resolution: {integrity: sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA==}
 
+  '@emnapi/core@1.9.2':
+    resolution: {integrity: sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA==}
+
   '@emnapi/runtime@1.9.1':
     resolution: {integrity: sha512-VYi5+ZVLhpgK4hQ0TAjiQiZ6ol0oe4mBx7mVv7IflsiEp0OWoVsp/+f9Vc1hOhE0TtkORVrI1GvzyreqpgWtkA==}
 
+  '@emnapi/runtime@1.9.2':
+    resolution: {integrity: sha512-3U4+MIWHImeyu1wnmVygh5WlgfYDtyf0k8AbLhMFxOipihf6nrWC4syIm/SwEeec0mNSafiiNnMJwbza/Is6Lw==}
+
   '@emnapi/wasi-threads@1.2.0':
     resolution: {integrity: sha512-N10dEJNSsUx41Z6pZsXU8FjPjpBEplgH24sfkmITrBED1/U2Esum9F3lfLrMjKHHjmi557zQn7kR9R+XWXu5Rg==}
+
+  '@emnapi/wasi-threads@1.2.1':
+    resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -451,6 +463,12 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
+  '@napi-rs/wasm-runtime@1.1.4':
+    resolution: {integrity: sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow==}
+    peerDependencies:
+      '@emnapi/core': ^1.7.1
+      '@emnapi/runtime': ^1.7.1
+
   '@oxc-parser/binding-darwin-arm64@0.66.0':
     resolution: {integrity: sha512-vu0/j+qQTIguTGxSF7PLnB+2DR8w1GLX4JMk9dlndS2AobkzNuZYAaIfh9XuXKi1Y5SFnWdmCE8bvaqldDYdJg==}
     engines: {node: '>=14.0.0'}
@@ -515,6 +533,125 @@ packages:
 
   '@oxc-project/types@0.66.0':
     resolution: {integrity: sha512-KF5Wlo2KzQ+jmuCtrGISZoUfdHom7qHavNfPLW2KkeYJfYMGwtiia8KjwtsvNJ49qRiXImOCkPeVPd4bMlbR7w==}
+
+  '@oxc-transform/binding-android-arm-eabi@0.127.0':
+    resolution: {integrity: sha512-jPnE3HfHJlA9NdPnE7UoY/D4USAoPD/DBx6S4HwFuuqub8ATIW5bCue4MriPuA5qotzMngCbvyrBELuCyM2HPA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm]
+    os: [android]
+
+  '@oxc-transform/binding-android-arm64@0.127.0':
+    resolution: {integrity: sha512-xB1TxtVUHmlv0VvK02fST227wH78Q2TrWv0gHrlmopEFISV2+A7hx2xkVPy/ESgDCGMPjjKxfZYPCv3BtZ2sPQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [android]
+
+  '@oxc-transform/binding-darwin-arm64@0.127.0':
+    resolution: {integrity: sha512-pUZ5jHFe/DsZUQMWb/BOIEXbJg/vvRJU/SQyGT8Ik9pSThYOvioARBCBYwTJNG5ajddjQmcXpzENgLe07irvZA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@oxc-transform/binding-darwin-x64@0.127.0':
+    resolution: {integrity: sha512-d+2BJ/3JVW4L7cT6FAJIqOyds1t3ZHMBYT4MpFzzRjwxS0ToENa3gm3W3Mruq9G4DlNgfW0Mp8qZwqEXpvJbuQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [darwin]
+
+  '@oxc-transform/binding-freebsd-x64@0.127.0':
+    resolution: {integrity: sha512-piZtLbhV0uaXkUW9IhGl0eW+qtBFQMvc8cuuvRtWhYit7sJcKKcL8AZaIq5Bwk/hDRBgoOyZMwX7qwS9X2PN1g==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@oxc-transform/binding-linux-arm-gnueabihf@0.127.0':
+    resolution: {integrity: sha512-gxPAKRp3tWVnPul/z8cEZcZqkR12DOFx1vg7/yqYy/rh706xEpSw16aT4e5m3onctH/XKZeW1d4koa5vpriNFg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-arm-musleabihf@0.127.0':
+    resolution: {integrity: sha512-U/bL7pzUbB4EVOmhkvdJn0lef4R5W+nRR8YLRaGXScapMxLcUdwNOiJRydoqnWJs6z4JU7chwGvR6Cs69eQ5Hw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-arm64-gnu@0.127.0':
+    resolution: {integrity: sha512-YiPtyow694+IUBw8ZwN5CNXhz/89dW7XPiz+sTACN2sxvxCKlmcgEraFc9PizE9iKtcchA36konF+yGO8SMoQg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-arm64-musl@0.127.0':
+    resolution: {integrity: sha512-xBCF0HUiDFD9Uk9Zb95f9PkVM7uJlzHBjY4iT1UJupxg+ApqpUxRL0cfyO2anZcesqOM2GffLnLBT4gwdRv+bQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-ppc64-gnu@0.127.0':
+    resolution: {integrity: sha512-lKNIuNAdMBQBrQEh9FSloH+fE6EZY8U6ZUqAbPEjcIHiEBUO7mx7DwogCZ8gib1xffNppvQ6oz0hFI0fMWb4cQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [ppc64]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-riscv64-gnu@0.127.0':
+    resolution: {integrity: sha512-WPl6s7h+Q6nl4u09D4+WnFGDBNj7AMFD6QXBqd23F9/xl+li2WlpOUidldoUZVJLtARuhHQtO0PQugoRPaHKYA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [riscv64]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-riscv64-musl@0.127.0':
+    resolution: {integrity: sha512-/LD0ufzVWF5TMXs2enX9XLMF49LYz5kpVb0XDuHZ36UhjGrg7WvaxLJp+lwVpgpdoMC6Sydi/KGFgbhhYbkgtg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [riscv64]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-s390x-gnu@0.127.0':
+    resolution: {integrity: sha512-xL0Dmzv28ooYtB2440BnNEedsii0KO32I+gJTdFl0/RceqBXjSCE0cD9DxJA8ORJOyfyKUPTG3lZ+bjU0eEcUw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [s390x]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-x64-gnu@0.127.0':
+    resolution: {integrity: sha512-klWVSHzEMMwXeTTZwalsbhIoJxl4GDjE/HIDUG+1O7cUojRx4WUnX0udfibc3RorMimakc4VWFU+x13lshfKgg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [linux]
+
+  '@oxc-transform/binding-linux-x64-musl@0.127.0':
+    resolution: {integrity: sha512-c4ELErkp2TqSZ/AQZZH80BHE6CY7lbFM2gEaOLeRkqXYMNw9U6wRwrdBMJtBv3ddD6HD1qLNhnEF+gpg/mDonw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [linux]
+
+  '@oxc-transform/binding-openharmony-arm64@0.127.0':
+    resolution: {integrity: sha512-1gGjYNSduyuaQ0q4+69StMlgQ7lhGePTq2hoTeeGngGMn8FcheFbW/M83CGh26R1PxyXPY5w/uPSahu4m2GpSw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [openharmony]
+
+  '@oxc-transform/binding-wasm32-wasi@0.127.0':
+    resolution: {integrity: sha512-Fvsh9QaBYiTK8Uq8Z0yR67aVf3Y+YXWq53sHTvnmpykj5rKslxBpbY3vwdWezsKcNWbnpmBlU9XKjAlyMdlqzg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [wasm32]
+
+  '@oxc-transform/binding-win32-arm64-msvc@0.127.0':
+    resolution: {integrity: sha512-9A4/Kbfk96PMR7FSpi68vy7+Sb6sQyN4jn4qYLafsEjKW1UuyBGsPclPFX0LlbtfpOyBo0DVhdScMiECTB7hrA==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [win32]
+
+  '@oxc-transform/binding-win32-ia32-msvc@0.127.0':
+    resolution: {integrity: sha512-0nGodphAt3YGqlo4ZkU19sy3m6vD+q4L+y7GUdqmWdYjxE5if+ZA6vRzxQ/P1b8voiyhhHqPLBH+RHfNk/gKJw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [ia32]
+    os: [win32]
+
+  '@oxc-transform/binding-win32-x64-msvc@0.127.0':
+    resolution: {integrity: sha512-iOew3ViUfZMicYuaejgdV4GXVKQFX9tlXRqqv2gniZOdggtZCYzfVpOiKw/hzLXRJTWJ8fqkUks7E6nrk8JlTw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [win32]
 
   '@quansync/fs@1.0.0':
     resolution: {integrity: sha512-4TJ3DFtlf1L5LDMaM6CanJ/0lckGNtJcMjQ1NAV6zDmA0tEHKZtxNKin8EgPaVX1YzljbxckyT2tJrpQKAtngQ==}
@@ -1308,6 +1445,10 @@ packages:
     resolution: {integrity: sha512-uNkhp3ZueIqwU/Hm1ccDl/ZuAKAEhVlEj3W9sC6aD66ArxjO0xA6RZ9w85XJ2rugAt4g6R4tWeGvpJOSG3jfKg==}
     engines: {node: '>=14.0.0'}
 
+  oxc-transform@0.127.0:
+    resolution: {integrity: sha512-NQOcL0m4mfYJyv3DRbjlQI0MOldnxOEqHwU53j7pI8UGThywfty+OkalWPmSGhHG8qhjxn9RJfWCm8O2UNPUcQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+
   parse5@8.0.0:
     resolution: {integrity: sha512-9m4m5GSgXjL4AjumKzq1Fgfp3Z8rsvjRNbnkVwfu2ImRqE5D0LnY2QfDen18FSY9C573YU5XxSapdHZTZ2WolA==}
 
@@ -1891,12 +2032,28 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
+  '@emnapi/core@1.9.2':
+    dependencies:
+      '@emnapi/wasi-threads': 1.2.1
+      tslib: 2.8.1
+    optional: true
+
   '@emnapi/runtime@1.9.1':
     dependencies:
       tslib: 2.8.1
     optional: true
 
+  '@emnapi/runtime@1.9.2':
+    dependencies:
+      tslib: 2.8.1
+    optional: true
+
   '@emnapi/wasi-threads@1.2.0':
+    dependencies:
+      tslib: 2.8.1
+    optional: true
+
+  '@emnapi/wasi-threads@1.2.1':
     dependencies:
       tslib: 2.8.1
     optional: true
@@ -2007,10 +2164,17 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
+  '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)':
     dependencies:
-      '@emnapi/core': 1.9.1
-      '@emnapi/runtime': 1.9.1
+      '@emnapi/core': 1.9.2
+      '@emnapi/runtime': 1.9.2
+      '@tybys/wasm-util': 0.10.1
+    optional: true
+
+  '@napi-rs/wasm-runtime@1.1.4(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)':
+    dependencies:
+      '@emnapi/core': 1.9.2
+      '@emnapi/runtime': 1.9.2
       '@tybys/wasm-util': 0.10.1
     optional: true
 
@@ -2049,6 +2213,70 @@ snapshots:
   '@oxc-project/types@0.122.0': {}
 
   '@oxc-project/types@0.66.0': {}
+
+  '@oxc-transform/binding-android-arm-eabi@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-android-arm64@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-darwin-arm64@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-darwin-x64@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-freebsd-x64@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-arm-gnueabihf@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-arm-musleabihf@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-arm64-gnu@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-arm64-musl@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-ppc64-gnu@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-riscv64-gnu@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-riscv64-musl@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-s390x-gnu@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-x64-gnu@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-linux-x64-musl@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-openharmony-arm64@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-wasm32-wasi@0.127.0':
+    dependencies:
+      '@emnapi/core': 1.9.2
+      '@emnapi/runtime': 1.9.2
+      '@napi-rs/wasm-runtime': 1.1.4(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
+    optional: true
+
+  '@oxc-transform/binding-win32-arm64-msvc@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-win32-ia32-msvc@0.127.0':
+    optional: true
+
+  '@oxc-transform/binding-win32-x64-msvc@0.127.0':
+    optional: true
 
   '@quansync/fs@1.0.0':
     dependencies:
@@ -2090,9 +2318,9 @@ snapshots:
   '@rolldown/binding-openharmony-arm64@1.0.0-rc.12':
     optional: true
 
-  '@rolldown/binding-wasm32-wasi@1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
+  '@rolldown/binding-wasm32-wasi@1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+      '@napi-rs/wasm-runtime': 1.1.2(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -2282,12 +2510,12 @@ snapshots:
       postcss-selector-parser: 6.0.10
       tailwindcss: 4.2.2
 
-  '@tailwindcss/vite@4.2.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))':
+  '@tailwindcss/vite@4.2.2(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1))':
     dependencies:
       '@tailwindcss/node': 4.2.2
       '@tailwindcss/oxide': 4.2.2
       tailwindcss: 4.2.2
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)
+      vite: 8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)
 
   '@tybys/wasm-util@0.10.1':
     dependencies:
@@ -2348,13 +2576,13 @@ snapshots:
     optionalDependencies:
       vite: 6.4.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.32.0)
 
-  '@vitest/mocker@4.1.4(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))':
+  '@vitest/mocker@4.1.4(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1))':
     dependencies:
       '@vitest/spy': 4.1.4
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)
+      vite: 8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)
 
   '@vitest/pretty-format@3.2.4':
     dependencies:
@@ -2773,6 +3001,29 @@ snapshots:
       '@oxc-parser/binding-win32-arm64-msvc': 0.66.0
       '@oxc-parser/binding-win32-x64-msvc': 0.66.0
 
+  oxc-transform@0.127.0:
+    optionalDependencies:
+      '@oxc-transform/binding-android-arm-eabi': 0.127.0
+      '@oxc-transform/binding-android-arm64': 0.127.0
+      '@oxc-transform/binding-darwin-arm64': 0.127.0
+      '@oxc-transform/binding-darwin-x64': 0.127.0
+      '@oxc-transform/binding-freebsd-x64': 0.127.0
+      '@oxc-transform/binding-linux-arm-gnueabihf': 0.127.0
+      '@oxc-transform/binding-linux-arm-musleabihf': 0.127.0
+      '@oxc-transform/binding-linux-arm64-gnu': 0.127.0
+      '@oxc-transform/binding-linux-arm64-musl': 0.127.0
+      '@oxc-transform/binding-linux-ppc64-gnu': 0.127.0
+      '@oxc-transform/binding-linux-riscv64-gnu': 0.127.0
+      '@oxc-transform/binding-linux-riscv64-musl': 0.127.0
+      '@oxc-transform/binding-linux-s390x-gnu': 0.127.0
+      '@oxc-transform/binding-linux-x64-gnu': 0.127.0
+      '@oxc-transform/binding-linux-x64-musl': 0.127.0
+      '@oxc-transform/binding-openharmony-arm64': 0.127.0
+      '@oxc-transform/binding-wasm32-wasi': 0.127.0
+      '@oxc-transform/binding-win32-arm64-msvc': 0.127.0
+      '@oxc-transform/binding-win32-ia32-msvc': 0.127.0
+      '@oxc-transform/binding-win32-x64-msvc': 0.127.0
+
   parse5@8.0.0:
     dependencies:
       entities: 6.0.1
@@ -2831,7 +3082,7 @@ snapshots:
 
   resolve-pkg-maps@1.0.0: {}
 
-  rolldown-plugin-dts@0.23.2(rolldown@1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1))(typescript@5.9.3):
+  rolldown-plugin-dts@0.23.2(rolldown@1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2))(typescript@5.9.3):
     dependencies:
       '@babel/generator': 8.0.0-rc.3
       '@babel/helper-validator-identifier': 8.0.0-rc.3
@@ -2843,13 +3094,13 @@ snapshots:
       get-tsconfig: 4.13.7
       obug: 2.1.1
       picomatch: 4.0.4
-      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
     optionalDependencies:
       typescript: 5.9.3
     transitivePeerDependencies:
       - oxc-resolver
 
-  rolldown@1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1):
+  rolldown@1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2):
     dependencies:
       '@oxc-project/types': 0.122.0
       '@rolldown/pluginutils': 1.0.0-rc.12
@@ -2866,7 +3117,7 @@ snapshots:
       '@rolldown/binding-linux-x64-gnu': 1.0.0-rc.12
       '@rolldown/binding-linux-x64-musl': 1.0.0-rc.12
       '@rolldown/binding-openharmony-arm64': 1.0.0-rc.12
-      '@rolldown/binding-wasm32-wasi': 1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+      '@rolldown/binding-wasm32-wasi': 1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
       '@rolldown/binding-win32-arm64-msvc': 1.0.0-rc.12
       '@rolldown/binding-win32-x64-msvc': 1.0.0-rc.12
     transitivePeerDependencies:
@@ -2985,7 +3236,7 @@ snapshots:
 
   trim-lines@3.0.1: {}
 
-  tsdown@0.21.7(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(typescript@5.9.3):
+  tsdown@0.21.7(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(typescript@5.9.3):
     dependencies:
       ansis: 4.2.0
       cac: 7.0.0
@@ -2995,14 +3246,14 @@ snapshots:
       import-without-cache: 0.2.5
       obug: 2.1.1
       picomatch: 4.0.4
-      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
-      rolldown-plugin-dts: 0.23.2(rolldown@1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1))(typescript@5.9.3)
+      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
+      rolldown-plugin-dts: 0.23.2(rolldown@1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2))(typescript@5.9.3)
       semver: 7.7.4
       tinyexec: 1.0.4
       tinyglobby: 0.2.15
       tree-kill: 1.2.2
       unconfig-core: 7.5.0
-      unrun: 0.2.34(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+      unrun: 0.2.34(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
     optionalDependencies:
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -3051,9 +3302,9 @@ snapshots:
       unist-util-is: 6.0.1
       unist-util-visit-parents: 6.0.2
 
-  unrun@0.2.34(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1):
+  unrun@0.2.34(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2):
     dependencies:
-      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -3105,12 +3356,12 @@ snapshots:
       jiti: 2.6.1
       lightningcss: 1.32.0
 
-  vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1):
+  vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
       postcss: 8.5.8
-      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+      rolldown: 1.0.0-rc.12(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
       tinyglobby: 0.2.15
     optionalDependencies:
       '@types/node': 25.5.0
@@ -3162,10 +3413,10 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@4.1.4(@types/node@25.5.0)(jsdom@29.0.1)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)):
+  vitest@4.1.4(@types/node@25.5.0)(jsdom@29.0.1)(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)):
     dependencies:
       '@vitest/expect': 4.1.4
-      '@vitest/mocker': 4.1.4(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))
+      '@vitest/mocker': 4.1.4(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1))
       '@vitest/pretty-format': 4.1.4
       '@vitest/runner': 4.1.4
       '@vitest/snapshot': 4.1.4
@@ -3182,7 +3433,7 @@ snapshots:
       tinyexec: 1.0.4
       tinyglobby: 0.2.15
       tinyrainbow: 3.1.0
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1)
+      vite: 8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(jiti@2.6.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.5.0

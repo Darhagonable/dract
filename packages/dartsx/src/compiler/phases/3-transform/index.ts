@@ -20,11 +20,11 @@ import type {
 	JSXExpressionIR,
 } from '../2-analyze';
 import { decodeHTML } from 'entities';
+import { transformSync as oxcTransform } from 'oxc-transform';
 import { wrapReadsInGet, transformEventHandler, transformBodyStatement, emitDerived } from './expr';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 
-// Module-level proxy vars for current transform context (avoids threading through every function)
-let currentProxyVars: Set<string> | undefined;
+// Module-level state for current transform context (avoids threading through every function)
 let currentDirectMemberAccessVars: Set<string> | undefined;
 let moduleDirectMemberAccess: Set<string> | undefined;
 /** Scope data attribute strings for the component currently being transformed (for render prop injection) */
@@ -116,7 +116,7 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 			case 'derived': {
 				const d = entry.item;
 				const prefix = d.exported ? 'export ' : '';
-				const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, analysis.moduleProxyVars, moduleDMA, analysis.reactiveCallTargets);
+				const wrappedExpr = wrapReadsInGet(d.expr, analysis.moduleReactiveVars, moduleDMA, analysis.reactiveCallTargets);
 				lines.push(`${prefix}const ${d.name} = ${emitDerived(wrappedExpr)};`);
 				break;
 			}
@@ -126,7 +126,7 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 				for (const p of fn.reactiveParams) mergedReactive.add(p);
 				lines.push(fn.signature);
 				for (const stmt of fn.bodyStatements) {
-					lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA)}`);
+					lines.push(`    ${transformBodyStatement(stmt, mergedReactive, analysis.reactiveCallTargets, moduleDMA)}`);
 				}
 				lines.push('}');
 				break;
@@ -165,7 +165,7 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 					}
 				}
 
-				stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, analysis.moduleProxyVars, moduleDMA);
+				stmt = transformBodyStatement(stmt, analysis.moduleReactiveVars, analysis.reactiveCallTargets, moduleDMA);
 
 				for (const { placeholder, compiled } of placeholders) {
 					stmt = stmt.replace(placeholder, compiled);
@@ -180,8 +180,16 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 	// Strip trailing blank lines
 	while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
 
+	let code = lines.join('\n') + '\n';
+
+	// Strip TypeScript type annotations via oxc-transform
+	const stripped = oxcTransform(filename || 'output.tsx', code);
+	if (stripped.errors.length === 0) {
+		code = stripped.code;
+	}
+
 	return {
-		code: lines.join('\n') + '\n',
+		code,
 		css: cssFragments.join('\n'),
 	};
 }
@@ -191,7 +199,6 @@ export function transform(analysis: AnalysisResult, filename?: string, cssMode?:
 function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string, Set<number>>, filename?: string, cssFragments?: string[], emitStyleCalls = true): string {
 	const lines: string[] = [];
 	const hasProps = comp.params.length > 0;
-	currentProxyVars = comp.proxyVars.size > 0 ? comp.proxyVars : undefined;
 	const directMemberAccessVars = new Set<string>(comp.proxyVars);
 	for (const d of comp.derivedVars) directMemberAccessVars.add(d.name);
 	for (const p of comp.params) {
@@ -264,7 +271,7 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 		if (decl.kind === 'state') {
 			lines.push(`    let ${decl.name} = $.state(${decl.initExpr});`);
 		} else if (decl.kind === 'derived') {
-			const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars, reactiveCallTargets);
+			const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentDirectMemberAccessVars, reactiveCallTargets);
 			lines.push(`    const ${decl.name} = ${decl.raw ? wrappedExpr : emitDerived(wrappedExpr)};`);
 		} else {
 			let stmt = decl.text;
@@ -284,7 +291,7 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 				}
 			}
 
-			stmt = transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars);
+			stmt = transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets, currentDirectMemberAccessVars);
 
 			for (const { placeholder, compiled } of placeholders) {
 				stmt = stmt.replace(placeholder, compiled);
@@ -600,7 +607,7 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			break;
 		}
 		case 'dynamic': {
-			let wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars, currentReactiveCallTargets);
+			let wrapped = wrapReadsInGet(attr.value || '', reactiveVars, currentDirectMemberAccessVars, currentReactiveCallTargets);
 			// Inject scope data attributes into JSX within render props
 			if (currentScopeAttrs && currentScopeAttrs.length > 0) {
 				wrapped = injectScopeAttrsIntoJSXSource(wrapped, currentScopeAttrs);
@@ -617,7 +624,7 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			break;
 		}
 		case 'event': {
-			const handler = transformEventHandler(attr.value || '', reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+			const handler = transformEventHandler(attr.value || '', reactiveVars, currentDirectMemberAccessVars);
 			entries.push(`${key}: ${handler}`);
 			break;
 		}
@@ -625,13 +632,13 @@ function emitAttr(attr: JSXAttrIR, entries: string[], reactiveVars: Set<string>,
 			if (attr.bindProperty) {
 				if (attr.bindGetter !== undefined && attr.bindSetter !== undefined) {
 					// Function binding: bind:value={getter, setter}
-					const getter = wrapReadsInGet(attr.bindGetter, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-					const setter = transformEventHandler(attr.bindSetter, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+					const getter = wrapReadsInGet(attr.bindGetter, reactiveVars, currentDirectMemberAccessVars);
+					const setter = transformEventHandler(attr.bindSetter, reactiveVars, currentDirectMemberAccessVars);
 					entries.push(`${formatObjectKey(`bind:${attr.bindProperty}`)}: [${getter}, ${setter}]`);
 				} else if (attr.value) {
 					const val = attr.value;
-					const getter = wrapReadsInGet(val, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
-					const setter = transformEventHandler(`(v) => ${val} = v`, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+					const getter = wrapReadsInGet(val, reactiveVars, currentDirectMemberAccessVars);
+					const setter = transformEventHandler(`(v) => ${val} = v`, reactiveVars, currentDirectMemberAccessVars);
 					entries.push(`${formatObjectKey(`bind:${attr.bindProperty}`)}: [() => ${getter}, ${setter}]`);
 				}
 			}
@@ -682,7 +689,7 @@ function emitChildrenArray(children: JSXNodeIR[], reactiveVars: Set<string>, ind
 }
 
 function emitChildExpression(node: JSXExpressionIR, reactiveVars: Set<string>): string {
-	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars, currentReactiveCallTargets);
+	const wrapped = wrapReadsInGet(node.raw, reactiveVars, currentDirectMemberAccessVars, currentReactiveCallTargets);
 	if (wrapped !== node.raw || containsReactiveVar(node.raw, reactiveVars)) {
 		return `() => ${wrapArrowBody(wrapped)}`;
 	}
@@ -708,14 +715,14 @@ function emitCFCallback(
 	const arrow = params ? `(${params}) =>` : `() =>`;
 	const bodyExpr = emitBranchReturn(children, reactiveVars, indent);
 	if (preamble) {
-		const transformedPreamble = transformBodyStatement(preamble, reactiveVars, undefined, currentProxyVars, currentDirectMemberAccessVars);
+		const transformedPreamble = transformBodyStatement(preamble, reactiveVars, undefined, currentDirectMemberAccessVars);
 		return `${arrow} { ${transformedPreamble} return ${bodyExpr}; }`;
 	}
 	return `${arrow} ${bodyExpr}`;
 }
 
 function emitIfBlock(node: JSXIfBlockIR, reactiveVars: Set<string>, indent: string): string {
-	const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+	const condExpr = wrapReadsInGet(node.condition, reactiveVars, currentDirectMemberAccessVars);
 	const trueCallback = emitCFCallback(node.trueBranch, reactiveVars, indent, undefined, node.truePreamble);
 
 	let result = `$.if(() => ${condExpr}, ${trueCallback}`;
@@ -729,14 +736,14 @@ function emitIfBlock(node: JSXIfBlockIR, reactiveVars: Set<string>, indent: stri
 
 function emitForBlock(node: JSXForBlockIR, reactiveVars: Set<string>, indent: string): string {
 	const collExpr = node.collection.trimStart().startsWith('{')
-		? transformBodyStatement(node.collection, reactiveVars, undefined, currentProxyVars, currentDirectMemberAccessVars)
-		: wrapReadsInGet(node.collection, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+		? transformBodyStatement(node.collection, reactiveVars, undefined, currentDirectMemberAccessVars)
+		: wrapReadsInGet(node.collection, reactiveVars, currentDirectMemberAccessVars);
 	const params = node.indexName ? `${node.itemName}, ${node.indexName}` : node.itemName;
 	const bodyCallback = emitCFCallback(node.body, reactiveVars, indent, params, node.preamble);
 
 	let result = `$.for(() => ${collExpr}, ${bodyCallback}`;
 	if (node.keyExpr) {
-		const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+		const keyExpr = wrapReadsInGet(node.keyExpr, reactiveVars, currentDirectMemberAccessVars);
 		result += `, (${node.itemName}) => ${keyExpr}`;
 	}
 	result += ')';
@@ -744,7 +751,7 @@ function emitForBlock(node: JSXForBlockIR, reactiveVars: Set<string>, indent: st
 }
 
 function emitSwitchBlock(node: JSXSwitchBlockIR, reactiveVars: Set<string>, indent: string): string {
-	const discExpr = wrapReadsInGet(node.discriminant, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+	const discExpr = wrapReadsInGet(node.discriminant, reactiveVars, currentDirectMemberAccessVars);
 
 	const caseStrs: string[] = [];
 	for (const c of node.cases) {
@@ -781,7 +788,7 @@ function emitTryBlock(node: JSXTryBlockIR, reactiveVars: Set<string>, indent: st
 function emitAnonymousBlock(node: JSXAnonymousBlockIR, reactiveVars: Set<string>, indent: string): string {
 	const bodyExpr = emitBranchReturn(node.children, reactiveVars, indent);
 	if (node.preamble) {
-		const transformedPreamble = transformBodyStatement(node.preamble, reactiveVars, undefined, currentProxyVars, currentDirectMemberAccessVars);
+		const transformedPreamble = transformBodyStatement(node.preamble, reactiveVars, undefined, currentDirectMemberAccessVars);
 		return `() => { ${transformedPreamble} return ${bodyExpr}; }`;
 	}
 	return bodyExpr;
@@ -794,7 +801,7 @@ function emitBranchReturn(children: JSXNodeIR[], reactiveVars: Set<string>, inde
 	// since the branch callback already provides the reactive context
 	if (children.length === 1 && children[0].type === 'expression') {
 		const expr = children[0] as JSXExpressionIR;
-		return wrapReadsInGet(expr.raw, reactiveVars, currentProxyVars, currentDirectMemberAccessVars);
+		return wrapReadsInGet(expr.raw, reactiveVars, currentDirectMemberAccessVars);
 	}
 	const childStrs = emitChildrenArray(children, reactiveVars, indent);
 	if (childStrs.length === 0) return 'null';

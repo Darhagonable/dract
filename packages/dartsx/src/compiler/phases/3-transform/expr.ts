@@ -6,12 +6,7 @@
  */
 import { parseSync } from 'oxc-parser';
 import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
-import type {
-	Expression,
-	AssignmentExpression,
-	UpdateExpression,
-	IdentifierReference,
-} from 'oxc-parser';
+import type { Expression } from 'oxc-parser';
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -150,6 +145,181 @@ function walk(node: ASTNode, visitor: (n: ASTNode, parent: ASTNode | null, key: 
 
 const WRAPPER_OFFSET = 2; // "0," is 2 chars
 
+// ── Scope helpers ──────────────────────────────────────────────────
+
+/** Returns true if `node` introduces a new variable scope. */
+function isScopeBoundary(node: ASTNode): boolean {
+	const t = node.type;
+	return (
+		t === 'FunctionDeclaration' ||
+		t === 'FunctionExpression' ||
+		t === 'ArrowFunctionExpression' ||
+		t === 'BlockStatement' ||
+		t === 'ForStatement' ||
+		t === 'ForInStatement' ||
+		t === 'ForOfStatement' ||
+		t === 'CatchClause'
+	);
+}
+
+/**
+ * Collect all names declared at the immediate scope level of a node.
+ * For functions/arrows: params + body-level declarations.
+ * For blocks/for/catch: their own declarations.
+ * Does NOT recurse into nested scopes.
+ */
+function collectScopeDeclarations(node: ASTNode): Set<string> {
+	const names = new Set<string>();
+	const t = node.type;
+
+	// Collect function/arrow params
+	if (t === 'FunctionDeclaration' || t === 'FunctionExpression' || t === 'ArrowFunctionExpression') {
+		const params = node.params?.items || node.params || [];
+		for (const p of params) {
+			collectBindingNames(p, names);
+		}
+	}
+
+	// Catch clause: the catch param
+	if (t === 'CatchClause' && node.param) {
+		collectBindingNames(node.param, names);
+	}
+
+	// For-statement init declarations
+	if (t === 'ForStatement' && node.init?.type === 'VariableDeclaration') {
+		for (const decl of node.init.declarations || []) {
+			if (decl.id) collectBindingNames(decl.id, names);
+		}
+	}
+	// ForIn/ForOf left
+	if ((t === 'ForInStatement' || t === 'ForOfStatement') && node.left?.type === 'VariableDeclaration') {
+		for (const decl of node.left.declarations || []) {
+			if (decl.id) collectBindingNames(decl.id, names);
+		}
+	}
+
+	// Block-level variable declarations (let/const — also var for simplicity)
+	const stmts = getBlockStatements(node);
+	for (const stmt of stmts) {
+		if (stmt.type === 'VariableDeclaration') {
+			for (const decl of stmt.declarations || []) {
+				if (decl.id) collectBindingNames(decl.id, names);
+			}
+		}
+		// Function declarations in blocks
+		if (stmt.type === 'FunctionDeclaration' && stmt.id?.name) {
+			names.add(stmt.id.name);
+		}
+	}
+
+	return names;
+}
+
+/** Get the direct child statements of a scope-introducing node. */
+function getBlockStatements(node: ASTNode): ASTNode[] {
+	const t = node.type;
+	if (t === 'BlockStatement') return node.body || node.statements || [];
+	if (t === 'FunctionDeclaration' || t === 'FunctionExpression') {
+		const body = node.body;
+		if (body?.type === 'BlockStatement' || body?.type === 'FunctionBody') {
+			return body.body || body.statements || [];
+		}
+	}
+	if (t === 'ArrowFunctionExpression') {
+		const body = node.body;
+		if (body?.type === 'BlockStatement' || body?.type === 'FunctionBody') {
+			return body.body || body.statements || [];
+		}
+	}
+	if (t === 'CatchClause') {
+		const body = node.body;
+		if (body) return body.body || body.statements || [];
+	}
+	if (t === 'ForStatement' || t === 'ForInStatement' || t === 'ForOfStatement') {
+		const body = node.body;
+		if (body?.type === 'BlockStatement') return body.body || body.statements || [];
+	}
+	return [];
+}
+
+/** Extract binding names from a pattern (Identifier, ObjectPattern, ArrayPattern, RestElement, etc.) */
+function collectBindingNames(pattern: ASTNode, names: Set<string>): void {
+	if (!pattern) return;
+	const t = pattern.type;
+	if (t === 'Identifier' || t === 'BindingIdentifier') {
+		if (pattern.name) names.add(pattern.name);
+		return;
+	}
+	if (t === 'FormalParameter') {
+		collectBindingNames(pattern.pattern, names);
+		return;
+	}
+	if (t === 'RestElement') {
+		collectBindingNames(pattern.argument, names);
+		return;
+	}
+	if (t === 'AssignmentPattern') {
+		collectBindingNames(pattern.left, names);
+		return;
+	}
+	if (t === 'ObjectPattern') {
+		for (const prop of pattern.properties || []) {
+			if (prop.type === 'RestElement') {
+				collectBindingNames(prop, names);
+			} else {
+				collectBindingNames(prop.value || prop.key, names);
+			}
+		}
+		return;
+	}
+	if (t === 'ArrayPattern') {
+		for (const elem of pattern.elements || []) {
+			if (elem) collectBindingNames(elem, names);
+		}
+		return;
+	}
+}
+
+/**
+ * Check if an AST node (by span) is inside any of the given scope boundaries.
+ * Returns the pruned reactive set for that position.
+ */
+function pruneReactiveVarsForScope(
+	scopeStack: Array<{ start: number; end: number; declared: Set<string> }>,
+	nodeStart: number,
+	nodeEnd: number,
+	baseReactiveVars: Set<string>,
+): Set<string> {
+	let vars = baseReactiveVars;
+	for (const scope of scopeStack) {
+		if (nodeStart >= scope.start && nodeEnd <= scope.end && scope.declared.size > 0) {
+			// Lazily create pruned set only when needed
+			if (vars === baseReactiveVars) vars = new Set(baseReactiveVars);
+			for (const name of scope.declared) {
+				vars.delete(name);
+			}
+		}
+	}
+	return vars;
+}
+
+/**
+ * Walk an AST collecting all inner scope boundaries with their declared names.
+ * Returns a flat list of { start, end, declared } for each scope-introducing node.
+ */
+function collectAllScopeBoundaries(root: ASTNode): Array<{ start: number; end: number; declared: Set<string> }> {
+	const boundaries: Array<{ start: number; end: number; declared: Set<string> }> = [];
+	walk(root, (node) => {
+		if (isScopeBoundary(node)) {
+			const declared = collectScopeDeclarations(node);
+			if (declared.size > 0) {
+				boundaries.push({ start: node.start, end: node.end, declared });
+			}
+		}
+	});
+	return boundaries;
+}
+
 // ── Shared helpers ─────────────────────────────────────────────────
 
 /** Walk an AST and collect exclusion zones for args at reactive call positions. */
@@ -181,7 +351,6 @@ function collectExclusionZones(ast: ASTNode, reactiveCallTargets: Map<string, Se
 export function wrapReadsInGet(
 	expr: string,
 	reactiveVars: Set<string>,
-	proxyVars?: Set<string>,
 	directMemberAccessVars?: Set<string>,
 	reactiveCallTargets?: Map<string, Set<number>>,
 ): string {
@@ -193,12 +362,22 @@ export function wrapReadsInGet(
 	// Build exclusion zones from reactive call targets
 	const exclusionZones = reactiveCallTargets ? collectExclusionZones(ast, reactiveCallTargets) : [];
 
+	// Collect all inner scope boundaries for scope-aware shadowing
+	const scopeBoundaries = collectAllScopeBoundaries(ast);
+
 	walk(ast, (node, parent, key) => {
 		if (node.type === 'Identifier' && reactiveVars.has(node.name)) {
+			// Check if this identifier is shadowed by an inner scope declaration
+			const effectiveVars = pruneReactiveVarsForScope(scopeBoundaries, node.start, node.end, reactiveVars);
+			if (!effectiveVars.has(node.name)) return;
+
 			// Skip the root object of a member expression (obj.count / obj[expr]).
 			// Object-valued reactive roots are proxy-backed at runtime, so member
 			// access should stay as `obj.prop`, not `$.get(obj).prop`.
-			if (parent?.type === 'MemberExpression' && key === 'object' && directMemberAccessVars?.has(node.name)) {
+			const effectiveDMA = directMemberAccessVars
+				? pruneReactiveVarsForScope(scopeBoundaries, node.start, node.end, directMemberAccessVars)
+				: undefined;
+			if (parent?.type === 'MemberExpression' && key === 'object' && effectiveDMA?.has(node.name)) {
 				return;
 			}
 			// Skip if this is the property of a non-computed member expression (obj.count)
@@ -237,125 +416,24 @@ export function wrapReadsInGet(
 export function transformEventHandler(
 	raw: string,
 	reactiveVars: Set<string>,
-	proxyVars?: Set<string>,
 	directMemberAccessVars?: Set<string>,
 ): string {
 	const trimmed = raw.trim();
 	const ast = parseExpression(trimmed);
-	if (!ast) return `() => ${wrapReadsInGet(trimmed, reactiveVars, proxyVars, directMemberAccessVars)}`;
 
-	// Arrow function: transform the body
-	if (ast.type === 'ArrowFunctionExpression') {
-		const arrow = ast;
-		// Get the params text from source
-		const arrowStart = ast.start - WRAPPER_OFFSET;
-		// Find the `=>` in the source
-		const arrowIdx = trimmed.indexOf('=>', arrowStart);
-		const prefix = trimmed.slice(arrowStart, arrowIdx + 2);
-
-		// Get the body expression
-		if (arrow.expression && arrow.body && arrow.body.type) {
-			const bodyStart = arrow.body.start - WRAPPER_OFFSET;
-			const bodyEnd = arrow.body.end - WRAPPER_OFFSET;
-			const bodySource = trimmed.slice(bodyStart, bodyEnd);
-			// Re-parse body so span offsets are relative to bodySource
-			const bodyAST = parseExpression(bodySource);
-			const transformedBody = bodyAST
-				? transformExpr(bodySource, bodyAST, reactiveVars, proxyVars, directMemberAccessVars)
-				: wrapReadsInGet(bodySource, reactiveVars, proxyVars, directMemberAccessVars);
-			return `${prefix} ${transformedBody}`;
-		}
-		// Block body — extract body content and transform assignments + reads
-		if (arrow.body?.type === 'BlockStatement') {
-			const bodyStart = arrow.body.start - WRAPPER_OFFSET;
-			const bodyEnd = arrow.body.end - WRAPPER_OFFSET;
-			const bodyContent = trimmed.slice(bodyStart + 1, bodyEnd - 1).trim();
-			const transformedBody = transformBodyStatement(bodyContent, reactiveVars, undefined, proxyVars, directMemberAccessVars);
-			return `${prefix} { ${transformedBody} }`;
-		}
-		return wrapReadsInGet(trimmed, reactiveVars, proxyVars, directMemberAccessVars);
+	// Function expressions — transformBodyStatement handles the full string
+	// via span-based replacements, preserving arrow/function structure
+	if (ast?.type === 'ArrowFunctionExpression' || ast?.type === 'FunctionExpression') {
+		return transformBodyStatement(trimmed, reactiveVars, undefined, directMemberAccessVars);
 	}
 
-	// Bare identifier (function reference) — just wrap if reactive
-	if (ast.type === 'Identifier') {
-		return wrapReadsInGet(trimmed, reactiveVars, proxyVars, directMemberAccessVars);
+	// Function references — just wrap reads (don't add () =>)
+	if (ast?.type === 'Identifier' || ast?.type === 'MemberExpression') {
+		return wrapReadsInGet(trimmed, reactiveVars, directMemberAccessVars);
 	}
 
-	// Member expression function reference (obj.fn) — return as-is if no reactive reads
-	if (ast.type === 'MemberExpression') {
-		const wrapped = wrapReadsInGet(trimmed, reactiveVars, proxyVars, directMemberAccessVars);
-		return wrapped;
-	}
-
-	// Update or assignment — wrap in arrow
-	const transformed = transformExpr(trimmed, ast, reactiveVars, proxyVars, directMemberAccessVars);
-	if (transformed !== trimmed) {
-		return `() => ${transformed}`;
-	}
-
-	// Fallback: wrap reads and put in arrow
-	return `() => ${wrapReadsInGet(trimmed, reactiveVars, proxyVars, directMemberAccessVars)}`;
-}
-
-/**
- * Transform a single expression node, handling assignments and updates.
- */
-function transformExpr(
-	source: string,
-	node: ASTNode,
-	reactiveVars: Set<string>,
-	proxyVars?: Set<string>,
-	directMemberAccessVars?: Set<string>,
-): string {
-	// UpdateExpression: count++ / count-- / ++count / --count
-	if (node.type === 'UpdateExpression') {
-		const update = node;
-		const arg = update.argument;
-		if (arg.type === 'Identifier' && reactiveVars.has(arg.name)) {
-			const name = arg.name;
-			const delta = update.operator === '++' ? '+ 1' : '- 1';
-			return `$.set(${name}, $.get(${name}) ${delta})`;
-		}
-	}
-
-	// AssignmentExpression: count = x / count += x / etc.
-	if (node.type === 'AssignmentExpression') {
-		const assign = node;
-		const left = assign.left;
-		if (left.type === 'Identifier' && reactiveVars.has(left.name)) {
-			const name = left.name;
-			const rhsStart = assign.right.start - WRAPPER_OFFSET;
-			const rhsEnd = assign.right.end - WRAPPER_OFFSET;
-			const rhsSource = source.slice(rhsStart, rhsEnd);
-			const transformedRhs = wrapReadsInGet(rhsSource, reactiveVars, proxyVars, directMemberAccessVars);
-
-			if (assign.operator === '=') {
-				return `$.set(${name}, ${transformedRhs})`;
-			}
-			// Compound: +=, -=, *=, /=, etc.
-			const op = assign.operator.slice(0, -1); // remove the '='
-			return `$.set(${name}, $.get(${name}) ${op} ${transformedRhs})`;
-		}
-	}
-
-	// SequenceExpression: transform each part
-	if (node.type === 'SequenceExpression') {
-		const seq = node;
-		const parts = seq.expressions.map((expr: ASTNode) => {
-			const s = expr.start - WRAPPER_OFFSET;
-			const e = expr.end - WRAPPER_OFFSET;
-			const subSource = source.slice(s, e);
-			// Re-parse each sub-expression for correct span offsets
-			const subAST = parseExpression(subSource);
-			return subAST
-				? transformExpr(subSource, subAST, reactiveVars, proxyVars, directMemberAccessVars)
-				: wrapReadsInGet(subSource, reactiveVars, proxyVars, directMemberAccessVars);
-		});
-		return parts.join(', ');
-	}
-
-	// Default: just wrap reads
-	return wrapReadsInGet(source, reactiveVars, proxyVars, directMemberAccessVars);
+	// Inline expression (update, assignment, call, etc.) — transform and wrap in arrow
+	return `() => ${transformBodyStatement(trimmed, reactiveVars, undefined, directMemberAccessVars)}`;
 }
 
 // ── Body statement transformer ─────────────────────────────────────
@@ -369,7 +447,6 @@ export function transformBodyStatement(
 	stmt: string,
 	reactiveVars: Set<string>,
 	reactiveCallTargets?: Map<string, Set<number>>,
-	proxyVars?: Set<string>,
 	directMemberAccessVars?: Set<string>,
 ): string {
 	// Detect any remaining /*@s*/ or /*@d*/ markers (from non-component scopes)
@@ -485,6 +562,22 @@ export function transformBodyStatement(
 		});
 	}
 
+	// Collect inner scope boundaries for scope-aware shadowing in Pass 1 & 2.
+	const scopeBoundaries = collectAllScopeBoundaries(result.program);
+
+	/** Check if a name is reactive at the given AST position (respecting scope shadows). */
+	function isReactiveAt(name: string, nodeStart: number, nodeEnd: number): boolean {
+		// Local reactive vars (from /*@s*/ and /*@d*/ markers in this statement) cannot
+		// be shadowed by their own declarations — they ARE the reactive state.
+		// Only incoming reactive vars (from the parent scope) can be shadowed.
+		if (localReactiveAll.has(name)) return allReactiveVars.has(name);
+		return pruneReactiveVarsForScope(scopeBoundaries, nodeStart, nodeEnd, allReactiveVars).has(name);
+	}
+	/** Check if a name has direct member access at the given AST position. */
+	function isDMAAt(name: string, nodeStart: number, nodeEnd: number): boolean {
+		return pruneReactiveVarsForScope(scopeBoundaries, nodeStart, nodeEnd, allDirectMemberAccessVars).has(name);
+	}
+
 	// Pass 0: Transform /*@s*/ and /*@d*/ declarations in nested scopes
 	const localReactiveAll = new Set([...localStateVars, ...localDerivedVars]);
 	if (localReactiveAll.size > 0) {
@@ -518,7 +611,7 @@ export function transformBodyStatement(
 					const initStart = s(decl.init.start);
 					const initEnd = s(decl.init.end);
 					const initExpr = stmt.slice(initStart, initEnd);
-					const wrappedInit = wrapReadsInGet(initExpr, allReactiveVars, proxyVars, allDirectMemberAccessVars);
+					const wrappedInit = wrapReadsInGet(initExpr, allReactiveVars, allDirectMemberAccessVars);
 					replacements.push({ start: s(decl.id.end), end: initEnd, text: ` = ${emitDerived(wrappedInit)}` });
 					coveredSpans.push({ start: decl.id.start, end: decl.init.end });
 				}
@@ -550,10 +643,10 @@ export function transformBodyStatement(
 	walk(result.program, (node, parent, key) => {
 		if (node.type === 'AssignmentExpression') {
 			const left = node.left;
-			if (left?.type === 'Identifier' && allReactiveVars.has(left.name)) {
+			if (left?.type === 'Identifier' && isReactiveAt(left.name, left.start, left.end)) {
 				const name = left.name;
 				const rhsSource = stmt.slice(s(node.right.start), s(node.right.end));
-				const wrappedRhs = wrapReadsInGet(rhsSource, allReactiveVars, proxyVars, allDirectMemberAccessVars);
+				const wrappedRhs = wrapReadsInGet(rhsSource, allReactiveVars, allDirectMemberAccessVars);
 
 				const text = node.operator === '='
 					? `$.set(${name}, ${wrappedRhs})`
@@ -566,7 +659,7 @@ export function transformBodyStatement(
 
 		if (node.type === 'UpdateExpression') {
 			const arg = node.argument;
-			if (arg?.type === 'Identifier' && allReactiveVars.has(arg.name)) {
+			if (arg?.type === 'Identifier' && isReactiveAt(arg.name, arg.start, arg.end)) {
 				const delta = node.operator === '++' ? '+ 1' : '- 1';
 				replacements.push({
 					start: s(node.start),
@@ -581,12 +674,14 @@ export function transformBodyStatement(
 	// Pass 2: Identifier reads not already covered by assignment/update transforms
 	walk(result.program, (node, parent, key) => {
 		if (node.type !== 'Identifier' || !allReactiveVars.has(node.name)) return;
+		// Scope-aware check: skip if shadowed by an inner scope declaration
+		if (!isReactiveAt(node.name, node.start, node.end)) return;
 		// Skip assignment LHS
 		if (parent?.type === 'AssignmentExpression' && key === 'left') return;
 		// Skip update argument
 		if (parent?.type === 'UpdateExpression') return;
 		// Skip the root object of a member expression (obj.x / obj[expr])
-		if (parent?.type === 'MemberExpression' && key === 'object' && allDirectMemberAccessVars.has(node.name)) return;
+		if (parent?.type === 'MemberExpression' && key === 'object' && isDMAAt(node.name, node.start, node.end)) return;
 		// Skip non-computed member property (obj.x)
 		if (parent?.type === 'MemberExpression' && key === 'property' && !parent.computed) return;
 		// Skip non-computed property keys in object literals: { count: 42 }

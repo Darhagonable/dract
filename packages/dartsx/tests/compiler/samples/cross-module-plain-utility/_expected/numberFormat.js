@@ -1,5 +1,4 @@
-import $ from 'dartsx/internal/client';
-
+import $ from "dartsx/internal/client";
 export function numberFormat(value) {
-    return $.get(value).toLocaleString();
+	return $.get(value).toLocaleString();
 }
