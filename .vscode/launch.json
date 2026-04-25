@@ -26,6 +26,19 @@
 			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
 			"sourceMaps": true,
 			"preLaunchTask": "build-extension"
+		},
+		{
+			"name": "Start Website",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--disable-extension=dartsx.dartsx-vscode",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-plugin/",
+				"${workspaceFolder}/website"
+			],
+			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
+			"sourceMaps": true,
+			"preLaunchTask": "build-extension"
 		}
 	]
 }

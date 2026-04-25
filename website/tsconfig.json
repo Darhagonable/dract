@@ -1,0 +1,18 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"jsx": "preserve",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"declaration": false,
+		"declarationMap": false,
+		"sourceMap": false,
+		"types": ["dartsx"],
+		"paths": {
+			"@dartsx-toolkit/router": ["../toolkit/router/src/index.ts"]
+		},
+		"plugins": [
+			{ "name": "dartsx-typescript-plugin" }
+		]
+	},
+	"include": ["src", "plugins"]
+}

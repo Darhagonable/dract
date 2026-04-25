@@ -2,3 +2,4 @@ packages:
   - packages/*
   - toolkit/*
   - playground
+  - website
