@@ -12,7 +12,7 @@
 
 import { createLanguageServicePlugin } from '@volar/typescript/lib/quickstart/createLanguageServicePlugin';
 import { getDarTsxLanguagePlugin } from './language';
-import { isDarTsxFile } from './dartsx-to-tsx';
+import { isDarTsxFile, findSuppressZones, type SuppressZone } from './dartsx-to-tsx';
 import * as fs from 'fs';
 import { analyzeUnusedCss, DARTSX_UNUSED_CSS_CODE } from './unused-css';
 
@@ -73,11 +73,11 @@ function getQuickInfoWithDarTsxKeywords(
 
 	const first = result.displayParts[0];
 
-	// Rewrite (parameter) → (prop) or (binded prop) for component params
+	// Rewrite (parameter)/(property) → (prop) or (binded prop) for component params
 	if (first.kind === 'punctuation' && first.text === '(' && result.displayParts.length >= 3) {
 		const label = result.displayParts[1];
 		const close = result.displayParts[2];
-		if (label.kind === 'text' && label.text === 'parameter' && close.kind === 'punctuation' && close.text === ')') {
+		if (label.kind === 'text' && (label.text === 'parameter' || label.text === 'property') && close.kind === 'punctuation' && close.text === ')') {
 			rewriteParameterLabel(service, result, fileName, position, content);
 		}
 	}
@@ -119,18 +119,63 @@ function rewriteComponentPropsOverload(result: import('typescript').QuickInfo): 
 	if (!result.displayParts?.length) return;
 
 	const text = result.displayParts.map((part) => part.text).join('');
-	if (!/^(?:\(alias\)\s+)?(?:function|component)\s+[A-Za-z_$][\w$]*\(props:\s*\{/.test(text)) return;
 
-	const rewritten = text
-		.replace(/^((?:\(alias\)\s+)?)function\b/, '$1component')
-		.replace(/\(props:\s*\{/, '(')
-		.replace(/\}\)(?=:\s*)/, ')');
+	// Match destructured style: Foo({ a, b }: { a: T; b: U; }): R
+	const prefixMatch = text.match(
+		/^((?:\(alias\)\s+)?(?:function|component)\s+[A-Za-z_$][\w$]*)\(\{/
+	);
+	if (!prefixMatch) return;
 
-	if (rewritten === text) return;
+	// Find `}: ` separator between destructuring and type annotation
+	const sepIdx = text.indexOf('}:', prefixMatch[0].length);
+	if (sepIdx === -1) return;
 
-	result.displayParts = [
-		{ kind: 'text', text: rewritten },
-	];
+	// Find the opening `{` of the type annotation after `}: `
+	const typeOpenIdx = text.indexOf('{', sepIdx + 2);
+	if (typeOpenIdx === -1) return;
+
+	// Find the matching `}` for the type annotation
+	let depth = 1;
+	let i = typeOpenIdx + 1;
+	while (i < text.length && depth > 0) {
+		if (text[i] === '{') depth++;
+		else if (text[i] === '}') depth--;
+		i++;
+	}
+	if (depth !== 0) return;
+	const typeCloseIdx = i - 1;
+
+	// After `})` get return type (up to next newline) and trailing content
+	const afterSig = text.slice(typeCloseIdx + 2); // skip `})`
+	const returnMatch = afterSig.match(/^(:\s*[^\n]+)([\s\S]*)$/);
+	if (!returnMatch) return;
+
+	const prefix = prefixMatch[1].replace(/\bfunction\b/, 'component');
+	const typeBody = text.slice(typeOpenIdx + 1, typeCloseIdx);
+	const returnType = returnMatch[1];
+	const trailing = returnMatch[2];
+
+	// Parse type members: "className?: string; children: any; [key: string]: any"
+	const members = typeBody.split(';').map(s => s.trim()).filter(Boolean);
+	const params: string[] = [];
+	let hasIndexSig = false;
+
+	for (const m of members) {
+		if (/^\[/.test(m)) {
+			hasIndexSig = true;
+			continue;
+		}
+		const pm = m.match(/^('(?:[^']+)'|"(?:[^"]+)"|[\w$]+)(\?)?:\s*(.+)$/);
+		if (pm) {
+			params.push(`${pm[1]}${pm[2] || ''}: ${pm[3]}`);
+		}
+	}
+	if (hasIndexSig) {
+		params.push('...rest: any[]');
+	}
+
+	const rewritten = `${prefix}(${params.join(', ')})${returnType}${trailing}`;
+	result.displayParts = [{ kind: 'text', text: rewritten }];
 }
 
 function rewriteParameterLabel(
@@ -146,7 +191,7 @@ function rewriteParameterLabel(
 	const label = result.displayParts[1];
 	const close = result.displayParts[2];
 	if (first.kind !== 'punctuation' || first.text !== '(') return;
-	if (label.kind !== 'text' || label.text !== 'parameter') return;
+	if (label.kind !== 'text' || (label.text !== 'parameter' && label.text !== 'property')) return;
 	if (close.kind !== 'punctuation' || close.text !== ')') return;
 
 	const paramName = getParamName(result.displayParts);
@@ -267,10 +312,8 @@ function isBoundParam(source: string, identStart: number): boolean {
 
 /** Extract parameter name from displayParts */
 function getParamName(parts: import('typescript').SymbolDisplayPart[]): string | undefined {
-	// Parts: ( parameter ) space name : space type
-	// Index:  0    1      2   3    4  5   6   7
 	for (const part of parts) {
-		if (part.kind === 'parameterName' || part.kind === 'localName') {
+		if (part.kind === 'parameterName' || part.kind === 'localName' || part.kind === 'propertyName') {
 			return part.text;
 		}
 	}
@@ -327,10 +370,21 @@ function tryRewriteKeyword(
 	return false;
 }
 
-const SUPPRESS_CODES = new Set([
+// Errors always suppressed in DarTsx files (syntax errors from custom keywords,
+// and semantic errors that are always false positives from the transform)
+const ALWAYS_SUPPRESS = new Set([
 	1003, 1005, 1109, 1128, 1136, 1381, 1434,
-	2304, 2322, 2339, 2362, 2552, 2632, 2693, 2695, 2724, 2747, 2809,
+	2304, 2362, 2552, 2632, 2657, 2693, 2695, 2724, 2809,
 	6385, 7026,
+]);
+
+// Errors suppressed only when they occur inside DarTsx-specific zones
+// (control flow in JSX, bind: attributes) — legitimate type errors
+// outside these zones are preserved (e.g. className vs class, fillOpacity vs fill-opacity)
+const ZONE_SUPPRESS = new Set([
+	2322, // Type 'X' is not assignable to type 'Y'
+	2339, // Property 'X' does not exist on type 'Y'
+	2747, // 'X' is not a valid JSX element
 ]);
 
 function filterDarTsxDiagnostics(
@@ -345,7 +399,19 @@ function filterDarTsxDiagnostics(
 		return diags;
 	}
 	if (!isDarTsxFile(content)) return diags;
-	return diags.filter(d => !d.code || !SUPPRESS_CODES.has(d.code));
+
+	let zones: SuppressZone[] | undefined;
+
+	return diags.filter(d => {
+		if (!d.code) return true;
+		if (ALWAYS_SUPPRESS.has(d.code)) return false;
+		if (ZONE_SUPPRESS.has(d.code)) {
+			if (!zones) zones = findSuppressZones(content!);
+			const start = d.start ?? 0;
+			return !zones.some(z => start >= z.start && start < z.end);
+		}
+		return true;
+	});
 }
 
 // ── Unused CSS selector detection ──────────────────────────────────

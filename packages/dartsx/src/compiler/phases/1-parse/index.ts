@@ -876,6 +876,17 @@ function buildCFCallback(body: string, params?: string): string {
 		return `${arrow} { ${body} }`;
 	}
 
+	// Nested control flow statement in branch body: the body is a bare
+	// `if/for/switch/try` statement (not a JSX expression container).
+	// E.g. inside `{if (a) { if (b) { <X/> } else { <Y/> } } else { <Z/> }}`
+	// the outer true-branch body is `if (b) { ... } else { ... }`.
+	// Wrap as `{body}` and recursively transform so it becomes `{__if(...)}`,
+	// then wrap the result as a JSX fragment.
+	if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*\{)/.test(trimmed)) {
+		const transformed = transformControlFlowBlocks(`{${body}}`);
+		return `${arrow} (<>${transformed}</>)`;
+	}
+
 	// Bare JS expression (count, "text", 6, {name: "John"}.name, etc.)
 	// → return directly without wrapping in JSX fragment
 	return `${arrow} (${body})`;

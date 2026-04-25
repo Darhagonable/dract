@@ -19,6 +19,7 @@ import type {
 	JSXAttrIR,
 	JSXExpressionIR,
 } from '../2-analyze';
+import { decodeHTML } from 'entities';
 import { wrapReadsInGet, transformEventHandler, transformBodyStatement, emitDerived } from './expr';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 
@@ -266,7 +267,30 @@ function transformComponent(comp: ComponentIR, reactiveCallTargets?: Map<string,
 			const wrappedExpr = wrapReadsInGet(decl.expr, comp.reactiveVars, currentProxyVars, currentDirectMemberAccessVars, reactiveCallTargets);
 			lines.push(`    const ${decl.name} = ${decl.raw ? wrappedExpr : emitDerived(wrappedExpr)};`);
 		} else {
-			lines.push(`    ${transformBodyStatement(decl.text, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars)}`);
+			let stmt = decl.text;
+			const placeholders: Array<{ placeholder: string; compiled: string }> = [];
+
+			if (decl.nestedJSX && decl.nestedJSX.length > 0) {
+				const sorted = [...decl.nestedJSX].sort((a, b) => b.localStart - a.localStart);
+				for (let j = 0; j < sorted.length; j++) {
+					const jn = sorted[j];
+					if (currentScopeAttrs && currentScopeAttrs.length > 0) {
+						injectAttrsRecursive(jn.ir, currentScopeAttrs);
+					}
+					const emitted = emitJSXNode(jn.ir, comp.reactiveVars, '\t');
+					const placeholder = `__DARTSX_BODY_JSX_${j}__`;
+					placeholders.push({ placeholder, compiled: emitted });
+					stmt = stmt.slice(0, jn.localStart) + placeholder + stmt.slice(jn.localEnd);
+				}
+			}
+
+			stmt = transformBodyStatement(stmt, comp.reactiveVars, reactiveCallTargets, currentProxyVars, currentDirectMemberAccessVars);
+
+			for (const { placeholder, compiled } of placeholders) {
+				stmt = stmt.replace(placeholder, compiled);
+			}
+
+			lines.push(`    ${stmt}`);
 		}
 	}
 
@@ -818,5 +842,5 @@ function normalizeJSXText(text: string, isFirst: boolean, isLast: boolean): stri
 	let result = text.replace(/\s*\n\s*/g, ' ');
 	if (isFirst) result = result.replace(/^\s+/, '');
 	if (isLast) result = result.replace(/\s+$/, '');
-	return result;
+	return decodeHTML(result);
 }

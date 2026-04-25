@@ -22,7 +22,7 @@ function unwrapTSExpression(node: any): any {
 export type DeclEntry =
 	| { kind: 'state'; name: string; initExpr: string }
 	| { kind: 'derived'; name: string; expr: string; raw?: boolean }
-	| { kind: 'body'; text: string };
+	| { kind: 'body'; text: string; nestedJSX?: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> };
 
 export interface ComponentIR {
 	meta: ComponentMeta;
@@ -870,6 +870,26 @@ function analyzeComponent(
 	let jsx: JSXNodeIR | null = null;
 	let jsxRootNode: any = null; // OXC AST node for depth computation
 
+	/** Create a body DeclEntry, detecting and analyzing any nested JSX nodes */
+	function makeBodyDecl(stmtNode: any): DeclEntry {
+		const text = source.slice(stmtNode.start, stmtNode.end);
+		const jsxHits: Array<{ start: number; end: number }> = [];
+		findTopLevelJSX(stmtNode, compMeta ? new Set([compMeta.name]) : new Set(), jsxHits);
+		if (jsxHits.length === 0) return { kind: 'body', text };
+		const nestedJSX: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> = [];
+		for (const { start, end } of jsxHits) {
+			const jsxAST = findASTNodeAt(stmtNode, start);
+			if (jsxAST) {
+				nestedJSX.push({
+					localStart: start - stmtNode.start,
+					localEnd: end - stmtNode.start,
+					ir: analyzeJSXNode(jsxAST, source),
+				});
+			}
+		}
+		return { kind: 'body', text, nestedJSX: nestedJSX.length > 0 ? nestedJSX : undefined };
+	}
+
 	// Get per-component rename map
 	const componentRenames = renamedParams[compMeta.name] || {};
 
@@ -892,7 +912,7 @@ function analyzeComponent(
 					if (!name) {
 						// Destructuring pattern or other non-simple binding — preserve as body statement
 						bodyStatements.push(source.slice(stmt.start, stmt.end));
-						orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
+						orderedDecls.push(makeBodyDecl(stmt));
 						break;
 					}
 
@@ -920,7 +940,7 @@ function analyzeComponent(
 					} else {
 						// Normal variable — preserve
 						bodyStatements.push(source.slice(stmt.start, stmt.end));
-						orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
+						orderedDecls.push(makeBodyDecl(stmt));
 					}
 				}
 			} else if (stmt.type === 'ReturnStatement' && stmt.argument) {
@@ -937,12 +957,12 @@ function analyzeComponent(
 				} else {
 					// Non-JSX return (e.g. `render null`, `render getValue()`)
 					bodyStatements.push(source.slice(stmt.start, stmt.end));
-					orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
+					orderedDecls.push(makeBodyDecl(stmt));
 				}
 			} else {
 				// Other statements — preserve as-is
 				bodyStatements.push(source.slice(stmt.start, stmt.end));
-				orderedDecls.push({ kind: 'body', text: source.slice(stmt.start, stmt.end) });
+				orderedDecls.push(makeBodyDecl(stmt));
 			}
 		}
 	}

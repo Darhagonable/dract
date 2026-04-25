@@ -33,6 +33,7 @@
 	},
 	"dependencies": {
 		"clsx": "^2.1.1",
+		"entities": "^8.0.0",
 		"oxc-parser": "^0.66.0",
 		"postcss": "^8.5.9",
 		"postcss-selector-parser": "^7.1.1"

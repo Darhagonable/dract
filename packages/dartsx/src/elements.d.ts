@@ -710,6 +710,11 @@ export interface HTMLAttributes<T extends EventTarget> extends AriaAttributes, D
 	security?: string | undefined | null;
 	unselectable?: 'on' | 'off' | undefined | null;
 
+	// DOM properties (set directly, not as HTML attributes)
+	innerHTML?: string | undefined | null;
+	textContent?: string | undefined | null;
+	innerText?: string | undefined | null;
+
 	// Living Standard
 	/**
 	 * Hints at the type of data that might be entered by the user while editing the element or its contents

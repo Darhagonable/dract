@@ -42,13 +42,13 @@ describe('dartsxToTsx', () => {
 	it('transforms exported component with params', () => {
 		const source = 'export component UserCard(bind name: string, age: number, active: boolean = true) {}';
 		const { code } = dartsxToTsx(source);
-		expect(code).toBe('export function UserCard(name: string, age: number, active: boolean = true) {}');
+		expect(code).toBe('export function UserCard({name, age, active = true}: {name: string, age: number, active?: boolean}) {}');
 	});
 
 	it('transforms renamed props', () => {
 		const source = "export component UserBadge(bind 'display-name' as displayName: string, status: string = 'offline') {}";
 		const { code } = dartsxToTsx(source);
-		expect(code).toContain("export function UserBadge(displayName: string, status: string = 'offline') {}");
+		expect(code).toContain("export function UserBadge({'display-name': displayName, status = 'offline'}: {'display-name': string, status?: string})");
 	});
 
 	it('transforms state → let', () => {
@@ -116,29 +116,23 @@ describe('dartsxToTsx', () => {
 		expect(code).toContain('__bind_value={value}');
 	});
 
-	it('transforms bind in params to just the param name', () => {
-		const { code } = dartsxToTsx('function Foo(bind name: string) {}');
-		expect(code).toContain('function Foo(name: string)');
-		expect(code).not.toContain('bind');
-	});
-
 	it('transforms renamed props to local parameter names', () => {
 		const { code } = dartsxToTsx("component UserBadge('display-name' as displayName: string) {}");
-		expect(code).toContain('function UserBadge(displayName: string)');
-		expect(code).not.toContain("'display-name' as");
+		expect(code).toContain("function UserBadge({'display-name': displayName}: {'display-name': string})");
+		expect(code).not.toContain(" as ");
 	});
 
 	it('transforms multiple renamed props with defaults', () => {
 		const source = "component UserBadge('display-name' as displayName: string, 'status-text' as statusText: string = 'offline') {}";
 		const { code } = dartsxToTsx(source);
-		expect(code).toContain("function UserBadge(displayName: string, statusText: string = 'offline')");
+		expect(code).toContain("function UserBadge({'display-name': displayName, 'status-text': statusText = 'offline'}: {'display-name': string, 'status-text'?: string})");
 	});
 
 	it('transforms bind used with renamed props to the local parameter name', () => {
 		const source = "component UserBadge(bind 'display-name' as displayName: string) {}";
 		const { code } = dartsxToTsx(source);
-		expect(code).toContain('function UserBadge(displayName: string)');
-		expect(code).not.toContain("'display-name' as");
+		expect(code).toContain("function UserBadge({'display-name': displayName}: {'display-name': string})");
+		expect(code).not.toContain(" as ");
 	});
 
 	it('handles a complete Counter component', () => {

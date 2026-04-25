@@ -6,15 +6,14 @@
  * surgical text manipulation with automatic source map generation.
  *
  * Transforms:
- *   - `component Name(` → `function Name(`
+ *   - `component Name(params)` → `function Name({params}: {types})`
  *   - `state x =` → `let x =`
  *   - `derived x =` → `const x =`
  *   - `render (...)` → `return (<>...</>)`
+ *   - `{if/for/switch/try}` in JSX → IIFE wrappers
  *   - `bind:value={x}` → `__bind_value={x}`
  *   - `bind:{x}` → `__bind_value={x}`
- *   - `bind paramName` → `paramName` (in function params)
- *   - `onclick={expr}` → `onclick={() => {expr}}` (bare expressions)
- *   - Control flow: left as-is (suppressed via diagnostics)
+ *   - `<style>` blocks → blanked (preserving interpolations)
  */
 
 import MagicString from 'magic-string';
@@ -48,8 +47,6 @@ export function dartsxToTsx(source: string): TransformResult {
 	const commentRanges = buildCommentRanges(source);
 
 	transformComponentDeclarations(ms, source, commentRanges);
-	transformRenamedParams(ms, source);
-	transformBindInParams(ms, source);
 	transformStateDeclarations(ms, source, commentRanges);
 	transformDerivedDeclarations(ms, source, commentRanges);
 	transformRenderBlocks(ms, source);
@@ -119,52 +116,263 @@ function skipString(source: string, start: number): number {
 	return i;
 }
 
-// ── component → function ───────────────────────────────────────────
+// ── component → function (with props destructuring) ───────────────
 
 function transformComponentDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
 	const re = /\b((?:export\s+)?(?:default\s+)?(?:async\s+)?)component(\s+\w+)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		if (isInComment(commentRanges, match.index)) continue;
+		// Replace component → function
 		const prefixEnd = match.index + match[1].length;
-		const componentStart = prefixEnd;
-		const componentEnd = componentStart + 'component'.length;
-		ms.overwrite(componentStart, componentEnd, 'function');
+		ms.overwrite(prefixEnd, prefixEnd + 'component'.length, 'function');
+
+		// Find the param list
+		const openParen = source.indexOf('(', match.index + match[0].length);
+		if (openParen === -1) continue;
+		const closeParen = findMatchingParen(source, openParen);
+		if (closeParen === -1) continue;
+
+		const paramRanges = splitParamRanges(source, openParen + 1, closeParen);
+		if (paramRanges.length === 0) continue;
+		const parsed = paramRanges.map(r => parseOneParam(r.text));
+
+		// Build destructuring prefix: ({name, ...rest}: {
+		const destructParts: string[] = [];
+		for (const p of parsed) {
+			if (p.isRest) {
+				destructParts.push(`...${p.localName}`);
+			} else {
+				const key = p.externalName !== null ? `'${p.externalName}'` : null;
+				const base = key ? `${key}: ${p.localName}` : p.localName;
+				destructParts.push(p.defaultValue ? `${base} = ${p.defaultValue}` : base);
+			}
+		}
+
+		// Replace ( with ({destructuring}: {  — keeps original params at their positions
+		ms.overwrite(openParen, openParen + 1, `({${destructParts.join(', ')}}: {`);
+		// Replace ) with })
+		ms.overwrite(closeParen, closeParen + 1, '})');
+
+		// Edit each param IN PLACE to become its type annotation entry
+		for (let i = 0; i < paramRanges.length; i++) {
+			editParamForType(ms, source, paramRanges[i], parsed[i]);
+		}
 	}
 }
 
+interface ParamRange {
+	text: string;
+	start: number;
+	end: number;
+}
 
+interface ParsedParam {
+	isBind: boolean;
+	isRest: boolean;
+	isOptional: boolean;
+	externalName: string | null;
+	localName: string;
+	type: string | null;
+	defaultValue: string | null;
+}
 
-// ── 'ext-name' as localName → localName ───────────────────────────
+function splitParamRanges(source: string, start: number, end: number): ParamRange[] {
+	const ranges: ParamRange[] = [];
+	let depth = 0;
+	let current = start;
+	for (let i = start; i < end; i++) {
+		const ch = source[i];
+		if (ch === "'" || ch === '"' || ch === '`') {
+			i = skipString(source, i) - 1;
+			continue;
+		}
+		if (ch === '(' || ch === '[' || ch === '{') depth++;
+		else if (ch === ')' || ch === ']' || ch === '}') depth--;
+		else if (ch === ',' && depth === 0) {
+			ranges.push({ text: source.slice(current, i), start: current, end: i });
+			current = i + 1;
+		}
+	}
+	const lastText = source.slice(current, end);
+	if (lastText.trim()) ranges.push({ text: lastText, start: current, end });
+	return ranges;
+}
 
-function transformRenamedParams(ms: MagicString, source: string): void {
-	const re = /(\bbind\s+)?(['"])([^'"]+)\2\s+as\s+(\w+)/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		const localName = match[4];
-		const identStart = match.index + match[0].lastIndexOf(localName);
-		ms.remove(match.index, identStart);
+/**
+ * Edit a param range in place so the original tokens become the type annotation entry.
+ * e.g. `bind 'ext' as name: string = 'x'` → `'ext'?: string`
+ * Preserves original character positions for correct source map hover.
+ */
+function editParamForType(
+	ms: MagicString, source: string, range: ParamRange, param: ParsedParam,
+): void {
+	const raw = range.text;
+	const leadingWs = raw.match(/^\s*/)![0].length;
+	const contentStart = range.start + leadingWs;
+
+	// Rest params → index signature
+	if (param.isRest) {
+		ms.overwrite(contentStart, range.end, '[key: string]: any');
+		return;
+	}
+
+	let cursor = contentStart;
+
+	// Remove `bind ` prefix
+	if (param.isBind) {
+		const bindMatch = source.slice(cursor, range.end).match(/^bind\s+/);
+		if (bindMatch) {
+			ms.remove(cursor, cursor + bindMatch[0].length);
+			cursor += bindMatch[0].length;
+		}
+	}
+
+	// Handle renamed params: remove ` as localName[?]`, keep ext name
+	if (param.externalName !== null) {
+		const quote = source[cursor];
+		const closeQuote = source.indexOf(quote, cursor + 1);
+		if (closeQuote > 0) {
+			const afterQuote = closeQuote + 1;
+			const asMatch = source.slice(afterQuote, range.end).match(/^\s+as\s+\w+\??/);
+			if (asMatch) {
+				ms.remove(afterQuote, afterQuote + asMatch[0].length);
+			}
+			// Insert ? if optional/has default
+			if (param.isOptional || param.defaultValue !== null) {
+				ms.appendLeft(afterQuote, '?');
+			}
+			// If no type, add `: any`
+			if (param.type === null) {
+				ms.appendLeft(afterQuote, ': any');
+			}
+		}
+	} else {
+		// Simple param: name[?]: Type [= default]
+		const nameEnd = cursor + param.localName.length;
+		if (param.isOptional || param.defaultValue !== null) {
+			if (source[nameEnd] !== '?') {
+				ms.appendLeft(nameEnd, '?');
+			}
+		}
+		// If no type, add `: any`
+		if (param.type === null) {
+			const insertPos = source[nameEnd] === '?' ? nameEnd + 1 : nameEnd;
+			ms.appendLeft(insertPos, ': any');
+		}
+	}
+
+	// Remove default value: ` = val`
+	if (param.defaultValue !== null) {
+		const eqPos = findDefaultEqualsPos(source, contentStart, range.end);
+		if (eqPos >= 0) {
+			// Include preceding whitespace
+			let removeStart = eqPos;
+			while (removeStart > contentStart && source[removeStart - 1] === ' ') removeStart--;
+			ms.remove(removeStart, range.end);
+		}
 	}
 }
 
-// ── bind paramName → paramName ─────────────────────────────────────
-
-function transformBindInParams(ms: MagicString, source: string): void {
-	// Match `bind` followed by an identifier in function parameter context
-	// We look for `bind` as a standalone keyword (not bind:)
-	const re = /\bbind\s+(\w+)/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		// Check it's not `bind:` (attribute syntax)
-		const afterBind = match.index + 4; // length of "bind"
-		const nextNonSpace = source.slice(afterBind).search(/\S/);
-		if (nextNonSpace >= 0 && source[afterBind + nextNonSpace] === ':') continue;
-
-		// Remove `bind ` prefix, keep just the identifier
-		const identStart = match.index + match[0].indexOf(match[1]);
-		ms.remove(match.index, identStart);
+/** Find the last `=` at depth 0 in [start, end), skipping `=>` and `==` */
+function findDefaultEqualsPos(source: string, start: number, end: number): number {
+	let eqPos = -1;
+	let depth = 0;
+	for (let i = start; i < end; i++) {
+		const ch = source[i];
+		if (ch === "'" || ch === '"' || ch === '`') {
+			i = skipString(source, i) - 1;
+			continue;
+		}
+		if (ch === '(' || ch === '[' || ch === '{') depth++;
+		else if (ch === ')' || ch === ']' || ch === '}') depth--;
+		else if (ch === '=' && depth === 0 && source[i + 1] !== '>' && source[i + 1] !== '=') {
+			eqPos = i;
+		}
 	}
+	return eqPos;
 }
+
+function parseOneParam(raw: string): ParsedParam {
+	let s = raw.trim();
+
+	// Rest param: ...name[: Type]
+	if (s.startsWith('...')) {
+		s = s.slice(3);
+		const colonIdx = s.indexOf(':');
+		const localName = (colonIdx >= 0 ? s.slice(0, colonIdx) : s).trim();
+		const type = colonIdx >= 0 ? s.slice(colonIdx + 1).trim() : null;
+		return { isBind: false, isRest: true, isOptional: false, externalName: null, localName, type, defaultValue: null };
+	}
+
+	// bind prefix
+	let isBind = false;
+	if (/^bind\s/.test(s)) {
+		isBind = true;
+		s = s.replace(/^bind\s+/, '');
+	}
+
+	// External name: 'ext-name' as local or "ext-name" as local
+	let externalName: string | null = null;
+	if (s[0] === "'" || s[0] === '"') {
+		const quote = s[0];
+		const closeQuote = s.indexOf(quote, 1);
+		if (closeQuote > 0) {
+			externalName = s.slice(1, closeQuote);
+			s = s.slice(closeQuote + 1).replace(/^\s*as\s+/, '');
+		}
+	}
+
+	// Local name (identifier)
+	const nameMatch = s.match(/^[\w$]+/);
+	if (!nameMatch) return { isBind, isRest: false, isOptional: false, externalName, localName: 'unknown', type: null, defaultValue: null };
+	const localName = nameMatch[0];
+	s = s.slice(nameMatch[0].length);
+
+	// Optional marker
+	let isOptional = false;
+	if (s[0] === '?') {
+		isOptional = true;
+		s = s.slice(1);
+	}
+	s = s.trimStart();
+
+	// Type annotation: : Type [= default]
+	let type: string | null = null;
+	let defaultValue: string | null = null;
+	if (s[0] === ':') {
+		s = s.slice(1).trimStart();
+		const eqIdx = findDefaultEquals(s);
+		if (eqIdx >= 0) {
+			type = s.slice(0, eqIdx).trim();
+			defaultValue = s.slice(eqIdx + 1).trim();
+		} else {
+			type = s.trim();
+		}
+	} else if (s[0] === '=') {
+		defaultValue = s.slice(1).trim();
+	}
+
+	return { isBind, isRest: false, isOptional, externalName, localName, type, defaultValue };
+}
+
+/** Find `=` at depth 0, skipping `=>` and `==` */
+function findDefaultEquals(s: string): number {
+	let depth = 0;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (ch === "'" || ch === '"' || ch === '`') {
+			i = skipString(s, i) - 1;
+			continue;
+		}
+		if (ch === '(' || ch === '[' || ch === '{') depth++;
+		else if (ch === ')' || ch === ']' || ch === '}') depth--;
+		else if (ch === '=' && depth === 0 && s[i + 1] !== '>' && s[i + 1] !== '=') return i;
+	}
+	return -1;
+}
+
+
 
 // ── state x = → let x = ───────────────────────────────────────────
 
@@ -389,4 +597,88 @@ function blankRange(ms: MagicString, source: string, start: number, end: number)
 		blanked += source[i] === '\n' ? '\n' : ' ';
 	}
 	ms.overwrite(start, end, blanked);
+}
+
+// ── Suppress zone detection ────────────────────────────────────────
+
+export interface SuppressZone {
+	start: number;
+	end: number;
+}
+
+/**
+ * Find regions in DarTsx source where certain TS errors are expected false
+ * positives and should be suppressed:
+ * - Control flow blocks in JSX (`{if/for/switch/try ...}` inside render blocks)
+ * - `bind:` attribute spans
+ */
+export function findSuppressZones(source: string): SuppressZone[] {
+	const zones: SuppressZone[] = [];
+
+	// 1. Control flow in JSX inside render(...) blocks
+	const renderRe = /\brender\s*\(/g;
+	let match;
+	while ((match = renderRe.exec(source)) !== null) {
+		const openParen = match.index + match[0].length - 1;
+		const closeParen = findMatchingParen(source, openParen);
+		if (closeParen === -1) continue;
+		collectControlFlowZones(source, openParen + 1, closeParen, zones);
+	}
+
+	// 2. bind: attributes (bind:prop={expr} and bind:{x} shorthand)
+	const bindRe = /\bbind:/g;
+	while ((match = bindRe.exec(source)) !== null) {
+		const attrStart = match.index;
+		let end = attrStart + match[0].length;
+		if (end < source.length && source[end] === '{') {
+			// bind:{x} shorthand
+			const closeBrace = findMatchingBrace(source, end);
+			end = closeBrace !== -1 ? closeBrace + 1 : end + 1;
+		} else {
+			// bind:propName or bind:propName={expr}
+			while (end < source.length && /[\w-]/.test(source[end])) end++;
+			if (end < source.length && source[end] === '=' && end + 1 < source.length && source[end + 1] === '{') {
+				const closeBrace = findMatchingBrace(source, end + 1);
+				end = closeBrace !== -1 ? closeBrace + 1 : end + 1;
+			}
+		}
+		zones.push({ start: attrStart, end });
+	}
+
+	return zones;
+}
+
+function collectControlFlowZones(
+	source: string, start: number, end: number, zones: SuppressZone[],
+): void {
+	let i = start;
+	while (i < end) {
+		const ch = source[i];
+		if (ch === "'" || ch === '"') {
+			i = skipString(source, i);
+			continue;
+		}
+		if (ch === '`') {
+			i = skipTemplateLiteral(source, i);
+			continue;
+		}
+		if (ch === '{') {
+			const closeBrace = findMatchingBrace(source, i);
+			if (closeBrace === -1 || closeBrace > end) { i++; continue; }
+
+			let j = i + 1;
+			while (j < closeBrace && /\s/.test(source[j])) j++;
+			const kw = source.slice(j, j + 10);
+
+			if (/^if\s*[\s(]/.test(kw) || /^for\s*[\s(]/.test(kw) ||
+				/^switch\s*\(/.test(kw) || /^try\s*\{/.test(kw)) {
+				zones.push({ start: i, end: closeBrace + 1 });
+			}
+			// Recurse into nested content
+			collectControlFlowZones(source, i + 1, closeBrace, zones);
+			i = closeBrace + 1;
+			continue;
+		}
+		i++;
+	}
 }

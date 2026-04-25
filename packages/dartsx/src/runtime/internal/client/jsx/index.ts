@@ -293,6 +293,14 @@ export function appendChild(parent: Node, child: any): void {
 function toNode(value: any): Node | null {
 	if (value == null || value === false || value === true) return null;
 	if (value instanceof Node) return value;
+	if (Array.isArray(value)) {
+		const frag = document.createDocumentFragment();
+		for (const item of value) {
+			const node = toNode(item);
+			if (node) frag.appendChild(node);
+		}
+		return frag.childNodes.length > 0 ? frag : null;
+	}
 	if (typeof value === 'function') return toNode(value());
 	return document.createTextNode(String(value));
 }
