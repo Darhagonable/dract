@@ -1,535 +1,335 @@
 /**
  * Phase 2 — Analyze
  *
- * Walks the OXC AST and, using metadata from the pre-processor,
- * produces an Intermediate Representation (IR) for each component.
+ * Walks the OXC AST (already parsed) and builds metadata for the transform:
+ * - Scope tree (via create_scopes)
+ * - Component identification
+ * - Binding kind upgrades (state/derived markers → binding.kind)
+ * - Transform records on bindings (read/assign/update)
+ * - Style block association
+ * - Cross-file reactive import tracking
+ * - Call-site analysis for reactive params
+ *
+ * Does NOT build any JSX IR. The transform walks the OXC AST directly
+ * with zimmerframe visitors.
  */
-import type { ComponentMeta, PreprocessResult, ExtractedStyleBlock } from '../1-parse';
+import type { ComponentMeta, PreprocessResult } from '../1-parse';
 import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
+import {
+	Scope,
+	ScopeRoot,
+	create_scopes,
+} from '../../scope';
+import type {
+	Program,
+	Node,
+	Span,
+	Statement,
+	Directive,
+	Expression,
+	Argument,
+	FunctionBody,
+	ParamPattern,
+	Function as OxcFunction,
+	VariableDeclaration,
+	JSXElement,
+	JSXFragment,
+} from 'oxc-parser';
 
-// ── Helpers ────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────
 
-/** Unwrap TypeScript type assertion nodes to get the underlying expression */
-function unwrapTSExpression(node: any): any {
-	while (node && (node.type === 'TSAsExpression' || node.type === 'TSSatisfiesExpression' || node.type === 'TSNonNullExpression' || node.type === 'TSTypeAssertion')) {
-		node = node.expression;
-	}
-	return node;
-}
+/** OXC AST node that has a span (filters out Modifier which lacks start/end) */
+type AstNode = Extract<Node, Span>;
 
-// ── IR Types ───────────────────────────────────────────────────────
-
-export type DeclEntry =
-	| { kind: 'state'; name: string; initExpr: string }
-	| { kind: 'derived'; name: string; expr: string; raw?: boolean }
-	| { kind: 'body'; text: string; nestedJSX?: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> };
-
-export interface ComponentIR {
-	meta: ComponentMeta;
-	params: ParamIR[];
-	stateVars: { name: string; initExpr: string }[];
-	derivedVars: { name: string; expr: string; raw?: boolean }[];
-	/** All variable names that are reactive (state + derived + bind props) */
-	reactiveVars: Set<string>;
-	/** State vars whose $.state() returns a proxy (object/array init) — skip $.get/$.set */
-	proxyVars: Set<string>;
-	jsx: JSXNodeIR;
-	/** Raw non-JSX statements between state/derived and render (to preserve) */
-	bodyStatements: string[];
-	/** All declarations in source order */
-	orderedDecls: DeclEntry[];
-	/** Style blocks extracted from the render output */
-	styleBlocks: StyleBlockIR[];
-	/** Source position of the component declaration (for source-order output) */
-	sourceStart?: number;
+/** Runtime type guard: checks that a value is a span-bearing AST node */
+function isAstNode(value: unknown): value is AstNode {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		'type' in value &&
+		typeof value.type === 'string' &&
+		'start' in value &&
+		'end' in value
+	);
 }
 
 export interface StyleBlockIR {
-	/** Raw CSS text from the <style> block */
 	css: string;
-	/** Whether this is a <style global> block (no scoping) */
 	isGlobal: boolean;
-	/** Path from root JSX node to the parent element (child indices at each level).
-	 *  Empty array = root-level (scopes to all elements). */
 	scopePath: number[];
-	/** Index of this style block within the component (for hash generation) */
 	index: number;
 }
 
-export interface ParamIR {
-	name: string;
-	/** External prop name if renamed via 'ext-name' as localName syntax */
-	externalName: string | null;
-	isBind: boolean;
-	isRest: boolean;
-	defaultValue: string | null;
+export interface ComponentInfo {
+	meta: ComponentMeta;
+	/** The FunctionDeclaration (or ExportNamedDeclaration wrapping it) AST node */
+	node: AstNode;
+	/** The function's body AST node */
+	bodyNode: FunctionBody | null;
+	/** Per-component rename map (localName → externalName) */
+	renamedParams: Record<string, string>;
+	/** Style blocks for this component */
+	styleBlocks: StyleBlockIR[];
+	/** Component's own scope (child of module scope, created by create_scopes) */
+	scope: Scope;
 }
-
-// ── JSX IR Types ───────────────────────────────────────────────────
-
-export type JSXNodeIR =
-	| JSXElementIR
-	| JSXFragmentIR
-	| JSXTextIR
-	| JSXExpressionIR
-	| JSXIfBlockIR
-	| JSXForBlockIR
-	| JSXSwitchBlockIR
-	| JSXTryBlockIR
-	| JSXAnonymousBlockIR;
-
-export interface JSXElementIR {
-	type: 'element';
-	tag: string;
-	isComponent: boolean;
-	selfClosing: boolean;
-	attributes: JSXAttrIR[];
-	children: JSXNodeIR[];
-}
-
-export interface JSXFragmentIR {
-	type: 'fragment';
-	children: JSXNodeIR[];
-}
-
-export interface JSXTextIR {
-	type: 'text';
-	value: string;
-}
-
-export interface JSXExpressionIR {
-	type: 'expression';
-	/** Raw source text of the expression */
-	raw: string;
-}
-
-export interface JSXIfBlockIR {
-	type: 'if_block';
-	/** Raw condition expression */
-	condition: string;
-	/** Children for the true branch */
-	trueBranch: JSXNodeIR[];
-	/** Raw source of statements preceding the JSX in the true branch */
-	truePreamble?: string;
-	/** Children for the false branch (null if no else) */
-	falseBranch: JSXNodeIR[] | null;
-	/** Raw source of statements preceding the JSX in the false branch */
-	falsePreamble?: string;
-}
-
-export interface JSXForBlockIR {
-	type: 'for_block';
-	/** Raw collection expression */
-	collection: string;
-	/** Loop item variable name */
-	itemName: string;
-	/** Optional index variable name */
-	indexName: string | null;
-	/** Optional key expression */
-	keyExpr: string | null;
-	/** Children for the loop body */
-	body: JSXNodeIR[];
-	/** Raw source of statements preceding the JSX in the body */
-	preamble?: string;
-}
-
-export interface JSXSwitchBlockIR {
-	type: 'switch_block';
-	/** Raw discriminant expression */
-	discriminant: string;
-	/** Cases with grouped values (null values = default case) */
-	cases: { values: string[] | null; body: JSXNodeIR[]; preamble?: string }[];
-}
-
-export interface JSXTryBlockIR {
-	type: 'try_block';
-	/** Try branch children */
-	tryBranch: JSXNodeIR[];
-	/** Raw source of statements preceding the JSX in the try branch */
-	tryPreamble?: string;
-	/** Catch parameter name (null if no catch) */
-	catchParam: string | null;
-	/** Catch branch children (null if no catch) */
-	catchBranch: JSXNodeIR[] | null;
-	/** Raw source of statements preceding the JSX in the catch branch */
-	catchPreamble?: string;
-	/** Pending branch children (null if no pending) */
-	pendingBranch: JSXNodeIR[] | null;
-	/** Raw source of statements preceding the JSX in the pending branch */
-	pendingPreamble?: string;
-}
-
-export interface JSXAnonymousBlockIR {
-	type: 'anonymous_block';
-	preamble?: string;
-	children: JSXNodeIR[];
-}
-
-export interface JSXAttrIR {
-	kind: 'static' | 'dynamic' | 'bind' | 'event' | 'spread';
-	name: string;
-	/** For bind: the property being bound (e.g. 'value', 'checked') */
-	bindProperty?: string;
-	/** Static attribute value string, or raw expression source */
-	value: string | null;
-	/** For function bindings: explicit getter expression (may be 'null') */
-	bindGetter?: string;
-	/** For function bindings: explicit setter expression */
-	bindSetter?: string;
-	/** JSX nodes found inside the attribute expression (positions relative to value string) */
-	nestedJSX?: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }>;
-}
-
-// ── Analysis Result (full module) ──────────────────────────────────
 
 export interface AnalysisResult {
-	components: ComponentIR[];
-	/** Source text of user import declarations to preserve */
-	userImports: string[];
-	/** Module-level state variable declarations */
-	moduleStateVars: { name: string; initExpr: string; exported: boolean; sourceStart: number }[];
-	/** Module-level derived variable declarations */
-	moduleDerivedVars: { name: string; expr: string; exported: boolean; sourceStart: number }[];
-	/** Module-level functions with reactive params */
-	moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[]; sourceStart: number }[];
-	/** Other module-level statements (not imports, not components, not state/derived, not reactive-param functions) */
-	moduleStatements: { text: string; sourceStart: number }[];
-	/** Module-level reactive var names (state + derived + cross-file imports) */
-	moduleReactiveVars: Set<string>;
-	/** Module-level proxy vars (object/array state) — skip $.get/$.set */
-	moduleProxyVars: Set<string>;
-	/** Names of reactive exports (state + derived) for implicit-mode cross-file tracking */
+	/** The OXC AST (unmodified, to be walked by transform) */
+	ast: Program;
+	/** Original source text */
+	source: string;
+	/** Module-level scope */
+	scope: Scope;
+	/** Scope root (for unique name generation) */
+	root: ScopeRoot;
+	/** Map from AST nodes to their scopes (for zimmerframe _ visitor) */
+	scopes: Map<AstNode, Scope>;
+	/** Component metadata keyed by AST node */
+	components: Map<AstNode, ComponentInfo>;
+	/** Set of component function names */
+	componentNames: Set<string>;
+	/** Style blocks keyed by component AST node */
+	styles: Map<AstNode, StyleBlockIR[]>;
+	/** Names of reactive exports (state + derived) for cross-file tracking */
 	reactiveExports: string[];
 	/**
 	 * Cross-file reactive function calls detected at call sites.
 	 * Maps import specifier → { exportedName → reactive param indices }.
-	 * E.g. { './helper': { test: [0] } } means test() from './helper' is called with a signal at position 0.
 	 */
 	reactiveCalls: Record<string, Record<string, number[]>>;
 	/**
-	 * Maps callable function names to their reactive param indices (for suppressing $.get() on call args).
-	 * Combines both local functions with reactive params and imported functions with cross-file reactive calls.
+	 * Maps callable function names to their reactive param indices.
+	 * Used to suppress $.get() unwrapping on call arguments.
 	 */
 	reactiveCallTargets: Map<string, Set<number>>;
-	/**
-	 * Import specifiers found in this module (e.g. ['./helper', './store']).
-	 * Provided so the Vite plugin can resolve them without regex-parsing the source.
-	 */
+	/** Import specifiers found in this module */
 	importSpecifiers: string[];
-	/** Nested component declarations found inside module statements (e.g. inside describe/it blocks) */
-	nestedComponents: Array<{
-		/** Index into moduleStatements array */
-		statementIndex: number;
-		/** Start offset within the statement text */
-		localStart: number;
-		/** End offset within the statement text */
-		localEnd: number;
-		/** Component IR */
-		ir: ComponentIR;
-	}>;
-	/** JSX nodes found in module-level statements */
-	moduleJSXNodes: Array<{
-		/** Index into moduleStatements array */
-		statementIndex: number;
-		/** Start offset within the statement text */
-		localStart: number;
-		/** End offset within the statement text */
-		localEnd: number;
-		/** Analyzed JSX IR */
-		ir: JSXNodeIR;
-	}>;
+	/** Preprocessor result (for downstream use) */
+	preprocessed: PreprocessResult;
 }
 
 // ── Analyze ────────────────────────────────────────────────────────
 
 export function analyze(
-	ast: any,
+	ast: Program,
 	source: string,
 	meta: PreprocessResult,
 	reactiveImports?: Record<string, string[]>,
 	reactiveCallImports?: Record<string, number[]>,
 ): AnalysisResult {
-	const components: ComponentIR[] = [];
 	const componentNames = new Set(meta.components.map((c) => c.name));
 	const stateSet = new Set(meta.stateVars);
 	const derivedSet = new Set(meta.derivedVars);
 
-	const userImports: string[] = [];
-	const moduleStateVars: { name: string; initExpr: string; exported: boolean; sourceStart: number }[] = [];
-	const moduleDerivedVars: { name: string; expr: string; exported: boolean; sourceStart: number }[] = [];
-	const moduleFunctions: { signature: string; bodyStatements: string[]; reactiveParams: string[]; sourceStart: number }[] = [];
-	const moduleStatements: { text: string; sourceStart: number }[] = [];
-	const moduleReactiveVars = new Set<string>();
-	const moduleProxyVars = new Set<string>();
+	// 1. Build scope tree
+	const root = new ScopeRoot();
+	const { scope: moduleScope, scopes } = create_scopes(ast, source, root);
+
+	// 2. Upgrade binding kinds based on markers
+	upgradeBindingKinds(ast, scopes, stateSet, derivedSet, componentNames, meta);
+
+	// 3. Mark cross-file reactive imports
+	if (reactiveImports) {
+		markCrossFileReactiveImports(ast, moduleScope, reactiveImports);
+	}
+
+	// 4. Identify components and associate metadata
+	const components = new Map<AstNode, ComponentInfo>();
+	const styles = new Map<AstNode, StyleBlockIR[]>();
 	const reactiveExports: string[] = [];
-	const pendingFunctions: { node: any; fnInfo: FnInfo }[] = [];
-	const pendingStatements: any[] = [];
-	/** Maps function names to their ordered param name lists (for call-site analysis) */
-	const functionParamMap = new Map<string, string[]>();
-	/** Maps imported local names to their source specifier and exported name (for cross-file call tracking) */
-	const importSourceMap = new Map<string, { specifier: string; exportedName: string }>();
-	/** All import specifiers found in this module */
 	const importSpecifiers: string[] = [];
 
-	// Resolve cross-file reactive imports from AST import declarations
-	if (reactiveImports) {
-		for (const node of ast.body) {
-			if (node.type === 'ImportDeclaration' && node.source?.value) {
-				const specifier = node.source.value;
-				const reactiveNames = reactiveImports[specifier];
-				if (!reactiveNames) continue;
-				const reactiveSet = new Set(reactiveNames);
-				for (const spec of node.specifiers || []) {
-					if (spec.type === 'ImportSpecifier') {
-						const importedName = spec.imported?.name || spec.local?.name;
-						if (reactiveSet.has(importedName)) {
-							moduleReactiveVars.add(spec.local?.name || importedName);
-						}
-					}
+	/** Maps function names to ordered param name lists (for call-site analysis) */
+	const functionParamMap = new Map<string, string[]>();
+	/** Maps imported local names to their source specifier and exported name */
+	const importSourceMap = new Map<string, { specifier: string; exportedName: string }>();
+
+	/** Recursively find component function declarations at any nesting level */
+	function findComponents(node: AstNode): void {
+		const fn = extractFunctionDecl(node);
+		if (fn && componentNames.has(fn.name)) {
+			const compMeta = meta.components.find((c) => c.name === fn.name)!;
+			const jsxRoot = findReturnJSXRoot(fn.node);
+			const compStyleBlocks = (meta.styleBlocks || []).filter(
+				(sb) => jsxRoot ? findJSXMarkerElement(jsxRoot, sb.markerName) !== null : false,
+			);
+
+			const fnNode = fn.node;
+			const compScope = scopes.get(fnNode) || moduleScope;
+
+			upgradeComponentParams(fnNode, compScope, meta.renamedParams[compMeta.name] || {});
+
+			const styleBlockIRs: StyleBlockIR[] = compStyleBlocks.map((sb, index) => ({
+				css: sb.css,
+				isGlobal: sb.isGlobal,
+				scopePath: jsxRoot ? computeStyleBlockScopePath(jsxRoot, sb.markerName) : [],
+				index,
+			}));
+
+			const info: ComponentInfo = {
+				meta: compMeta,
+				node,
+				bodyNode: fn.body,
+				renamedParams: meta.renamedParams[compMeta.name] || {},
+				styleBlocks: styleBlockIRs,
+				scope: compScope,
+			};
+
+			components.set(node, info);
+			styles.set(node, styleBlockIRs);
+		}
+
+		// Recurse into function bodies to find nested components
+		if (fn && fn.body) {
+			for (const stmt of fn.body.body) {
+				findComponents(stmt);
+			}
+			return;
+		}
+
+		// Recurse into other nested structures (e.g. describe(() => { it(() => { component ... }) }))
+		if (node.type === 'ExpressionStatement') {
+			findComponents(node.expression);
+		} else if (node.type === 'CallExpression') {
+			for (const arg of node.arguments) {
+				findComponents(arg);
+			}
+		} else if (node.type === 'ArrowFunctionExpression') {
+			if (node.body.type === 'BlockStatement') {
+				for (const stmt of node.body.body) {
+					findComponents(stmt);
+				}
+			}
+		} else if (node.type === 'FunctionExpression') {
+			if (node.body) {
+				for (const stmt of node.body.body) {
+					findComponents(stmt);
 				}
 			}
 		}
 	}
 
 	for (const node of ast.body) {
-		// Collect user imports (not the runtime import — that's generated)
+		// Collect import specifiers and source mappings
 		if (node.type === 'ImportDeclaration') {
-			const src = node.source?.value || '';
-			// Skip dartsx internal imports (will be regenerated)
-			if (!src.startsWith('dartsx/internal')) {
-				userImports.push(source.slice(node.start, node.end));
-				if (src) importSpecifiers.push(src);
+			const src = node.source.value;
+			if (src && !src.startsWith('dartsx/internal')) {
+				importSpecifiers.push(src);
 			}
-			// Track import sources for cross-file call detection
 			if (src) {
-				for (const spec of node.specifiers || []) {
+				for (const spec of node.specifiers) {
 					if (spec.type === 'ImportSpecifier') {
-						const localName = spec.local?.name || spec.imported?.name;
-						const exportedName = spec.imported?.name || localName;
-						if (localName) {
-							importSourceMap.set(localName, { specifier: src, exportedName });
-						}
+						const importedName = spec.imported.type === 'Identifier'
+							? spec.imported.name
+							: spec.imported.value;
+						const localName = spec.local.name;
+						importSourceMap.set(localName, { specifier: src, exportedName: importedName });
 					}
 				}
 			}
 			continue;
 		}
 
-		// Check if this is a function declaration (component or otherwise)
+		// Identify component function declarations (including nested)
+		findComponents(node);
+
+		// Collect function param maps for call-site analysis
 		const fn = extractFunctionDecl(node);
-		if (fn && componentNames.has(fn.name)) {
-			const compMeta = meta.components.find((c) => c.name === fn.name)!;
-			// Associate style blocks with this component by source position
-			const compStart = node.start;
-			const compEnd = node.end;
-			const compStyleBlocks = (meta.styleBlocks || []).filter(
-				(sb) => sb.sourceOffset >= compStart && sb.sourceOffset < compEnd,
-			);
-			const ir = analyzeComponent(fn, compMeta, source, stateSet, derivedSet, moduleReactiveVars, meta.renamedParams, compStyleBlocks);
-			ir.sourceStart = node.start;
-			components.push(ir);
-			continue;
+		if (fn && !componentNames.has(fn.name)) {
+			const paramNames = fn.params
+				.map((p) => {
+					if (p.type === 'Identifier') return p.name;
+					if (p.type === 'RestElement') {
+						return p.argument.type === 'Identifier' ? p.argument.name : undefined;
+					}
+					if (p.type === 'AssignmentPattern' && p.left.type === 'Identifier') {
+						return p.left.name;
+					}
+					return undefined;
+				})
+				.filter((name): name is string => name !== undefined);
+			functionParamMap.set(fn.name, paramNames);
 		}
 
-		// Module-level variable declarations (state/derived)
-		if (node.type === 'VariableDeclaration' || node.type === 'ExportNamedDeclaration') {
+		// Track reactive exports
+		if (node.type === 'ExportNamedDeclaration' || node.type === 'VariableDeclaration') {
 			const varDecl = node.type === 'ExportNamedDeclaration' ? node.declaration : node;
 			const exported = node.type === 'ExportNamedDeclaration';
-
-			if (varDecl?.type === 'VariableDeclaration') {
-				let handled = false;
+			if (exported && varDecl?.type === 'VariableDeclaration') {
 				for (const decl of varDecl.declarations) {
-					const name = decl.id?.name;
+					if (decl.id.type !== 'Identifier') continue;
+					const name = decl.id.name;
 					if (!name) continue;
-
-					const marker = source.slice(decl.id.end, decl.init?.start ?? node.end);
-					const isState = stateSet.has(name) && (marker.includes(STATE_MARKER) || !decl.init);
-					const isDerived = derivedSet.has(name) && marker.includes(DERIVED_MARKER);
-
-					if (isState) {
-						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
-						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : '';
-						moduleStateVars.push({ name, initExpr, exported, sourceStart: node.start });
-						moduleReactiveVars.add(name);
-						if (decl.init && isProxyInit(decl.init)) moduleProxyVars.add(name);
-						if (exported) reactiveExports.push(name);
-						handled = true;
-					} else if (isDerived) {
-						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
-						const expr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
-						moduleDerivedVars.push({ name, expr, exported, sourceStart: node.start });
-						moduleReactiveVars.add(name);
-						if (exported) reactiveExports.push(name);
-						handled = true;
+					const binding = moduleScope.get(name);
+					if (binding && (binding.kind === 'state' || binding.kind === 'derived')) {
+						binding.exported = true;
+						reactiveExports.push(name);
 					}
 				}
-				if (handled) continue;
 			}
 		}
-
-		// Non-component function — collect for later processing
-		if (fn && !componentNames.has(fn.name)) {
-			pendingFunctions.push({ node, fnInfo: fn });
-			// Collect param names for call-site analysis
-			const paramNames = fn.params
-				.map((p: any) => p.name || p.argument?.name || p.left?.name)
-				.filter(Boolean);
-			functionParamMap.set(fn.name, paramNames);
-			continue;
-		}
-
-		// Everything else — collect for later
-		pendingStatements.push(node);
 	}
 
-	// Analyze call sites to determine which params receive signals
+	// 5. Call-site analysis for reactive params
 	const implicitReactiveParams = new Map<string, Set<string>>();
 	const importedReactiveCalls: Record<string, Record<string, Set<number>>> = {};
-	// Walk the entire AST looking for call expressions (scope-aware: each
-	// component sees only its own state/derived/props, not other components')
-	walkCallSites(ast, source, moduleReactiveVars, stateSet, derivedSet, componentNames, functionParamMap, implicitReactiveParams, importSourceMap, importedReactiveCalls);
 
-	// Process pending non-function statements
-	const nestedComponents: AnalysisResult['nestedComponents'] = [];
-	const moduleJSXNodes: AnalysisResult['moduleJSXNodes'] = [];
+	walkCallSites(
+		ast, source, moduleScope, scopes, stateSet, derivedSet,
+		componentNames, functionParamMap, implicitReactiveParams,
+		importSourceMap, importedReactiveCalls,
+	);
 
-	/** Discover and analyze component declarations nested inside a statement node */
-	function collectNestedComponents(node: any, stmtIndex: number): void {
-		const nested: Array<{ fnInfo: FnInfo; start: number; end: number }> = [];
-		findNestedFunctionDecls(node, componentNames, nested);
-		if (nested.length === 0) return;
+	// Second-pass: re-scan function bodies where params became reactive
+	for (const node of ast.body) {
+		const fn = extractFunctionDecl(node);
+		if (!fn || componentNames.has(fn.name)) continue;
 
-		for (const { fnInfo: nestedFn, start, end } of nested) {
-			const compMeta = meta.components.find(c => c.name === nestedFn.name)!;
-			const compStyleBlocks = (meta.styleBlocks || []).filter(
-				(sb) => sb.sourceOffset >= start && sb.sourceOffset < end,
-			);
+		const sameFileReactive = implicitReactiveParams.get(fn.name);
+		const crossFileIndices = reactiveCallImports?.[fn.name];
+		if (!sameFileReactive && !crossFileIndices) continue;
 
-			// Build reactive var set: module-level + state/derived vars in the direct parent function
-			const enclosingReactiveVars = new Set(moduleReactiveVars);
-			const parentFn = findDirectParentFunction(node, start, componentNames);
-			if (parentFn) {
-				const parentSource = source.slice(parentFn.start, parentFn.end);
-				const stateRe = /let\s+(\w+)\s*\/\*@s\*\//g;
-				const derivedRe = /const\s+(\w+)\s*\/\*@d\*\//g;
-				let m: RegExpExecArray | null;
-				while ((m = stateRe.exec(parentSource)) !== null) enclosingReactiveVars.add(m[1]);
-				while ((m = derivedRe.exec(parentSource)) !== null) enclosingReactiveVars.add(m[1]);
-			}
+		const paramNames = functionParamMap.get(fn.name) || [];
+		const fnScope = scopes.get(fn.node) || moduleScope;
 
-			const ir = analyzeComponent(nestedFn, compMeta, source, stateSet, derivedSet, enclosingReactiveVars, meta.renamedParams, compStyleBlocks);
-			nestedComponents.push({
-				statementIndex: stmtIndex,
-				localStart: start - node.start,
-				localEnd: end - node.start,
-				ir,
-			});
-		}
-	}
-
-	/** Discover and analyze JSX nodes in a module-level statement */
-	function collectModuleJSX(node: any, stmtIndex: number): void {
-		const jsxNodes: Array<{ start: number; end: number }> = [];
-		findTopLevelJSX(node, componentNames, jsxNodes);
-		for (const { start, end } of jsxNodes) {
-			const jsxAST = findASTNodeAt(node, start);
-			if (jsxAST) {
-				const ir = analyzeJSXNode(jsxAST, source);
-				moduleJSXNodes.push({
-					statementIndex: stmtIndex,
-					localStart: start - node.start,
-					localEnd: end - node.start,
-					ir,
-				});
-			}
-		}
-	}
-
-	// Now process pending functions
-	for (const { node, fnInfo } of pendingFunctions) {
-		let reactiveParams: string[] | undefined;
-
-		if (implicitReactiveParams.has(fnInfo.name)) {
-			// Params detected at same-file call sites
-			reactiveParams = [...implicitReactiveParams.get(fnInfo.name)!];
-		} else if (reactiveCallImports?.[fnInfo.name]) {
-			// Params detected at cross-file call sites (via Vite plugin)
-			const indices = reactiveCallImports[fnInfo.name];
-			const paramNames = functionParamMap.get(fnInfo.name) || [];
-			reactiveParams = indices
-				.filter((i) => i < paramNames.length)
-				.map((i) => paramNames[i]);
-		}
-
-		if (reactiveParams && reactiveParams.length > 0) {
-			const signature = source.slice(node.start, fnInfo.body.start + 1);
-			const bodyStmts: string[] = [];
-			const stmts = fnInfo.body.statements || fnInfo.body.body || [];
-			for (const s of stmts) {
-				bodyStmts.push(source.slice(s.start, s.end));
-			}
-			moduleFunctions.push({ signature, bodyStatements: bodyStmts, reactiveParams, sourceStart: node.start });
-		} else {
-			// No reactive params — preserve as-is
-			const stmtIndex = moduleStatements.length;
-			moduleStatements.push({ text: source.slice(node.start, node.end), sourceStart: node.start });
-			collectNestedComponents(node, stmtIndex);
-			collectModuleJSX(node, stmtIndex);
-		}
-	}
-
-	// Process pending non-function statements
-	for (const node of pendingStatements) {
-		const stmtIndex = moduleStatements.length;
-		moduleStatements.push({ text: source.slice(node.start, node.end), sourceStart: node.start });
-		collectNestedComponents(node, stmtIndex);
-		collectModuleJSX(node, stmtIndex);
-	}
-
-	// Second-pass call-site analysis: re-scan function bodies where params became
-	// reactive (via same-file call-site detection OR cross-file reactiveCallImports).
-	// This detects forwarding of reactive params to imported functions (e.g.
-	// effect(value, ...) where value became reactive via call-site analysis).
-	{
-		for (const { node, fnInfo } of pendingFunctions) {
-			// Check same-file reactive params
-			const sameFileReactive = implicitReactiveParams.get(fnInfo.name);
-			// Check cross-file reactive params
-			const crossFileIndices = reactiveCallImports?.[fnInfo.name];
-
-			if (!sameFileReactive && !crossFileIndices) continue;
-
-			const paramNames = functionParamMap.get(fnInfo.name) || [];
-			const fnModuleVars = new Set(moduleReactiveVars);
-
-			// Add same-file reactive params
-			if (sameFileReactive) {
-				for (const paramName of sameFileReactive) {
-					fnModuleVars.add(paramName);
-				}
-			}
-			// Add cross-file reactive params
-			if (crossFileIndices) {
-				for (const idx of crossFileIndices) {
-					if (idx < paramNames.length) fnModuleVars.add(paramNames[idx]);
-				}
-			}
-
-			// Re-walk the function body with the expanded reactive var set
-			const secondPassImportedCalls: Record<string, Record<string, Set<number>>> = {};
-			walkCallSites(node, source, fnModuleVars, stateSet, derivedSet, componentNames, functionParamMap, new Map(), importSourceMap, secondPassImportedCalls);
-			// Merge any new detections into importedReactiveCalls
-			for (const [specifier, fns] of Object.entries(secondPassImportedCalls)) {
-				if (!importedReactiveCalls[specifier]) importedReactiveCalls[specifier] = {};
-				for (const [fn, idxSet] of Object.entries(fns)) {
-					if (!importedReactiveCalls[specifier][fn]) importedReactiveCalls[specifier][fn] = new Set();
-					for (const i of idxSet) importedReactiveCalls[specifier][fn].add(i);
+		// Upgrade reactive params in scope
+		if (sameFileReactive) {
+			for (const paramName of sameFileReactive) {
+				const binding = fnScope.get(paramName);
+				if (binding && binding.kind === 'normal') {
+					binding.kind = 'prop'; // treat as reactive param
 				}
 			}
 		}
+		if (crossFileIndices) {
+			for (const idx of crossFileIndices) {
+				if (idx < paramNames.length) {
+					const binding = fnScope.get(paramNames[idx]);
+					if (binding && binding.kind === 'normal') {
+						binding.kind = 'prop';
+					}
+				}
+			}
+		}
+
+		// Re-walk for forwarded calls
+		const secondPassImportedCalls: Record<string, Record<string, Set<number>>> = {};
+		walkCallSites(
+			node, source, fnScope, scopes, stateSet, derivedSet,
+			componentNames, functionParamMap, new Map(),
+			importSourceMap, secondPassImportedCalls,
+		);
+		for (const [specifier, fns] of Object.entries(secondPassImportedCalls)) {
+			if (!importedReactiveCalls[specifier]) importedReactiveCalls[specifier] = {};
+			for (const [fnName, idxSet] of Object.entries(fns)) {
+				if (!importedReactiveCalls[specifier][fnName]) importedReactiveCalls[specifier][fnName] = new Set();
+				for (const i of idxSet) importedReactiveCalls[specifier][fnName].add(i);
+			}
+		}
 	}
 
-	// Convert Set<number> to number[] for the result
+	// Convert Set<number> to number[] for result
 	const reactiveCalls: Record<string, Record<string, number[]>> = {};
 	for (const [specifier, fns] of Object.entries(importedReactiveCalls)) {
 		reactiveCalls[specifier] = {};
@@ -538,25 +338,23 @@ export function analyze(
 		}
 	}
 
-	// Build reactiveCallTargets: which functions should NOT have their args unwrapped
+	// Build reactiveCallTargets
 	const reactiveCallTargets = new Map<string, Set<number>>();
-	// Local functions with reactive params: map param names to indices
-	for (const fn of moduleFunctions) {
-		const paramNames = functionParamMap.get(fn.signature.match(/function\s+(\w+)/)?.[1] || '') || [];
+
+	// Local functions with reactive params
+	for (const [fnName, reactiveParamNames] of implicitReactiveParams) {
+		const paramNames = functionParamMap.get(fnName) || [];
 		const indices = new Set<number>();
-		for (const rp of fn.reactiveParams) {
+		for (const rp of reactiveParamNames) {
 			const idx = paramNames.indexOf(rp);
 			if (idx >= 0) indices.add(idx);
 		}
-		const fnName = fn.signature.match(/function\s+(\w+)/)?.[1];
-		if (fnName && indices.size > 0) {
-			reactiveCallTargets.set(fnName, indices);
-		}
+		if (indices.size > 0) reactiveCallTargets.set(fnName, indices);
 	}
-	// Imported functions with detected reactive call positions (from same-file call-site analysis)
+
+	// Imported functions with detected reactive call positions
 	for (const [_specifier, fns] of Object.entries(reactiveCalls)) {
 		for (const [fnName, indices] of Object.entries(fns)) {
-			// Find the local name for this imported function
 			for (const [localName, info] of importSourceMap) {
 				if (info.exportedName === fnName) {
 					const existing = reactiveCallTargets.get(localName) || new Set();
@@ -566,7 +364,8 @@ export function analyze(
 			}
 		}
 	}
-	// Imported functions with reactive param info from cross-file tracking (via Vite plugin)
+
+	// Cross-file reactive param info from Vite plugin
 	if (reactiveCallImports) {
 		for (const [fnName, indices] of Object.entries(reactiveCallImports)) {
 			const existing = reactiveCallTargets.get(fnName) || new Set();
@@ -576,35 +375,244 @@ export function analyze(
 	}
 
 	return {
+		ast,
+		source,
+		scope: moduleScope,
+		root,
+		scopes,
 		components,
-		userImports,
-		moduleStateVars,
-		moduleDerivedVars,
-		moduleFunctions,
-		moduleStatements,
-		moduleReactiveVars,
-		moduleProxyVars,
+		componentNames,
+		styles,
 		reactiveExports,
 		reactiveCalls,
 		reactiveCallTargets,
 		importSpecifiers,
-		nestedComponents,
-		moduleJSXNodes,
+		preprocessed: meta,
 	};
 }
 
-// ── Helpers ────────────────────────────────────────────────────────
+// ── Binding Kind Upgrades ──────────────────────────────────────────
 
 /**
- * Walk the AST looking for call expressions like `test(reactiveVar, normalVar)`.
- * When a call targets a known local function and passes a reactive variable as an argument,
- * mark that positional parameter as reactive.
- * Also detects calls to imported functions and records which positions receive reactive args.
+ * Walk the AST and upgrade binding kinds from 'normal' to 'state'/'derived'
+ * based on $$s/$$d sibling-declarator markers emitted by preprocess.
+ *
+ * Preprocess emits `let $$s = 0, name = expr` for state and
+ * `const $$d = 0, name = expr` for derived. We detect the marker
+ * declarator and upgrade the next sibling's binding.
+ */
+function upgradeBindingKinds(
+	ast: Program,
+	scopes: Map<AstNode, Scope>,
+	stateSet: Set<string>,
+	derivedSet: Set<string>,
+	componentNames: Set<string>,
+	meta: PreprocessResult,
+): void {
+	function upgradeMarkedDeclarations(varDecl: VariableDeclaration, scope: Scope, exported = false): void {
+		let prevName: string | null = null;
+		for (const decl of varDecl.declarations) {
+			if (decl.id.type !== 'Identifier') continue;
+			const name = decl.id.name;
+
+			// Skip marker declarators themselves, but remember their name
+			if (name.startsWith(STATE_MARKER) || name.startsWith(DERIVED_MARKER)) {
+				prevName = name;
+				continue;
+			}
+
+			const binding = scope.get(name);
+			if (!binding) continue;
+
+			if (prevName?.startsWith(STATE_MARKER)) {
+				binding.kind = 'state';
+				binding.exported = exported;
+				if (decl.init && isProxyInit(decl.init)) binding.proxy = true;
+			}
+			if (prevName?.startsWith(DERIVED_MARKER)) {
+				binding.kind = 'derived';
+				binding.exported = exported;
+			}
+		}
+	}
+
+	function visitStmts(stmts: ReadonlyArray<Directive | Statement>, scope: Scope): void {
+		for (const stmt of stmts) {
+			if (stmt.type === 'VariableDeclaration') {
+				upgradeMarkedDeclarations(stmt, scope);
+			}
+
+			// Recurse into function bodies
+			if (stmt.type === 'FunctionDeclaration' && stmt.body) {
+				const fnScope = scopes.get(stmt) || scope;
+				visitStmts(stmt.body.body, fnScope);
+			}
+
+			// Recurse into arrow/function expression bodies in variable declarations
+			if (stmt.type === 'VariableDeclaration') {
+				for (const decl of stmt.declarations) {
+					const init = decl.init;
+					if (init && init.type === 'ArrowFunctionExpression') {
+						const fnScope = scopes.get(init) || scope;
+						if (init.body.type === 'BlockStatement') {
+							visitStmts(init.body.body, fnScope);
+						}
+					} else if (init && init.type === 'FunctionExpression') {
+						const fnScope = scopes.get(init) || scope;
+						if (init.body) {
+							visitStmts(init.body.body, fnScope);
+						}
+					}
+					// Also recurse into call expression arguments (e.g., createContext(() => { state x = 0; }))
+					if (init && init.type === 'CallExpression') {
+						visitExpression(init, scope);
+					}
+				}
+			}
+
+			// Recurse into blocks, loops, etc.
+			if (stmt.type === 'BlockStatement') {
+				const blockScope = scopes.get(stmt) || scope;
+				visitStmts(stmt.body, blockScope);
+			}
+
+			// Export wrapped function declarations
+			if (stmt.type === 'ExportNamedDeclaration' && stmt.declaration?.type === 'FunctionDeclaration') {
+				const fn = stmt.declaration;
+				const fnScope = scopes.get(fn) || scope;
+				if (fn.body) {
+					visitStmts(fn.body.body, fnScope);
+				}
+			}
+			if (stmt.type === 'ExportDefaultDeclaration' && stmt.declaration?.type === 'FunctionDeclaration') {
+				const fn = stmt.declaration;
+				const fnScope = scopes.get(fn) || scope;
+				if (fn.body) {
+					visitStmts(fn.body.body, fnScope);
+				}
+			}
+
+			// Export wrapped variable declarations
+			if (stmt.type === 'ExportNamedDeclaration' && stmt.declaration?.type === 'VariableDeclaration') {
+				upgradeMarkedDeclarations(stmt.declaration, scope, true);
+			}
+
+			// Recurse into expression statements (e.g., describe(() => { ... }))
+			if (stmt.type === 'ExpressionStatement') {
+				visitExpression(stmt.expression, scope);
+			}
+		}
+	}
+
+	function visitExpression(expr: Expression, scope: Scope): void {
+		if (expr.type === 'CallExpression') {
+			for (const arg of expr.arguments) {
+				if (arg.type !== 'SpreadElement') {
+					visitExpression(arg, scope);
+				}
+			}
+		} else if (expr.type === 'ArrowFunctionExpression') {
+			const fnScope = scopes.get(expr) || scope;
+			if (expr.body.type === 'BlockStatement') {
+				visitStmts(expr.body.body, fnScope);
+			}
+		} else if (expr.type === 'FunctionExpression') {
+			const fnScope = scopes.get(expr) || scope;
+			if (expr.body) {
+				visitStmts(expr.body.body, fnScope);
+			}
+		}
+	}
+
+	const moduleScope = scopes.get(ast) || new Scope(new ScopeRoot());
+	visitStmts(ast.body, moduleScope);
+}
+
+/**
+ * Mark cross-file reactive imports in the module scope.
+ */
+function markCrossFileReactiveImports(
+	ast: Program,
+	moduleScope: Scope,
+	reactiveImports: Record<string, string[]>,
+): void {
+	for (const node of ast.body) {
+		if (node.type !== 'ImportDeclaration') continue;
+		const specifier = node.source.value;
+		if (!specifier) continue;
+		const reactiveNames = reactiveImports[specifier];
+		if (!reactiveNames) continue;
+		const reactiveSet = new Set(reactiveNames);
+		for (const spec of node.specifiers) {
+			if (spec.type === 'ImportSpecifier') {
+				const importedName = spec.imported.type === 'Identifier'
+					? spec.imported.name
+					: spec.imported.value;
+				if (reactiveSet.has(importedName)) {
+					const localName = spec.local.name;
+					const binding = moduleScope.get(localName);
+					if (binding) {
+						binding.kind = 'state';
+					}
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Upgrade component parameter bindings to param/bind-prop/rest-prop kinds.
+ */
+function upgradeComponentParams(
+	fnNode: OxcFunction,
+	compScope: Scope,
+	renamedParams: Record<string, string>,
+): void {
+	for (const param of fnNode.params) {
+		if (param.type === 'RestElement') {
+			if (param.argument.type === 'Identifier') {
+				const binding = compScope.get(param.argument.name);
+				if (binding) binding.kind = 'rest-prop';
+			}
+			continue;
+		}
+
+		// FormalParameter (BindingIdentifier | AssignmentPattern | ObjectPattern | ArrayPattern)
+		let rawName: string | undefined;
+		if (param.type === 'Identifier') {
+			rawName = param.name;
+		} else if (param.type === 'AssignmentPattern' && param.left.type === 'Identifier') {
+			rawName = param.left.name;
+		}
+		if (!rawName) continue;
+
+		const isBind = rawName.startsWith('__bind__');
+		const name = isBind ? rawName.slice(8) : rawName;
+
+		if (isBind) {
+			// Bind params: __bind__value → value in the scope
+			// The body references "value", not "__bind__value", so declare the clean name
+			compScope.declare(name, 'bind-prop', 'let');
+		} else {
+			const binding = compScope.get(rawName);
+			if (binding) {
+				binding.kind = 'prop';
+			}
+		}
+	}
+}
+
+// ── Call-site Analysis ─────────────────────────────────────────────
+
+/**
+ * Walk AST looking for call expressions to detect which function params
+ * receive reactive variables as arguments.
  */
 function walkCallSites(
-	ast: any,
+	ast: AstNode,
 	source: string,
-	moduleReactiveVars: Set<string>,
+	moduleScope: Scope,
+	scopes: Map<AstNode, Scope>,
 	stateSet: Set<string>,
 	derivedSet: Set<string>,
 	componentNames: Set<string>,
@@ -612,48 +620,46 @@ function walkCallSites(
 	localResult: Map<string, Set<string>>,
 	importSourceMap: Map<string, { specifier: string; exportedName: string }>,
 	importedResult: Record<string, Record<string, Set<number>>>,
-) {
-	// Scope-aware: activeScope tracks which vars are reactive in the current scope.
-	// Module level sees only moduleReactiveVars; component scopes add their own
-	// state/derived/props; nested functions inherit their parent scope.
-	let activeScope: Set<string> = moduleReactiveVars;
+): void {
+	let activeScope: Scope = moduleScope;
 
-	/** Check if an argument contains a reactive reference */
-	function isReactiveArg(arg: any): boolean {
-		if (arg.type === 'Identifier' && activeScope.has(arg.name)) return true;
-		// Member expression with reactive root: user.name, obj.a.b
+	function isReactiveArg(arg: Argument): boolean {
+		if (arg.type === 'Identifier') {
+			const binding = activeScope.get(arg.name);
+			return binding ? binding.reactive : false;
+		}
 		if (arg.type === 'MemberExpression') return isReactiveArg(arg.object);
-		// Array of deps: [a, b] where any element is reactive
-		if (arg.type === 'ArrayExpression' && arg.elements) {
-			return arg.elements.some((el: any) => el && isReactiveArg(el));
+		if (arg.type === 'ArrayExpression') {
+			return arg.elements.some((el) => el !== null && isReactiveArg(el));
 		}
 		return false;
 	}
 
-	function visit(node: any) {
-		if (!node || typeof node !== 'object') return;
-
-		// When entering a component function, create a scope with that component's
-		// reactive vars (module-level + props + local state/derived).
-		if (node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name)) {
+	function visit(node: AstNode): void {
+		// Switch scope on component function entry
+		if (node.type === 'FunctionDeclaration' && node.id && componentNames.has(node.id.name)) {
 			const prevScope = activeScope;
-			activeScope = new Set(moduleReactiveVars);
-			// Add component params (props become signals at runtime)
-			for (const param of node.params || []) {
-				if (param.type === 'RestElement') continue;
-				const name = param.name || param.left?.name;
-				if (name) activeScope.add(name);
-			}
-			// Add state/derived vars declared in this component's body
-			collectLocalReactiveVars(node.body, source, activeScope, stateSet, derivedSet);
+			activeScope = scopes.get(node) || activeScope;
 			forEachChild(node, visit);
 			activeScope = prevScope;
 			return;
 		}
 
-		if (node.type === 'CallExpression' && node.callee?.type === 'Identifier') {
+		// Switch scope on any function entry
+		if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
+			const fnScope = scopes.get(node);
+			if (fnScope) {
+				const prevScope = activeScope;
+				activeScope = fnScope;
+				forEachChild(node, visit);
+				activeScope = prevScope;
+				return;
+			}
+		}
+
+		if (node.type === 'CallExpression' && node.callee.type === 'Identifier') {
 			const fnName = node.callee.name;
-			const args: any[] = node.arguments || [];
+			const args = node.arguments;
 
 			// Check calls to local functions
 			const paramNames = functionParamMap.get(fnName);
@@ -681,140 +687,114 @@ function walkCallSites(
 			}
 		}
 
-		// Recurse into known AST child fields (avoids Object.keys() on every node)
 		forEachChild(node, visit);
 	}
 
 	visit(ast);
 }
 
-/** Scan a function body's top-level variable declarations for state/derived markers */
-function collectLocalReactiveVars(
-	body: any,
-	source: string,
-	scope: Set<string>,
-	stateSet: Set<string>,
-	derivedSet: Set<string>,
-) {
-	const stmts = body?.statements || body?.body || [];
-	for (const stmt of stmts) {
-		if (stmt.type !== 'VariableDeclaration') continue;
-		for (const decl of stmt.declarations || []) {
-			const name = decl.id?.name;
-			if (!name) continue;
-			const marker = source.slice(decl.id.end, decl.init?.start ?? stmt.end);
-			if (stateSet.has(name) && (marker.includes(STATE_MARKER) || !decl.init)) {
-				scope.add(name);
-			} else if (derivedSet.has(name) && marker.includes(DERIVED_MARKER)) {
-				scope.add(name);
-			}
-		}
-	}
+// ── Helpers ────────────────────────────────────────────────────────
+
+interface FnInfo {
+	name: string;
+	node: OxcFunction;
+	params: ParamPattern[];
+	body: FunctionBody | null;
 }
 
-/**
- * Recursively walk an AST node to find FunctionDeclaration nodes that match
- * known component names. Used to discover components nested inside expression
- * statements (e.g. inside describe/it test blocks).
- */
-/**
- * Find the nearest enclosing function that contains `targetStart`, skipping component functions.
- */
-function findDirectParentFunction(
-	node: any,
-	targetStart: number,
-	componentNames: Set<string>,
-): any {
-	if (!node || typeof node !== 'object') return null;
-	if (node.start > targetStart || node.end <= targetStart) return null;
-
-	const isFn = node.type === 'FunctionDeclaration'
-		|| node.type === 'FunctionExpression'
-		|| node.type === 'ArrowFunctionExpression';
-	const isComponent = isFn && node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name);
-
-	// Recurse into children first to find the nearest parent
-	let found: any = null;
-	forEachChild(node, child => { if (!found) found = findDirectParentFunction(child, targetStart, componentNames); });
-	if (found) return found;
-
-	// If this is a non-component function containing the target, return it
-	if (isFn && !isComponent) return node;
+function extractFunctionDecl(node: AstNode): FnInfo | null {
+	if (node.type === 'FunctionDeclaration' && node.id) {
+		return { name: node.id.name, node, params: node.params, body: node.body };
+	}
+	if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'FunctionDeclaration') {
+		const fn = node.declaration;
+		return { name: fn.id?.name || 'default', node: fn, params: fn.params, body: fn.body };
+	}
+	if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'FunctionDeclaration') {
+		const fn = node.declaration;
+		if (!fn.id) return null;
+		return { name: fn.id.name, node: fn, params: fn.params, body: fn.body };
+	}
 	return null;
 }
 
-function findNestedFunctionDecls(
-	node: any,
-	componentNames: Set<string>,
-	results: Array<{ fnInfo: FnInfo; start: number; end: number }>,
-): void {
-	if (!node || typeof node !== 'object') return;
-
-	// If this node is a component function declaration, collect it and stop recursing
-	if (node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name)) {
-		const fn = extractFunctionDecl(node);
-		if (fn) {
-			results.push({ fnInfo: fn, start: node.start, end: node.end });
-			return;
-		}
-	}
-
-	// Recurse into children
-	forEachChild(node, child => findNestedFunctionDecls(child, componentNames, results));
+/**
+ * Detect whether a state initializer will produce a proxy at runtime.
+ */
+function isProxyInit(initNode: Expression): boolean {
+	const t = initNode.type;
+	return t === 'ObjectExpression' || t === 'ArrayExpression' || t === 'NewExpression';
 }
 
 /**
- * Find top-level JSX nodes in an AST subtree (not inside component functions or other JSX).
+ * Find the JSX root in a component's return statement.
  */
-function findTopLevelJSX(
-	node: any,
-	componentNames: Set<string>,
-	results: Array<{ start: number; end: number }>,
-): void {
-	if (!node || typeof node !== 'object') return;
-
-	// Stop at component function bodies — their JSX is handled by the component pipeline
-	if (node.type === 'FunctionDeclaration' && node.id?.name && componentNames.has(node.id.name)) return;
-
-	// Found a top-level JSX node — collect it and don't recurse (children are handled by analyzeJSXNode)
-	if (node.type === 'JSXElement' || node.type === 'JSXFragment') {
-		results.push({ start: node.start, end: node.end });
-		return;
-	}
-
-	forEachChild(node, child => findTopLevelJSX(child, componentNames, results));
-}
-
-/** Find an AST node by its start position */
-function findASTNodeAt(node: any, start: number): any {
-	if (!node || typeof node !== 'object') return null;
-	if ((node.type === 'JSXElement' || node.type === 'JSXFragment') && node.start === start) return node;
-	let found: any = null;
-	forEachChild(node, child => { if (!found) found = findASTNodeAt(child, start); });
-	return found;
-}
-
-/** Collect JSX nodes inside an attribute expression and return them with positions relative to the expression start */
-function collectNestedJSXInExpr(exprNode: any, source: string): Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> {
-	const hits: Array<{ start: number; end: number }> = [];
-	findTopLevelJSX(exprNode, new Set(), hits);
-	if (hits.length === 0) return [];
-	const exprStart = exprNode.start;
-	const result: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> = [];
-	for (const { start, end } of hits) {
-		const jsxAST = findASTNodeAt(exprNode, start);
-		if (jsxAST) {
-			result.push({
-				localStart: start - exprStart,
-				localEnd: end - exprStart,
-				ir: analyzeJSXNode(jsxAST, source),
-			});
+function findReturnJSXRoot(fnNode: OxcFunction): JSXElement | JSXFragment | null {
+	if (!fnNode.body) return null;
+	for (const stmt of fnNode.body.body) {
+		if (stmt.type === 'ReturnStatement' && stmt.argument) {
+			let node: Expression = stmt.argument;
+			while (node.type === 'ParenthesizedExpression') node = node.expression;
+			if (node.type === 'JSXElement' || node.type === 'JSXFragment') return node;
 		}
 	}
-	return result;
+	return null;
 }
 
-/** Known AST fields that contain child nodes — avoids iterating all object keys */
+/** Get the tag name of a JSXElement if it has a simple JSXIdentifier name */
+function getJSXTagName(node: JSXElement): string | null {
+	const name = node.openingElement.name;
+	return name.type === 'JSXIdentifier' ? name.name : null;
+}
+
+/**
+ * Find a JSX marker element by name in a JSX tree.
+ * Returns the element node if found, null otherwise.
+ */
+function findJSXMarkerElement(node: JSXElement | JSXFragment, markerName: string): JSXElement | null {
+	if (node.type === 'JSXElement' && getJSXTagName(node) === markerName) {
+		return node;
+	}
+	for (const child of node.children) {
+		if (child.type === 'JSXElement') {
+			const found = findJSXMarkerElement(child, markerName);
+			if (found) return found;
+		} else if (child.type === 'JSXFragment') {
+			const found = findJSXMarkerElement(child, markerName);
+			if (found) return found;
+		}
+	}
+	return null;
+}
+
+/**
+ * Compute the path of element indices from the root JSX node to the
+ * JSXElement that directly contains a style marker element.
+ */
+function computeStyleBlockScopePath(rootNode: JSXElement | JSXFragment, markerName: string): number[] {
+	const path: number[] = [];
+
+	function walk(node: JSXElement | JSXFragment): boolean {
+		let elementIdx = 0;
+		for (const child of node.children) {
+			if (child.type === 'JSXElement') {
+				if (getJSXTagName(child) === markerName) return true;
+				if (findJSXMarkerElement(child, markerName)) {
+					path.push(elementIdx);
+					walk(child);
+					return true;
+				}
+				elementIdx++;
+			}
+		}
+		return false;
+	}
+
+	walk(rootNode);
+	return path;
+}
+
+/** Known AST fields that contain child nodes */
 const AST_CHILD_FIELDS = [
 	'body', 'declarations', 'declaration', 'init', 'test', 'consequent',
 	'alternate', 'expression', 'expressions', 'left', 'right', 'object',
@@ -825,692 +805,19 @@ const AST_CHILD_FIELDS = [
 	'source', 'key', 'id', 'label', 'tag', 'quasi', 'quasis',
 ];
 
+const AST_CHILD_FIELD_SET = new Set(AST_CHILD_FIELDS);
+
 /** Visit all AST child nodes of a given node */
-function forEachChild(node: any, fn: (child: any) => void): void {
-	for (const key of AST_CHILD_FIELDS) {
-		const child = node[key];
-		if (child == null) continue;
-		if (Array.isArray(child)) {
-			for (const item of child) {
-				if (item && typeof item === 'object' && item.type) fn(item);
+function forEachChild(node: AstNode, fn: (child: AstNode) => void): void {
+	for (const [key, value] of Object.entries(node)) {
+		if (!AST_CHILD_FIELD_SET.has(key)) continue;
+		if (value == null) continue;
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				if (isAstNode(item)) fn(item);
 			}
-		} else if (typeof child === 'object' && child.type) {
-			fn(child);
+		} else if (isAstNode(value)) {
+			fn(value);
 		}
 	}
-}
-
-interface FnInfo {
-	name: string;
-	node: any;
-	params: any[];
-	body: any;
-}
-
-function extractFunctionDecl(node: any): FnInfo | null {
-	// Regular function declaration
-	if (node.type === 'FunctionDeclaration' && node.id) {
-		return { name: node.id.name, node, params: node.params, body: node.body };
-	}
-	// export default function X() {}
-	if (node.type === 'ExportDefaultDeclaration' && node.declaration?.type === 'FunctionDeclaration') {
-		const fn = node.declaration;
-		return { name: fn.id?.name || 'default', node: fn, params: fn.params, body: fn.body };
-	}
-	// export function X() {}
-	if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'FunctionDeclaration') {
-		const fn = node.declaration;
-		return { name: fn.id.name, node: fn, params: fn.params, body: fn.body };
-	}
-	return null;
-}
-
-function analyzeComponent(
-	fn: FnInfo,
-	compMeta: ComponentMeta,
-	source: string,
-	stateSet: Set<string>,
-	derivedSet: Set<string>,
-	crossFileReactiveVars: Set<string>,
-	renamedParams: Record<string, Record<string, string>>,
-	extractedStyleBlocks: ExtractedStyleBlock[] = [],
-): ComponentIR {
-	const params: ParamIR[] = [];
-	const stateVars: { name: string; initExpr: string }[] = [];
-	const derivedVars: { name: string; expr: string; raw?: boolean }[] = [];
-	const reactiveVars = new Set<string>(crossFileReactiveVars);
-	const proxyVars = new Set<string>();
-	const bodyStatements: string[] = [];
-	const orderedDecls: DeclEntry[] = [];
-	let jsx: JSXNodeIR | null = null;
-	let jsxRootNode: any = null; // OXC AST node for depth computation
-
-	/** Create a body DeclEntry, detecting and analyzing any nested JSX nodes */
-	function makeBodyDecl(stmtNode: any): DeclEntry {
-		const text = source.slice(stmtNode.start, stmtNode.end);
-		const jsxHits: Array<{ start: number; end: number }> = [];
-		findTopLevelJSX(stmtNode, compMeta ? new Set([compMeta.name]) : new Set(), jsxHits);
-		if (jsxHits.length === 0) return { kind: 'body', text };
-		const nestedJSX: Array<{ localStart: number; localEnd: number; ir: JSXNodeIR }> = [];
-		for (const { start, end } of jsxHits) {
-			const jsxAST = findASTNodeAt(stmtNode, start);
-			if (jsxAST) {
-				nestedJSX.push({
-					localStart: start - stmtNode.start,
-					localEnd: end - stmtNode.start,
-					ir: analyzeJSXNode(jsxAST, source),
-				});
-			}
-		}
-		return { kind: 'body', text, nestedJSX: nestedJSX.length > 0 ? nestedJSX : undefined };
-	}
-
-	// Get per-component rename map
-	const componentRenames = renamedParams[compMeta.name] || {};
-
-	// Analyze params
-	for (const param of fn.params) {
-		const p = analyzeParam(param, source, componentRenames);
-		params.push(p);
-		// All non-rest props are reactive (wrapped in $.prop → derived signal)
-		if (!p.isRest) {
-			reactiveVars.add(p.name);
-		}
-	}
-
-	// Walk the function body
-	if (fn.body?.type === 'FunctionBody' || fn.body?.type === 'BlockStatement') {
-		for (const stmt of fn.body.statements || fn.body.body || []) {
-			if (stmt.type === 'VariableDeclaration') {
-				for (const decl of stmt.declarations) {
-					const name = decl.id?.name;
-					if (!name) {
-						// Destructuring pattern or other non-simple binding — preserve as body statement
-						bodyStatements.push(source.slice(stmt.start, stmt.end));
-						orderedDecls.push(makeBodyDecl(stmt));
-						break;
-					}
-
-					const marker = source.slice(decl.id.end, decl.init?.start ?? stmt.end);
-					const isState = stateSet.has(name) && (marker.includes(STATE_MARKER) || !decl.init);
-					const isDerived = derivedSet.has(name) && marker.includes(DERIVED_MARKER);
-
-					if (isState) {
-						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
-						const initExpr = initNode ? source.slice(initNode.start, initNode.end) : '';
-						stateVars.push({ name, initExpr });
-						orderedDecls.push({ kind: 'state', name, initExpr });
-						reactiveVars.add(name);
-						if (decl.init && isProxyInit(decl.init)) proxyVars.add(name);
-					} else if (isDerived) {
-						const initNode = decl.init ? unwrapTSExpression(decl.init) : null;
-						const expr = initNode ? source.slice(initNode.start, initNode.end) : 'undefined';
-						derivedVars.push({ name, expr });
-						orderedDecls.push({ kind: 'derived', name, expr });
-						reactiveVars.add(name);
-					} else if (name.startsWith('__derived_')) {
-						const expr = decl.init ? source.slice(decl.init.start, decl.init.end) : 'undefined';
-						derivedVars.push({ name, expr, raw: true });
-						orderedDecls.push({ kind: 'derived', name, expr, raw: true });
-					} else {
-						// Normal variable — preserve
-						bodyStatements.push(source.slice(stmt.start, stmt.end));
-						orderedDecls.push(makeBodyDecl(stmt));
-					}
-				}
-			} else if (stmt.type === 'ReturnStatement' && stmt.argument) {
-				// This was a `render (...)` block, now `return (<>...</>)`
-				// Unwrap ParenthesizedExpression if present
-				let jsxNode = stmt.argument;
-				while (jsxNode.type === 'ParenthesizedExpression') {
-					jsxNode = jsxNode.expression;
-				}
-				// Only treat as JSX render if the argument is actually JSX
-				if (jsxNode.type === 'JSXElement' || jsxNode.type === 'JSXFragment') {
-					jsxRootNode = jsxNode;
-					jsx = analyzeJSXNode(jsxNode, source);
-				} else {
-					// Non-JSX return (e.g. `render null`, `render getValue()`)
-					bodyStatements.push(source.slice(stmt.start, stmt.end));
-					orderedDecls.push(makeBodyDecl(stmt));
-				}
-			} else {
-				// Other statements — preserve as-is
-				bodyStatements.push(source.slice(stmt.start, stmt.end));
-				orderedDecls.push(makeBodyDecl(stmt));
-			}
-		}
-	}
-
-	if (!jsx) {
-		jsx = { type: 'fragment', children: [] };
-	}
-
-	// Build style blocks from preprocessor extraction, computing JSX scope paths
-	const styleBlocks: StyleBlockIR[] = extractedStyleBlocks.map((sb, index) => ({
-		css: sb.css,
-		isGlobal: sb.isGlobal,
-		scopePath: jsxRootNode ? computeStyleBlockScopePath(jsxRootNode, sb.sourceOffset) : [],
-		index,
-	}));
-
-	return { meta: compMeta, params, stateVars, derivedVars, reactiveVars, proxyVars, jsx, bodyStatements, orderedDecls, styleBlocks };
-}
-
-/**
- * Compute the path of element indices from the root JSX node to the JSXElement
- * that directly contains a style block at `offset`.
- * Empty path = root-level (sibling of render's root elements).
- * Each index counts only JSXElement children (not text or expression nodes).
- */
-function computeStyleBlockScopePath(rootNode: any, offset: number): number[] {
-	const path: number[] = [];
-
-	function walk(node: any): boolean {
-		if (!node || offset < node.start || offset >= node.end) return false;
-
-		const children = node.children || [];
-		let elementIdx = 0;
-		for (let i = 0; i < children.length; i++) {
-			const child = children[i];
-			if (child.type === 'JSXElement') {
-				if (offset >= child.start && offset < child.end) {
-					path.push(elementIdx);
-					walk(child);
-					return true;
-				}
-				elementIdx++;
-			}
-		}
-		// offset is within this node's range but not inside any child JSXElement
-		return true;
-	}
-
-	walk(rootNode);
-	return path;
-}
-
-function analyzeParam(param: any, source: string, renamedParams: Record<string, string>): ParamIR {
-	if (param.type === 'RestElement') {
-		return {
-			name: param.argument?.name || 'rest',
-			externalName: null,
-			isBind: false,
-			isRest: true,
-			defaultValue: null,
-		};
-	}
-	if (param.type === 'AssignmentPattern') {
-		const rawName = param.left?.name || 'unknown';
-		const isBind = rawName.startsWith('__bind__');
-		const name = isBind ? rawName.slice(8) : rawName;
-		return {
-			name,
-			externalName: renamedParams[name] || null,
-			isBind,
-			isRest: false,
-			defaultValue: source.slice(param.right.start, param.right.end),
-		};
-	}
-	if (param.type === 'Identifier') {
-		const rawName = param.name;
-		const isBind = rawName.startsWith('__bind__');
-		const name = isBind ? rawName.slice(8) : rawName;
-		return {
-			name,
-			externalName: renamedParams[name] || null,
-			isBind,
-			isRest: false,
-			defaultValue: null,
-		};
-	}
-	// Fallback
-	return { name: 'unknown', externalName: null, isBind: false, isRest: false, defaultValue: null };
-}
-
-// ── JSX Analysis ───────────────────────────────────────────────────
-
-function analyzeJSXNode(node: any, source: string): JSXNodeIR {
-	switch (node.type) {
-		case 'JSXElement':
-			return analyzeJSXElement(node, source);
-		case 'JSXFragment':
-			return analyzeJSXFragment(node, source);
-		case 'JSXText':
-			return { type: 'text', value: node.value };
-		case 'JSXExpressionContainer': {
-			const expr = node.expression;
-			// Detect __if() calls
-			if (
-				expr.type === 'CallExpression' &&
-				expr.callee?.type === 'Identifier' &&
-				expr.callee.name === '__if'
-			) {
-				return analyzeIfBlock(expr, source);
-			}
-			// Detect __for() calls
-			if (
-				expr.type === 'CallExpression' &&
-				expr.callee?.type === 'Identifier' &&
-				expr.callee.name === '__for'
-			) {
-				return analyzeForBlock(expr, source);
-			}
-			// Detect __switch() calls
-			if (
-				expr.type === 'CallExpression' &&
-				expr.callee?.type === 'Identifier' &&
-				expr.callee.name === '__switch'
-			) {
-				return analyzeSwitchBlock(expr, source);
-			}
-			// Detect __try() calls
-			if (
-				expr.type === 'CallExpression' &&
-				expr.callee?.type === 'Identifier' &&
-				expr.callee.name === '__try'
-			) {
-				return analyzeTryBlock(expr, source);
-			}
-			// Detect __block() calls (anonymous blocks with statements + render)
-			if (
-				expr.type === 'CallExpression' &&
-				expr.callee?.type === 'Identifier' &&
-				expr.callee.name === '__block'
-			) {
-				return analyzeAnonymousBlock(expr, source);
-			}
-			// Detect .map() calls returning JSX: expr.map(item => <jsx/>)
-			if (
-				expr.type === 'CallExpression' &&
-				expr.callee?.type === 'MemberExpression' &&
-				expr.callee.property?.name === 'map'
-			) {
-				const callback = expr.arguments?.[0];
-				if (
-					callback &&
-					(callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression') &&
-					isJSXNode(callback.body)
-				) {
-					return analyzeMapExpression(expr, source);
-				}
-			}
-			// Detect ternary: condition ? <JSX/> : <JSX/>
-			if (expr.type === 'ConditionalExpression') {
-				const consqIsJSX = isJSXNode(expr.consequent);
-				const altIsJSX = isJSXNode(expr.alternate);
-				const altIsNullish = isNullishNode(expr.alternate);
-				if (consqIsJSX && (altIsJSX || altIsNullish)) {
-					return analyzeTernaryExpression(expr, source);
-				}
-			}
-			// Detect logical &&: condition && <JSX/>
-			if (expr.type === 'LogicalExpression' && expr.operator === '&&') {
-				if (isJSXNode(expr.right)) {
-					return analyzeLogicalAndExpression(expr, source);
-				}
-			}
-			// Bare JSX inside expression container: {<p>Hello</p>}
-			if (isJSXNode(expr)) {
-				return analyzeJSXNode(expr, source);
-			}
-			return {
-				type: 'expression',
-				raw: source.slice(expr.start, expr.end),
-			};
-		}
-		default:
-			// Fallback: treat as text
-			return { type: 'text', value: '' };
-	}
-}
-
-function analyzeJSXFragment(node: any, source: string): JSXFragmentIR {
-	return {
-		type: 'fragment',
-		children: (node.children || []).map((c: any) => analyzeJSXNode(c, source)),
-	};
-}
-
-function analyzeJSXElement(node: any, source: string): JSXElementIR {
-	const opening = node.openingElement;
-	const tag = getTagName(opening.name);
-	const isComponent = /^[A-Z]/.test(tag);
-	const selfClosing = opening.selfClosing;
-
-	const attributes: JSXAttrIR[] = [];
-	for (const attr of opening.attributes || []) {
-		if (attr.type === 'JSXSpreadAttribute') {
-			attributes.push({
-				kind: 'spread',
-				name: '...',
-				value: source.slice(attr.argument.start, attr.argument.end),
-			});
-			continue;
-		}
-
-		// JSXAttribute
-		const attrName = getAttrName(attr.name);
-		const attrValue = getAttrValue(attr, source);
-
-		if (attr.name.type === 'JSXNamespacedName') {
-			const ns = attr.name.namespace.name;
-			const local = attr.name.name.name;
-			if (ns === 'bind') {
-				const expr = attr.value?.type === 'JSXExpressionContainer' ? attr.value.expression : null;
-				if (expr?.type === 'ArrayExpression' && expr.elements.length === 2) {
-					// Function binding: bind:value={getter, setter} (pre-wrapped as array by parser)
-					const getExpr = source.slice(expr.elements[0].start, expr.elements[0].end);
-					const setExpr = source.slice(expr.elements[1].start, expr.elements[1].end);
-					attributes.push({
-						kind: 'bind',
-						name: `bind:${local}`,
-						bindProperty: local,
-						value: null,
-						bindGetter: getExpr,
-						bindSetter: setExpr,
-					});
-				} else {
-					attributes.push({
-						kind: 'bind',
-						name: `bind:${local}`,
-						bindProperty: local,
-						value: attrValue,
-					});
-				}
-				continue;
-			}
-		}
-
-		// Event handler: onclick, onkeydown, etc.
-		if (attrName.startsWith('on') && attrName.length > 2) {
-			attributes.push({
-				kind: 'event',
-				name: attrName,
-				value: attrValue,
-			});
-			continue;
-		}
-
-		// Boolean attribute: `disabled` → { kind: 'static', name: 'disabled', value: 'true' }
-		if (attr.value === null && attr.name?.type === 'JSXIdentifier') {
-			attributes.push({
-				kind: 'static',
-				name: attrName,
-				value: 'true',
-			});
-			continue;
-		}
-
-		// Dynamic vs static
-		if (attr.value?.type === 'JSXExpressionContainer') {
-			const nestedJSX = collectNestedJSXInExpr(attr.value.expression, source);
-			attributes.push({
-				kind: 'dynamic',
-				name: attrName,
-				value: attrValue,
-				...(nestedJSX.length > 0 ? { nestedJSX } : {}),
-			});
-		} else {
-			attributes.push({
-				kind: 'static',
-				name: attrName,
-				value: attrValue,
-			});
-		}
-	}
-
-	const children = (node.children || []).map((c: any) => analyzeJSXNode(c, source));
-
-	return { type: 'element', tag, isComponent, selfClosing, attributes, children };
-}
-
-function getTagName(nameNode: any): string {
-	if (nameNode.type === 'JSXIdentifier') return nameNode.name;
-	if (nameNode.type === 'JSXMemberExpression') {
-		return `${getTagName(nameNode.object)}.${nameNode.property.name}`;
-	}
-	return 'unknown';
-}
-
-/**
- * Detect whether a state initializer will produce a proxy at runtime.
- * $.state() returns a proxy for objects/arrays, a Signal for primitives.
- */
-function isProxyInit(initNode: any): boolean {
-	if (!initNode) return false;
-	const t = initNode.type;
-	return t === 'ObjectExpression' || t === 'ArrayExpression' || t === 'NewExpression';
-}
-
-function getAttrName(nameNode: any): string {
-	if (nameNode.type === 'JSXIdentifier') return nameNode.name;
-	if (nameNode.type === 'JSXNamespacedName') {
-		return `${nameNode.namespace.name}:${nameNode.name.name}`;
-	}
-	return 'unknown';
-}
-
-function getAttrValue(attr: any, source: string): string | null {
-	if (!attr.value) return null;
-	if (attr.value.type === 'Literal' || attr.value.type === 'StringLiteral') {
-		return attr.value.value;
-	}
-	if (attr.value.type === 'JSXExpressionContainer') {
-		return source.slice(attr.value.expression.start, attr.value.expression.end);
-	}
-	return source.slice(attr.value.start, attr.value.end);
-}
-
-// ── Control flow block analysis ────────────────────────────────────
-
-function unwrapParen(node: any): any {
-	while (node?.type === 'ParenthesizedExpression') node = node.expression;
-	return node;
-}
-
-interface BranchBody {
-	children: JSXNodeIR[];
-	preamble?: string;
-}
-
-/**
- * Extracts JSX children and optional preamble from an arrow function body.
- * Handles both expression bodies `() => (<>jsx</>)` and block bodies
- * `() => { stmts; return (<>jsx</>); }`.
- */
-function extractBranchBody(arrowBody: any, source: string): BranchBody {
-	if (arrowBody?.type === 'BlockStatement') {
-		const stmts: any[] = arrowBody.body || [];
-		const returnStmt = stmts.find((s: any) => s.type === 'ReturnStatement');
-		if (returnStmt?.argument) {
-			const children = extractJSXChildren(returnStmt.argument, source);
-			// Everything before the return is preamble
-			const preambleStmts = stmts.filter((s: any) => s !== returnStmt);
-			const preamble = preambleStmts.length > 0
-				? source.slice(preambleStmts[0].start, preambleStmts[preambleStmts.length - 1].end).trim()
-				: undefined;
-			return { children, preamble };
-		}
-		return { children: [] };
-	}
-	return { children: extractJSXChildren(arrowBody, source) };
-}
-
-function extractJSXChildren(node: any, source: string): JSXNodeIR[] {
-	const jsx = unwrapParen(node);
-	if (!jsx) return [];
-	if (jsx.type === 'JSXFragment') {
-		return (jsx.children || []).map((c: any) => analyzeJSXNode(c, source));
-	}
-	if (jsx.type === 'JSXElement') {
-		const analyzed = analyzeJSXNode(jsx, source);
-		return analyzed.type === 'fragment' ? analyzed.children : [analyzed];
-	}
-	// Non-JSX expression (bare expression like count, "text", 6, etc.)
-	return [{ type: 'expression', raw: source.slice(jsx.start, jsx.end) }];
-}
-
-function analyzeIfBlock(callExpr: any, source: string): JSXIfBlockIR {
-	const args = callExpr.arguments;
-
-	// First arg: () => (condition)
-	const condArrow = args[0];
-	const condBody = unwrapParen(condArrow?.body);
-	const condition = condBody ? source.slice(condBody.start, condBody.end) : 'true';
-
-	// Second arg: () => (<>trueBranch</>) or () => { stmts; return (<>...</>); }
-	const trueArrow = args[1];
-	const trueResult = trueArrow ? extractBranchBody(trueArrow.body, source) : { children: [] };
-
-	// Third arg (optional): () => (<>falseBranch</>)
-	let falseBranch: JSXNodeIR[] | null = null;
-	let falsePreamble: string | undefined;
-	if (args.length > 2) {
-		const falseArrow = args[2];
-		if (falseArrow) {
-			const falseResult = extractBranchBody(falseArrow.body, source);
-			falseBranch = falseResult.children;
-			falsePreamble = falseResult.preamble;
-		}
-	}
-
-	return { type: 'if_block', condition, trueBranch: trueResult.children, truePreamble: trueResult.preamble, falseBranch, falsePreamble };
-}
-
-function analyzeForBlock(callExpr: any, source: string): JSXForBlockIR {
-	const args = callExpr.arguments;
-
-	// First arg: () => (collection)
-	const collArrow = args[0];
-	const collBody = unwrapParen(collArrow?.body);
-	const collection = collBody ? source.slice(collBody.start, collBody.end) : '[]';
-
-	// Second arg: (item, index?) => (<>body</>) or (item) => { stmts; return (<>...</>); }
-	const bodyArrow = args[1];
-	const params = bodyArrow?.params || [];
-	const itemParam = params[0];
-	const itemName = itemParam?.name || (itemParam ? source.slice(itemParam.start, itemParam.end) : 'item');
-	const indexName = params.length > 1 ? params[1]?.name : null;
-	const bodyResult = bodyArrow ? extractBranchBody(bodyArrow.body, source) : { children: [] };
-
-	// Third arg (optional): (item) => (key)
-	let keyExpr: string | null = null;
-	if (args.length > 2) {
-		const keyArrow = args[2];
-		const keyBody = unwrapParen(keyArrow?.body);
-		keyExpr = keyBody ? source.slice(keyBody.start, keyBody.end) : null;
-	}
-
-	return { type: 'for_block', collection, itemName, indexName, keyExpr, body: bodyResult.children, preamble: bodyResult.preamble };
-}
-
-function analyzeSwitchBlock(callExpr: any, source: string): JSXSwitchBlockIR {
-	const args = callExpr.arguments;
-
-	// First arg: () => (discriminant)
-	const discArrow = args[0];
-	const discBody = unwrapParen(discArrow?.body);
-	const discriminant = discBody ? source.slice(discBody.start, discBody.end) : '""';
-
-	// Remaining args come in pairs: (values-array-or-null, body-fn)
-	const cases: { values: string[] | null; body: JSXNodeIR[]; preamble?: string }[] = [];
-	for (let i = 1; i < args.length; i += 2) {
-		const valuesArg = args[i];
-		const fnArg = args[i + 1];
-
-		let values: string[] | null = null;
-		if (valuesArg.type === 'ArrayExpression') {
-			values = (valuesArg.elements || []).map((el: any) =>
-				source.slice(el.start, el.end),
-			);
-		}
-		// NullLiteral → values stays null (default case)
-
-		const result = fnArg ? extractBranchBody(fnArg.body, source) : { children: [] };
-		cases.push({ values, body: result.children, preamble: result.preamble });
-	}
-
-	return { type: 'switch_block', discriminant, cases };
-}
-
-function analyzeTryBlock(callExpr: any, source: string): JSXTryBlockIR {
-	const args = callExpr.arguments;
-
-	// First arg: () => (<>tryBody</>)
-	const tryArrow = args[0];
-	const tryResult = tryArrow ? extractBranchBody(tryArrow.body, source) : { children: [] };
-
-	// Second arg (optional): (param) => (<>catchBody</>) or null
-	let catchParam: string | null = null;
-	let catchBranch: JSXNodeIR[] | null = null;
-	let catchPreamble: string | undefined;
-	if (args.length > 1 && args[1].type !== 'NullLiteral') {
-		const catchArrow = args[1];
-		catchParam = catchArrow.params?.[0]?.name || 'e';
-		const catchResult = extractBranchBody(catchArrow.body, source);
-		catchBranch = catchResult.children;
-		catchPreamble = catchResult.preamble;
-	}
-
-	// Third arg (optional): () => (<>pendingBody</>)
-	let pendingBranch: JSXNodeIR[] | null = null;
-	let pendingPreamble: string | undefined;
-	if (args.length > 2) {
-		const pendArrow = args[2];
-		const pendResult = extractBranchBody(pendArrow.body, source);
-		pendingBranch = pendResult.children;
-		pendingPreamble = pendResult.preamble;
-	}
-
-	return { type: 'try_block', tryBranch: tryResult.children, tryPreamble: tryResult.preamble, catchParam, catchBranch, catchPreamble, pendingBranch, pendingPreamble };
-}
-
-function analyzeAnonymousBlock(callExpr: any, source: string): JSXAnonymousBlockIR {
-	const arrowFn = callExpr.arguments[0];
-	const result = extractBranchBody(arrowFn.body, source);
-	return { type: 'anonymous_block', preamble: result.preamble, children: result.children };
-}
-
-// ── JSX expression pattern detection helpers ───────────────────────
-
-function isJSXNode(node: any): boolean {
-	const unwrapped = unwrapParen(node);
-	return unwrapped?.type === 'JSXElement' || unwrapped?.type === 'JSXFragment';
-}
-
-function isNullishNode(node: any): boolean {
-	const unwrapped = unwrapParen(node);
-	if (!unwrapped) return false;
-	if (unwrapped.type === 'NullLiteral') return true;
-	if (unwrapped.type === 'Literal' && unwrapped.value === null) return true;
-	if (unwrapped.type === 'Identifier' && unwrapped.name === 'undefined') return true;
-	return false;
-}
-
-function analyzeMapExpression(callExpr: any, source: string): JSXForBlockIR {
-	const collection = source.slice(callExpr.callee.object.start, callExpr.callee.object.end);
-	const callback = callExpr.arguments[0];
-	const params = callback.params || [];
-	const itemParam = params[0];
-	const itemName = itemParam?.name || (itemParam ? source.slice(itemParam.start, itemParam.end) : 'item');
-	const indexName = params.length > 1 ? (params[1]?.name || null) : null;
-	const body = extractJSXChildren(callback.body, source);
-	return { type: 'for_block', collection, itemName, indexName, keyExpr: null, body };
-}
-
-function analyzeTernaryExpression(expr: any, source: string): JSXIfBlockIR {
-	const condition = source.slice(expr.test.start, expr.test.end);
-	const trueBranch = extractJSXChildren(expr.consequent, source);
-	let falseBranch: JSXNodeIR[] | null = null;
-	if (!isNullishNode(expr.alternate)) {
-		falseBranch = extractJSXChildren(expr.alternate, source);
-	}
-	return { type: 'if_block', condition, trueBranch, falseBranch };
-}
-
-function analyzeLogicalAndExpression(expr: any, source: string): JSXIfBlockIR {
-	const condition = source.slice(expr.left.start, expr.left.end);
-	const trueBranch = extractJSXChildren(expr.right, source);
-	return { type: 'if_block', condition, trueBranch, falseBranch: null };
 }

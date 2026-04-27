@@ -5,7 +5,15 @@
  * then parses with OXC. Returns the AST plus metadata about which
  * identifiers are state/derived/components.
  */
-import { parseSync } from 'oxc-parser';
+import {
+	parseSync as oxcParseSync,
+	type BindingPattern,
+	type BindingProperty,
+	type BindingRestElement,
+	type IfStatement,
+	type Statement,
+	type SwitchStatement,
+} from 'oxc-parser';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -16,9 +24,11 @@ export interface ComponentMeta {
 	isAsync: boolean;
 }
 
-/** Marker comments embedded in preprocessed code to identify state/derived declarations */
-export const STATE_MARKER = '/*@s*/';
-export const DERIVED_MARKER = '/*@d*/';
+/** Marker identifiers used in preprocessed code to identify state/derived declarations */
+export const STATE_MARKER = '$$s';
+export const DERIVED_MARKER = '$$d';
+/** Prefix for style block marker JSX elements (e.g. <$$style0 />) */
+export const STYLE_MARKER_PREFIX = '$$style';
 
 export interface PreprocessResult {
 	/** The transformed source that OXC can parse */
@@ -40,8 +50,8 @@ export interface ExtractedStyleBlock {
 	css: string;
 	/** Whether this is a `<style global>` block */
 	isGlobal: boolean;
-	/** Source offset where the style block was found (for component association) */
-	sourceOffset: number;
+	/** Marker JSX element name (e.g. '$$style0') used to locate this block in the AST */
+	markerName: string;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -98,7 +108,8 @@ function skipTypeAnnotation(code: string, start: number): number {
 }
 
 /**
- * Transform `state varName: Type = expr` → `let varName MARKER = expr`
+ * Transform `state varName: Type = expr` → `let $$s = 0, varName = expr`
+ * Transform `state varName: Type` → `let $$s = 0, varName`
  * Properly handles balanced braces inside type annotations.
  */
 function transformStateDeclarations(code: string, stateVars: string[], marker: string): string {
@@ -106,6 +117,7 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
 	let result = '';
 	let lastIndex = 0;
 	let match;
+	let counter = 0;
 
 	while ((match = re.exec(code)) !== null) {
 		const exportKw = match[1] || '';
@@ -122,7 +134,8 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
 
 		stateVars.push(name);
 		result += code.slice(lastIndex, match.index);
-		result += `${exportKw}let ${name} ${marker} `;
+		// Emit `let $$s0 = 0, name = expr` — the $$s* sibling declarator marks this as state
+		result += `${exportKw}let ${marker}${counter++} = 0, ${name} `;
 		lastIndex = afterType;
 	}
 
@@ -131,7 +144,7 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
 }
 
 /**
- * Transform `derived varName: Type = expr` → `const varName MARKER = expr`
+ * Transform `derived varName: Type = expr` → `const $$d = 0, varName = expr`
  * Properly handles balanced braces inside type annotations.
  */
 function transformDerivedDeclarations(code: string, derivedVars: string[], marker: string): string {
@@ -139,6 +152,7 @@ function transformDerivedDeclarations(code: string, derivedVars: string[], marke
 	let result = '';
 	let lastIndex = 0;
 	let match;
+	let counter = 0;
 
 	while ((match = re.exec(code)) !== null) {
 		const exportKw = match[1] || '';
@@ -155,7 +169,8 @@ function transformDerivedDeclarations(code: string, derivedVars: string[], marke
 
 		derivedVars.push(name);
 		result += code.slice(lastIndex, match.index);
-		result += `${exportKw}const ${name} ${marker} `;
+		// Emit `const $$d0 = 0, name = expr` — the $$d* sibling declarator marks this as derived
+		result += `${exportKw}const ${marker}${counter++} = 0, ${name} `;
 		lastIndex = afterType;
 	}
 
@@ -227,13 +242,9 @@ export function preprocess(source: string): PreprocessResult {
 	//     so OXC can parse it as a valid identifier, and the analyzer can detect it.
 	code = code.replace(/\bbind\s+(\w+)/g, '__bind__$1');
 
-	// 2. Transform `state varName = expr`, `state varName: Type = expr`, or `state varName: Type` → `let varName /*@s*/ ...`
-	//    The /*@s*/ marker lets the analyzer identify this as a state declaration
-	//    regardless of scope, without relying on name matching alone.
-	//    Optional type annotations (`: Type`) are stripped — the runtime $.state()
-	//    call infers the type from the initializer.
-	//    Uses a function-based replacement to properly handle balanced braces
-	//    inside type annotations (e.g. `{ id: string; text: string }`).
+	// 2. Transform `state varName = expr` or `state varName: Type = expr` → `let $$s = 0, varName = expr`
+	//    The $$s sibling declarator lets the analyzer identify this as a state declaration
+	//    regardless of scope. Survives oxcTransformSync (unlike comment markers).
 	code = transformStateDeclarations(code, stateVars, STATE_MARKER);
 
 	// 3a. Transform destructured derived declarations into a temp plus
@@ -241,8 +252,7 @@ export function preprocess(source: string): PreprocessResult {
 	//     object/array patterns, aliases, defaults, and rest bindings.
 	code = transformDerivedDestructuring(code, derivedVars);
 
-	// 3b. Transform `derived varName = expr` or `derived varName: Type = expr` → `const varName /*@d*/ = expr`
-	//    Uses the same balanced-brace-aware stripping as state.
+	// 3b. Transform `derived varName = expr` or `derived varName: Type = expr` → `const $$d = 0, varName = expr`
 	code = transformDerivedDeclarations(code, derivedVars, DERIVED_MARKER);
 
 	// 4. Transform all `render` forms into `return` statements:
@@ -298,16 +308,17 @@ function extractStyleBlocks(code: string, blocks: ExtractedStyleBlock[]): string
 		const css = code.slice(openTagEnd, closeIdx);
 		const fullEnd = closeIdx + closeTag.length;
 
+		const markerName = `${STYLE_MARKER_PREFIX}${blocks.length}`;
 		blocks.push({
 			css,
 			isGlobal,
-			sourceOffset: openTagStart,
+			markerName,
 		});
 
-		// Replace the entire <style>...</style> with whitespace to preserve offsets
+		// Replace the entire <style>...</style> with a marker JSX element
+		// that survives oxcTransformSync and can be found in the AST
 		result += code.slice(lastIndex, openTagStart);
-		// Use spaces to avoid shifting offsets for subsequent matches
-		result += ' '.repeat(fullEnd - openTagStart);
+		result += `<${markerName} />`;
 		lastIndex = fullEnd;
 		styleOpenRegex.lastIndex = fullEnd;
 	}
@@ -620,8 +631,8 @@ function skipBlockComment(code: string, start: number): number {
 
 // ── Parse with OXC ─────────────────────────────────────────────────
 
-export function parse(filename: string, code: string) {
-	return parseSync(filename, code, { sourceType: 'module', lang: 'tsx' });
+export function parse(filename: string, code: string, lang: 'tsx' | 'jsx' = 'tsx') {
+	return oxcParseSync(filename, code, { sourceType: 'module', lang });
 }
 
 function transformDerivedDestructuring(code: string, derivedVars: string[]): string {
@@ -677,9 +688,10 @@ function lowerDerivedPattern(
 	const bindings = collectDerivedBindings(pattern, tempName);
 	const lines = [`const ${tempName} = ${expr}`];
 
+	let i = 0;
 	for (const binding of bindings) {
 		derivedVars.push(binding.name);
-		lines.push(`${exportKw}const ${binding.name} ${DERIVED_MARKER} = ${binding.expr}`);
+		lines.push(`${exportKw}const ${DERIVED_MARKER}${counter}_${i++} = 0, ${binding.name} = ${binding.expr}`);
 	}
 
 	return lines.join(';\n\t');
@@ -687,16 +699,17 @@ function lowerDerivedPattern(
 
 function collectDerivedBindings(pattern: string, baseExpr: string): Array<{ name: string; expr: string }> {
 	const source = `const ${pattern} = __source__`;
-	const parsed = parseSync('derived-pattern.ts', source, { sourceType: 'module', lang: 'tsx' });
-	const stmt = parsed.program.body[0] as any;
-	const decl = stmt?.declarations?.[0];
+	const parsed = oxcParseSync('derived-pattern.ts', source, { sourceType: 'module', lang: 'tsx' });
+	const stmt = parsed.program.body[0];
+	if (!stmt || stmt.type !== 'VariableDeclaration') return [];
+	const decl = stmt.declarations[0];
 	const bindings: Array<{ name: string; expr: string }> = [];
-	collectDerivedBindingsFromNode(decl?.id, baseExpr, source, bindings);
+	if (decl) collectDerivedBindingsFromNode(decl.id, baseExpr, source, bindings);
 	return bindings;
 }
 
 function collectDerivedBindingsFromNode(
-	node: any,
+	node: BindingPattern | BindingRestElement | null | undefined,
 	baseExpr: string,
 	source: string,
 	bindings: Array<{ name: string; expr: string }>,
@@ -748,8 +761,8 @@ function collectDerivedBindingsFromNode(
 }
 
 function collectRestBindings(
-	argument: any,
-	node: any,
+	argument: BindingPattern,
+	node: BindingRestElement,
 	baseExpr: string,
 	source: string,
 	bindings: Array<{ name: string; expr: string }>,
@@ -771,7 +784,7 @@ function collectRestBindings(
 	collectDerivedBindingsFromNode(argument, baseExpr, source, bindings);
 }
 
-function buildObjectPropertyAccess(prop: any, source: string): string {
+function buildObjectPropertyAccess(prop: BindingProperty, source: string): string {
 	if (prop.computed) {
 		return `[${source.slice(prop.key.start, prop.key.end)}]`;
 	}
@@ -783,7 +796,7 @@ function buildObjectPropertyAccess(prop: any, source: string): string {
 	return `[${source.slice(prop.key.start, prop.key.end)}]`;
 }
 
-function collectObjectRestKeys(properties: any[], source: string): string[] {
+function collectObjectRestKeys(properties: (BindingProperty | BindingRestElement)[], source: string): string[] {
 	const keys: string[] = [];
 	for (const prop of properties) {
 		if (!prop || prop.type === 'RestElement') continue;
@@ -1205,24 +1218,27 @@ function tryParseIfBlock(code: string, outerBrace: number): ControlFlowResult | 
 	// If bodies contain `return` (from block-render), wrap in a function
 	// so the return is valid.
 	let source = wrapped;
-	let result = parseSync('if-block.tsx', source, {
+	let result = oxcParseSync('if-block.tsx', source, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
 	if (result.errors.length > 0) {
 		source = `function __(){${wrapped}}`;
-		result = parseSync('if-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
+		result = oxcParseSync('if-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
 		if (result.errors.length > 0) return null;
-		const fnBody = (result.program.body[0] as any)?.body?.body;
-		if (!fnBody?.length || fnBody[0].type !== 'IfStatement') return null;
-		const output = buildIfCall(source, fnBody[0]);
+		const fnDecl = result.program.body[0];
+		if (!fnDecl || fnDecl.type !== 'FunctionDeclaration') return null;
+		if (!fnDecl.body) return null;
+		const firstStmt = fnDecl.body.body[0];
+		if (!firstStmt || firstStmt.type !== 'IfStatement') return null;
+		const output = buildIfCall(source, firstStmt);
 		return { text: `{${output}}`, end: outerClose + 1 };
 	}
 
-	const stmts = result.program.body;
-	if (stmts.length === 0 || stmts[0].type !== 'IfStatement') return null;
+	const firstStmt = result.program.body[0];
+	if (!firstStmt || firstStmt.type !== 'IfStatement') return null;
 
-	const output = buildIfCall(source, stmts[0]);
+	const output = buildIfCall(source, firstStmt);
 	return { text: `{${output}}`, end: outerClose + 1 };
 }
 
@@ -1230,7 +1246,7 @@ function tryParseIfBlock(code: string, outerBrace: number): ControlFlowResult | 
  * Recursively build __if() calls from an OXC IfStatement AST node.
  * Handles else-if chains naturally through AST recursion.
  */
-function buildIfCall(source: string, stmt: any): string {
+function buildIfCall(source: string, stmt: IfStatement): string {
 	const condition = source.slice(stmt.test.start, stmt.test.end);
 	const trueBody = extractBranchBody(source, stmt.consequent);
 
@@ -1249,7 +1265,7 @@ function buildIfCall(source: string, stmt: any): string {
 }
 
 /** Extract body text from a branch node — strips braces for BlockStatement, uses full text otherwise */
-function extractBranchBody(source: string, node: any): string {
+function extractBranchBody(source: string, node: Statement): string {
 	if (node.type === 'BlockStatement') {
 		const inner = source.slice(node.start + 1, node.end - 1).trim();
 		// Unwrap fragment added by wrapJSXBranchBodies: `(<>...</>)` → inner JSX
@@ -1287,13 +1303,13 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
 
 	// Try parsing the full header to determine loop type
 	const forSource = `for (${fullHeader}) {}`;
-	const fullResult = parseSync('for-block.tsx', forSource, {
+	const fullResult = oxcParseSync('for-block.tsx', forSource, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
 
 	if (fullResult.errors.length === 0 && fullResult.program.body.length > 0) {
-		const forStmt = fullResult.program.body[0] as any;
+		const forStmt = fullResult.program.body[0];
 
 		// for...in: for (const key in obj)
 		if (forStmt.type === 'ForInStatement') {
@@ -1312,10 +1328,15 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
 
 			// Extract loop variable name from init
 			let loopVar = '__i';
-			if (forStmt.init?.type === 'VariableDeclaration' && forStmt.init.declarations?.[0]?.id?.name) {
-				loopVar = forStmt.init.declarations[0].id.name;
-			} else if (forStmt.init?.type === 'AssignmentExpression' && forStmt.init.left?.name) {
-				loopVar = forStmt.init.left.name;
+			if (forStmt.init && forStmt.init.type === 'VariableDeclaration') {
+				const firstDecl = forStmt.init.declarations[0];
+				if (firstDecl && firstDecl.id.type === 'Identifier') {
+					loopVar = firstDecl.id.name;
+				}
+			} else if (forStmt.init && forStmt.init.type === 'AssignmentExpression') {
+				if (forStmt.init.left.type === 'Identifier') {
+					loopVar = forStmt.init.left.name;
+				}
 			}
 
 			const collectionFn = `{ const __a = []; for (${initSrc}; ${testSrc}; ${updateSrc}) __a.push(${loopVar}); return __a; }`;
@@ -1346,7 +1367,7 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
 	}
 
 	const forOfSource = `for (${mainPart}) {}`;
-	const forOfResult = parseSync('for-block.tsx', forOfSource, {
+	const forOfResult = oxcParseSync('for-block.tsx', forOfSource, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
@@ -1385,31 +1406,31 @@ function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResul
 	// Parse the transformed switch statement with OXC.
 	// If cases contain `return` (from block-render), wrap in a function.
 	let source = wrapped;
-	let result = parseSync('switch-block.tsx', source, {
+	let result = oxcParseSync('switch-block.tsx', source, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
 	if (result.errors.length > 0) {
 		source = `function __(){${wrapped}}`;
-		result = parseSync('switch-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
+		result = oxcParseSync('switch-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
 		if (result.errors.length > 0) return null;
-		const fnBody = (result.program.body[0] as any)?.body?.body;
-		if (!fnBody?.length || fnBody[0].type !== 'SwitchStatement') return null;
-		// Continue with the switch statement from the function body
-		const switchStmt = fnBody[0];
-		const discriminant = source.slice(switchStmt.discriminant.start, switchStmt.discriminant.end);
-		return buildSwitchOutput(source, switchStmt, discriminant, outerClose);
+		const fnDecl = result.program.body[0];
+		if (!fnDecl || fnDecl.type !== 'FunctionDeclaration') return null;
+		if (!fnDecl.body) return null;
+		const firstStmt = fnDecl.body.body[0];
+		if (!firstStmt || firstStmt.type !== 'SwitchStatement') return null;
+		const discriminant = source.slice(firstStmt.discriminant.start, firstStmt.discriminant.end);
+		return buildSwitchOutput(source, firstStmt, discriminant, outerClose);
 	}
 
-	const stmts = result.program.body;
-	if (stmts.length === 0 || stmts[0].type !== 'SwitchStatement') return null;
+	const firstStmt = result.program.body[0];
+	if (!firstStmt || firstStmt.type !== 'SwitchStatement') return null;
 
-	const switchStmt = stmts[0];
-	const discriminant = source.slice(switchStmt.discriminant.start, switchStmt.discriminant.end);
-	return buildSwitchOutput(source, switchStmt, discriminant, outerClose);
+	const discriminant = source.slice(firstStmt.discriminant.start, firstStmt.discriminant.end);
+	return buildSwitchOutput(source, firstStmt, discriminant, outerClose);
 }
 
-function buildSwitchOutput(source: string, switchStmt: any, discriminant: string, outerClose: number): ControlFlowResult {
+function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discriminant: string, outerClose: number): ControlFlowResult {
 	const switchCases = switchStmt.cases || [];
 
 	// Group cases with fall-through support
@@ -1426,10 +1447,10 @@ function buildSwitchOutput(source: string, switchStmt: any, discriminant: string
 			pendingDefault = true;
 		}
 
-		const consequent: any[] = sc.consequent || [];
-		const bodyStmts = consequent.filter((s: any) => s.type !== 'BreakStatement' && s.type !== 'ReturnStatement');
-		const hasBreak = consequent.some((s: any) => s.type === 'BreakStatement');
-		const hasReturn = consequent.some((s: any) => s.type === 'ReturnStatement');
+		const consequent = sc.consequent || [];
+		const bodyStmts = consequent.filter((s) => s.type !== 'BreakStatement' && s.type !== 'ReturnStatement');
+		const hasBreak = consequent.some((s) => s.type === 'BreakStatement');
+		const hasReturn = consequent.some((s) => s.type === 'ReturnStatement');
 		const isLast = ci === switchCases.length - 1;
 
 		// A case terminates its group if it has body content, a break/return, or is the last case
@@ -1437,7 +1458,7 @@ function buildSwitchOutput(source: string, switchStmt: any, discriminant: string
 			let body = '';
 			// For block-render: include the return statement in the body
 			const allBodyStmts = hasReturn
-				? consequent.filter((s: any) => s.type !== 'BreakStatement')
+				? consequent.filter((s) => s.type !== 'BreakStatement')
 				: bodyStmts;
 			if (allBodyStmts.length > 0) {
 				const start = allBodyStmts[0].start;

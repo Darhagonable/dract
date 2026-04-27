@@ -35,6 +35,9 @@ importers:
       entities:
         specifier: ^8.0.0
         version: 8.0.0
+      esrap:
+        specifier: ^2.2.5
+        version: 2.2.5
       oxc-parser:
         specifier: ^0.66.0
         version: 0.66.0
@@ -47,6 +50,9 @@ importers:
       postcss-selector-parser:
         specifier: ^7.1.1
         version: 7.1.1
+      zimmerframe:
+        specifier: ^1.1.4
+        version: 1.1.4
     devDependencies:
       typescript:
         specifier: ^5.8.2
@@ -1243,6 +1249,14 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  esrap@2.2.5:
+    resolution: {integrity: sha512-/yLB1538mag+dn0wsePTe8C0rDIjUOaJpMs2McodSzmM2msWcZsBSdRtg6HOBt0A/r82BN+Md3pgwSc/uWt2Ig==}
+    peerDependencies:
+      '@typescript-eslint/types': ^8.2.0
+    peerDependenciesMeta:
+      '@typescript-eslint/types':
+        optional: true
+
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
@@ -1952,6 +1966,9 @@ packages:
 
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
+
+  zimmerframe@1.1.4:
+    resolution: {integrity: sha512-B58NGBEoc8Y9MWWCQGl/gq9xBCe4IiKM0a2x7GZdQKOW5Exr8S1W24J6OgM1njK8xCRGvAJIL/MxXHf6SkmQKQ==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -2795,6 +2812,10 @@ snapshots:
       '@esbuild/win32-ia32': 0.25.12
       '@esbuild/win32-x64': 0.25.12
 
+  esrap@2.2.5:
+    dependencies:
+      '@jridgewell/sourcemap-codec': 1.5.5
+
   estree-walker@3.0.3:
     dependencies:
       '@types/estree': 1.0.8
@@ -3518,5 +3539,7 @@ snapshots:
   xml-name-validator@5.0.0: {}
 
   xmlchars@2.2.0: {}
+
+  zimmerframe@1.1.4: {}
 
   zwitch@2.0.4: {}
