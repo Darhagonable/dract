@@ -1,3 +1,5 @@
+import $ from "dartsx/internal/client";
+
 function createState() {
 	let count = $.state(0);
 	const increment = () => $.set(count, $.get(count) + 1);

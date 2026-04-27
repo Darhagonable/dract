@@ -1157,9 +1157,10 @@ function hasModuleReactiveDecls(analysis: AnalysisResult): boolean {
 	for (const [, binding] of analysis.scope.declarations) {
 		if (binding.kind === 'state' || binding.kind === 'derived') return true;
 	}
-	// Check for cross-module reactive params (function params upgraded to 'prop' kind)
+	// Check all scopes for function-level state/derived and cross-module reactive params
 	for (const scope of analysis.scopes.values()) {
 		for (const [, binding] of scope.declarations) {
+			if (binding.kind === 'state' || binding.kind === 'derived') return true;
 			if (binding.kind === 'prop' && binding.reactive) return true;
 		}
 	}
