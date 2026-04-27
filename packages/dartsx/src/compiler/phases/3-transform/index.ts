@@ -208,6 +208,7 @@ export function transform(
 			if (fn === '__switch') return transformSwitchCall(node, state, visit);
 			if (fn === '__try') return transformTryCall(node, state, visit);
 			if (fn === '__block') return transformBlockCall(node, state, visit);
+			if (fn === '__html') return transformHtmlCall(node, state);
 			return transformReactiveCallOrNext(node, state, next);
 		},
 
@@ -405,6 +406,7 @@ function walkNode(node: AstNode, state: TransformState): AstNode {
 			if (fn === '__switch') return transformSwitchCall(node, s, visit);
 			if (fn === '__try') return transformTryCall(node, s, visit);
 			if (fn === '__block') return transformBlockCall(node, s, visit);
+			if (fn === '__html') return transformHtmlCall(node, s);
 			return transformReactiveCallOrNext(node, s, next);
 		},
 		JSXExpressionContainer(node, { state: s, visit }) {
@@ -867,7 +869,7 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 			// Control flow calls
 			if (expr.type === 'CallExpression' && expr.callee.type === 'Identifier') {
 				const fn = expr.callee.name;
-				if (fn === '__if' || fn === '__for' || fn === '__switch' || fn === '__try' || fn === '__block') {
+				if (fn === '__if' || fn === '__for' || fn === '__switch' || fn === '__try' || fn === '__block' || fn === '__html') {
 					result.push(walkNode(expr, state));
 					continue;
 				}
@@ -1029,6 +1031,13 @@ function transformBlockCall(node: CallExpression, state: TransformState, visit: 
 	const arrowFn = node.arguments[0];
 	if (!arrowFn) return b.literal(null);
 	return walkNode(arrowFn, state);
+}
+
+function transformHtmlCall(node: CallExpression, state: TransformState) {
+	const arg = node.arguments[0];
+	if (!arg || arg.type === 'SpreadElement') return b.literal(null);
+	const transformed = walkNode(arg, state);
+	return b.call('$.html', [b.arrow([], transformed)]);
 }
 
 function transformCFCallback(arrowFn: Argument | undefined, state: TransformState): AstNode {

@@ -17,6 +17,7 @@ export { if_block } from './blocks/if';
 export { for_block } from './blocks/for';
 export { switch_block, type SwitchCase } from './blocks/switch';
 export { try_block } from './blocks/try';
+export { html_block } from './blocks/html';
 
 // ── Imports needed internally ──────────────────────────────────────
 
@@ -30,6 +31,7 @@ import { if_block } from './blocks/if';
 import { for_block } from './blocks/for';
 import { switch_block } from './blocks/switch';
 import { try_block } from './blocks/try';
+import { html_block } from './blocks/html';
 import { jsx, svg, math, Fragment } from './jsx';
 import { style } from './jsx/style-inject';
 
@@ -52,6 +54,7 @@ export default {
 	for: for_block,
 	switch: switch_block,
 	try: try_block,
+	html: html_block,
 	scheduleEffect,
 	getFlushPromise,
 };

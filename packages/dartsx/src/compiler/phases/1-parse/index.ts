@@ -999,6 +999,19 @@ function transformControlFlowBlocks(code: string): string {
 		}
 
 		if (code[i] === '{') {
+			// {@html expr} → {__html(expr)}
+			const htmlMatch = code.slice(i).match(/^\{@html\s+/);
+			if (htmlMatch) {
+				const exprStart = i + htmlMatch[0].length;
+				const closeBrace = findMatchingBrace(code, i);
+				if (closeBrace > exprStart) {
+					const expr = code.slice(exprStart, closeBrace).trim();
+					result += `{__html(${expr})}`;
+					i = closeBrace + 1;
+					continue;
+				}
+			}
+
 			const parsed = tryParseJSXBlock(code, i);
 			if (parsed) {
 				result += parsed.text;

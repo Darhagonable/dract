@@ -8,6 +8,7 @@ import { StyleShowcase } from "./styling/StyleShowcase";
 import { RouterDemo } from "./RouterDemo";
 import { EffectDemo } from "./EffectDemo";
 import { StorageSyncDemo } from "./StorageSyncDemo";
+import { HtmlDemo } from "./HtmlDemo";
 import { test } from "./helper-test";
 
 export default component App() {
@@ -46,6 +47,8 @@ export default component App() {
       <EffectDemo />
       <hr />
       <StorageSyncDemo />
+      <hr />
+      <HtmlDemo />
       <hr />
       <RouterDemo />
     </div>
