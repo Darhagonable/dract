@@ -392,7 +392,7 @@ function filterDarTsxDiagnostics(
 	fileName: string,
 ): import('typescript').Diagnostic[] {
 	if (!diags.length) return diags;
-	let content: string | undefined;
+	let content: string;
 	try {
 		content = fs.readFileSync(fileName, 'utf-8');
 	} catch {
@@ -406,7 +406,7 @@ function filterDarTsxDiagnostics(
 		if (!d.code) return true;
 		if (ALWAYS_SUPPRESS.has(d.code)) return false;
 		if (ZONE_SUPPRESS.has(d.code)) {
-			if (!zones) zones = findSuppressZones(content!);
+			if (!zones) zones = findSuppressZones(content);
 			const start = d.start ?? 0;
 			return !zones.some(z => start >= z.start && start < z.end);
 		}

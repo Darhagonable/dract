@@ -8,7 +8,9 @@
 	"engines": {
 		"vscode": "^1.85.0"
 	},
-	"categories": ["Programming Languages"],
+	"categories": [
+		"Programming Languages"
+	],
 	"activationEvents": [
 		"onLanguage:javascript",
 		"onLanguage:javascriptreact",
@@ -27,12 +29,24 @@
 			{
 				"scopeName": "source.dartsx.render.injection",
 				"path": "./syntaxes/dartsx.render.injection.tmLanguage.json",
-				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"]
+				"injectTo": [
+					"source.js",
+					"source.js.jsx",
+					"source.jsx",
+					"source.ts",
+					"source.tsx"
+				]
 			},
 			{
 				"scopeName": "source.dartsx.style.injection",
 				"path": "./syntaxes/dartsx.style.injection.tmLanguage.json",
-				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"],
+				"injectTo": [
+					"source.js",
+					"source.js.jsx",
+					"source.jsx",
+					"source.ts",
+					"source.tsx"
+				],
 				"embeddedLanguages": {
 					"source.css": "css"
 				}
@@ -40,7 +54,13 @@
 			{
 				"scopeName": "source.dartsx.css-expressions.injection",
 				"path": "./syntaxes/dartsx.css-expressions.injection.tmLanguage.json",
-				"injectTo": ["source.js", "source.js.jsx", "source.jsx", "source.ts", "source.tsx"]
+				"injectTo": [
+					"source.js",
+					"source.js.jsx",
+					"source.jsx",
+					"source.ts",
+					"source.tsx"
+				]
 			}
 		]
 	},
@@ -49,14 +69,14 @@
 		"package": "vsce package --no-dependencies"
 	},
 	"dependencies": {
-		"dartsx-typescript-plugin": "workspace:*",
 		"@volar/language-server": "~2.4.28",
+		"dartsx-typescript-plugin": "workspace:*",
 		"volar-service-css": "0.0.70",
 		"volar-service-html": "0.0.70",
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
-		"@types/vscode": "^1.85.0",
-		"typescript": "^5.8.2"
+		"@types/vscode": "^1.116.0",
+		"typescript": "^6.0.3"
 	}
 }

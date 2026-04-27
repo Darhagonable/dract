@@ -13,12 +13,12 @@
 	},
 	"devDependencies": {
 		"@tailwindcss/typography": "^0.5.19",
-		"@tailwindcss/vite": "^4.2.2",
+		"@tailwindcss/vite": "^4.2.4",
 		"dartsx-typescript-plugin": "workspace:*",
 		"dartsx-vite-plugin": "workspace:*",
-		"marked": "^15.0.0",
-		"shiki": "^3.0.0",
-		"tailwindcss": "^4.2.2",
-		"vite": "^8.0.0"
+		"marked": "^18.0.2",
+		"shiki": "^4.0.2",
+		"tailwindcss": "^4.2.4",
+		"vite": "^8.0.10"
 	}
 }
