@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { dartsxToTsx, isDarTsxFile } from '../src/dartsx-to-tsx';
+import ts from 'typescript';
+import fs from 'fs';
+import path from 'path';
+
+/** Parse transformed code through TypeScript and return syntax errors */
+function getTsSyntaxErrors(code: string, fileName = 'test.tsx'): string[] {
+	const kind = fileName.endsWith('.tsx') || fileName.endsWith('.jsx')
+		? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+	const sf = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true, kind);
+	return (sf as any).parseDiagnostics?.map((d: ts.DiagnosticWithLocation) => {
+		const pos = ts.getLineAndCharacterOfPosition(sf, d.start);
+		return `L${pos.line + 1}:${pos.character} ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`;
+	}) ?? [];
+}
 
 describe('isDarTsxFile', () => {
 	it('detects DarTsx files with component keyword', () => {
@@ -271,4 +285,67 @@ describe('dartsxToTsx', () => {
 		expect(code).toContain('} catch (e) {');
 		expect(code).toContain('})()}');
 	});
+});
+
+describe('dartsxToTsx produces valid TypeScript', () => {
+	// Inline snippets — every DarTsx pattern must produce parseable TSX
+	const snippets: [string, string][] = [
+		['render (expr)', 'component A() { render (<div>hi</div>) }'],
+		['render <JSX>', 'component A() { render <div>hi</div> }'],
+		['render expression', 'component A() { render getNode(); }'],
+		['render optional chain', 'component A() { render match?.handler(params) ?? null; }'],
+		['{@html expr}', 'component A() { render (<div>{@html markup}</div>) }'],
+		['bind:value', '<input bind:value={x} />'],
+		['bind shorthand', '<input bind:{value} />'],
+		['state + derived', 'component A() { state x = 0\n  derived y = x * 2 }'],
+		['component with props', 'component A(name: string, age?: number) {}'],
+		['if control flow', 'component A() { render (<div>{if (x) { <p>yes</p> }}</div>) }'],
+		['for control flow', 'component A() { render (<div>{for (const item of items) { <p>{item}</p> }}</div>) }'],
+		['switch control flow', 'component A() { render (<div>{switch (x) { case 1: <p>one</p> }}</div>) }'],
+		['try control flow', 'component A() { render (<div>{try { <Data /> } catch (e) { <p>Error</p> }}</div>) }'],
+	];
+
+	for (const [name, source] of snippets) {
+		it(`snippet: ${name}`, () => {
+			const { code } = dartsxToTsx(source);
+			const errors = getTsSyntaxErrors(code);
+			expect(errors, `Transform produced invalid TSX:\n${code}\n\nErrors:\n${errors.join('\n')}`).toEqual([]);
+		});
+	}
+
+	// Scan all project .tsx/.ts source files
+	const rootDir = path.resolve(__dirname, '../../..');
+	const scanDirs = ['playground/src', 'toolkit'];
+
+	function collectDarTsxFiles(dir: string): string[] {
+		const files: string[] = [];
+		if (!fs.existsSync(dir)) return files;
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (entry.name === 'node_modules') continue;
+			const full = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				files.push(...collectDarTsxFiles(full));
+				continue;
+			}
+			if (!/\.(tsx?|jsx?)$/.test(entry.name)) continue;
+			if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.d.ts.map')) continue;
+			try {
+				const src = fs.readFileSync(full, 'utf-8');
+				if (isDarTsxFile(src)) files.push(full);
+			} catch { /* skip unreadable */ }
+		}
+		return files;
+	}
+
+	const dartsxFiles = scanDirs.flatMap(d => collectDarTsxFiles(path.join(rootDir, d)));
+
+	for (const file of dartsxFiles) {
+		const rel = path.relative(rootDir, file);
+		it(`file: ${rel}`, () => {
+			const src = fs.readFileSync(file, 'utf-8');
+			const { code } = dartsxToTsx(src);
+			const errors = getTsSyntaxErrors(code, file);
+			expect(errors, `dartsxToTsx produced invalid TypeScript for ${rel}:\n\nTransformed:\n${code.slice(0, 500)}...\n\nErrors:\n${errors.join('\n')}`).toEqual([]);
+		});
+	}
 });

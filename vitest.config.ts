@@ -13,6 +13,12 @@ export default defineConfig({
 				},
 			},
 			{
+				test: {
+					name: 'dartsx-to-tsx',
+					include: ['packages/dartsx/tests/dartsx-to-tsx.test.ts'],
+				},
+			},
+			{
 				plugins: [dartsx()],
 				test: {
 					name: 'client',

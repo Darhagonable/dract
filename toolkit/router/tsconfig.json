@@ -13,8 +13,7 @@
 		"verbatimModuleSyntax": true,
 		"jsx": "preserve",
 		"outDir": "dist",
-		"rootDir": "src",
-		"composite": true
+		"rootDir": "src"
 	},
 	"include": ["src"]
 }

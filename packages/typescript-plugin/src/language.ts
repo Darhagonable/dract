@@ -50,10 +50,20 @@ class DarTsxVirtualCode implements VirtualCode {
 			this.scriptKind = this.serviceExtension === '.tsx' ? 4 : 3;
 		}
 
-		const { code, map } = dartsxToTsx(source);
+		let code: string;
+		let mapMappings: string;
+		try {
+			const result = dartsxToTsx(source);
+			code = result.code;
+			mapMappings = result.map.mappings;
+		} catch {
+			// Fallback: pass source through unchanged
+			code = source;
+			mapMappings = '';
+		}
 
 		// Build Volar CodeMappings from the VLQ source map mappings
-		this.mappings = buildMappings(map.mappings, source, code);
+		this.mappings = buildMappings(mapMappings, source, code);
 
 		this.snapshot = {
 			getText: (start, end) => code.substring(start, end),
@@ -522,13 +532,18 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 			const accepted = new Set(['dartsx', 'typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
 			if (!accepted.has(languageId)) return undefined;
 
+			const fileName = typeof _uri === 'string' ? _uri : String(_uri);
+
+			// Never transform .d.ts files — TS lib files can false-positive on
+			// isDarTsxFile (e.g. `state` in PromiseState, `derived` in comments)
+			if (fileName.endsWith('.d.ts')) return undefined;
+
 			// For non-dartsx languageIds, verify content is actually DarTsx
 			if (languageId !== 'dartsx') {
 				const source = snapshot.getText(0, Math.min(snapshot.getLength(), 4096));
 				if (!isDarTsxFile(source)) return undefined;
 			}
 
-			const fileName = typeof _uri === 'string' ? _uri : String(_uri);
 			return new DarTsxVirtualCode(fileName, snapshot);
 		},
 

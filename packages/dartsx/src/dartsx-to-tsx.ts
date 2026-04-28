@@ -10,9 +10,12 @@
  *   - `state x =` → `let x =`
  *   - `derived x =` → `const x =`
  *   - `render (...)` → `return (<>...</>)`
+ *   - `render <expr>` → `return <expr>`
+ *   - `render expr;` → `return expr;`
  *   - `{if/for/switch/try}` in JSX → IIFE wrappers
  *   - `bind:value={x}` → `__bind_value={x}`
  *   - `bind:{x}` → `__bind_value={x}`
+ *   - `{@html expr}` → `{expr}`
  *   - `<style>` blocks → blanked (preserving interpolations)
  */
 
@@ -54,6 +57,7 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformDerivedDeclarations(ms, source, commentRanges);
 	transformRenderBlocks(ms, source);
 	transformJsxControlFlow(ms, source);
+	transformHtmlDirective(ms, source);
 	transformBindShorthand(ms, source);
 	transformBindAttributes(ms, source);
 	blankStyleBlocks(ms, source);
@@ -441,6 +445,12 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 	while ((match = reInline.exec(source)) !== null) {
 		ms.overwrite(match.index, match.index + 'render'.length, 'return');
 	}
+
+	// render <expression>; → return <expression>; (bare expression, not parens or JSX)
+	const reExpr = /\brender(\s+)(?![(<])/g;
+	while ((match = reExpr.exec(source)) !== null) {
+		ms.overwrite(match.index, match.index + 'render'.length, 'return');
+	}
 }
 
 // ── JSX control flow → IIFE ────────────────────────────────────────
@@ -571,6 +581,19 @@ function skipTemplateLiteral(code: string, start: number): number {
 		i++;
 	}
 	return i;
+}
+
+// ── {@html expr} → {expr} ─────────────────────────────────────────
+
+function transformHtmlDirective(ms: MagicString, source: string): void {
+	// {@html expr} → {expr} — strip the @html directive for type-checking
+	const re = /\{@html\s+/g;
+	let match;
+	while ((match = re.exec(source)) !== null) {
+		const start = match.index + 1; // after '{'
+		const end = start + match[0].length - 1; // up to end of '@html '
+		ms.overwrite(start, end, '');
+	}
 }
 
 // ── <style> block blanking ─────────────────────────────────────────

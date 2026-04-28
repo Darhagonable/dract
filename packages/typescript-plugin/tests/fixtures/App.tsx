@@ -15,14 +15,14 @@ export component App(title: string) {
       <p>{count} x 2 = {doubled}</p>
       <p>{helper(count)}</p>
       <input bind:value={user.name} />
-      {#if count > 0}
+      {if (count > 0) {
         <p>Positive</p>
-      {:else}
+      } else {
         <p>Zero or negative</p>
-      {/if}
-      {#for item of [1, 2, 3]}
+      }}
+      {for (const item of [1, 2, 3]) {
         <span>{item}</span>
-      {/for}
+      }}
     </div>
   )
 }

@@ -201,6 +201,7 @@ function rewriteParameterLabel(
 		label.text = isBoundParam(content, result.textSpan.start)
 			? 'binded prop'
 			: 'prop';
+		rewriteRenamedPropName(result, content, result.textSpan.start);
 		return;
 	}
 
@@ -208,9 +209,52 @@ function rewriteParameterLabel(
 	if (!defSite || !isDarTsxFile(defSite.content)) return;
 	if (!isInsideComponent(defSite.content, defSite.textSpan.start)) return;
 
-	label.text = isBoundParam(defSite.content, defSite.textSpan.start)
+	// Volar may map the definition to the start of the param list (coarse mapping).
+	// Resolve the actual parameter position by name within the component's param list.
+	const paramPos = findParamInComponent(defSite.content, defSite.textSpan.start, paramName);
+
+	label.text = isBoundParam(defSite.content, paramPos)
 		? 'binded prop'
 		: 'prop';
+	rewriteRenamedPropName(result, defSite.content, paramPos);
+}
+
+/**
+ * For renamed props (`'ext-name' as localName`), TS shows the external name
+ * in the hover. Rewrite it to show the local alias instead.
+ */
+function rewriteRenamedPropName(
+	result: import('typescript').QuickInfo,
+	source: string,
+	identStart: number,
+): void {
+	if (!result.displayParts) return;
+	// The textSpan may start at the quoted external name ('data-id')
+	// or at the local alias (dataId). Check both directions.
+	const after = source.slice(identStart, identStart + 120);
+	const forwardMatch = after.match(/^(['"])[^'"]+\1\s+as\s+([\w$]+)/);
+	if (!forwardMatch) {
+		// Check if identStart is at the local alias, look backward for quote
+		const before = source.substring(Math.max(0, identStart - 120), identStart);
+		const backMatch = before.match(/(['"])[^'"]+\1\s+as\s+$/);
+		if (!backMatch) return;
+		// identStart is at the local alias — extract it
+		const localMatch = source.slice(identStart).match(/^[\w$]+/);
+		if (!localMatch) return;
+		rewriteQuotedParts(result, localMatch[0]);
+		return;
+	}
+	// identStart is at the quoted name — the local alias is captured in group 2
+	rewriteQuotedParts(result, forwardMatch[2]);
+}
+
+function rewriteQuotedParts(result: import('typescript').QuickInfo, localName: string): void {
+	if (!result.displayParts) return;
+	for (const part of result.displayParts) {
+		if (part.text.startsWith("'") || part.text.startsWith('"')) {
+			part.text = localName;
+		}
+	}
 }
 
 function getDefinitionSite(
@@ -332,6 +376,26 @@ function findMatchingParen(source: string, openIdx: number): number {
 	return -1;
 }
 
+/**
+ * Find the position of a named parameter within the enclosing component's param list.
+ * Falls back to the given `nearPos` if not found.
+ */
+function findParamInComponent(source: string, nearPos: number, paramName: string): number {
+	const before = source.substring(0, nearPos + 1);
+	const lastComp = before.lastIndexOf('component ');
+	if (lastComp === -1) return nearPos;
+	const parenIdx = source.indexOf('(', lastComp);
+	if (parenIdx === -1) return nearPos;
+	const closeParen = findMatchingParen(source, parenIdx);
+	if (closeParen === -1) return nearPos;
+	const paramList = source.substring(parenIdx, closeParen + 1);
+	// Match the param name as a word followed by : or , or ) (handles `value:`, `dataId:`)
+	const re = new RegExp(`\\b${paramName}\\s*[:),]`);
+	const match = re.exec(paramList);
+	if (match) return parenIdx + match.index;
+	return nearPos;
+}
+
 function tryRewriteKeyword(
 	part: import('typescript').SymbolDisplayPart,
 	source: string,
@@ -340,12 +404,13 @@ function tryRewriteKeyword(
 	// For destructured bindings, scan back past `{ ..., ` or `[ ..., ` to find the keyword
 	let scanStart = identStart;
 	const charBefore = source[scanStart - 1];
-	if (charBefore === ' ' || charBefore === '\t' || charBefore === ',' || charBefore === '\n') {
-		// Walk backward to find the opening { or [
+	if (charBefore === ',' || charBefore === ' ' || charBefore === '\t') {
+		// Walk backward to find the opening { or [ (but stop at newlines — different statement)
 		let k = scanStart - 1;
 		let depth = 0;
 		while (k >= 0) {
 			const ch = source[k];
+			if (ch === '\n' || ch === ';') break; // don't cross statement boundaries
 			if (ch === '}' || ch === ']') depth++;
 			else if (ch === '{' || ch === '[') {
 				if (depth === 0) { scanStart = k; break; }

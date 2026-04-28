@@ -1,0 +1,8 @@
+dist/
+*.tsbuildinfo
+test/**/*.js
+test/**/*.js.map
+test/**/*.d.ts
+test/fixture/src/**/*.js
+test/fixture/src/**/*.js.map
+test/fixture/src/**/*.d.ts

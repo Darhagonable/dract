@@ -65,7 +65,8 @@
 		]
 	},
 	"scripts": {
-		"build": "tsc -b",
+		"build": "tsc",
+		"test": "tsc -p tsconfig.test.json && vscode-test",
 		"package": "vsce package --no-dependencies"
 	},
 	"dependencies": {
@@ -76,7 +77,10 @@
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
+		"@types/mocha": "^10.0.10",
 		"@types/vscode": "^1.116.0",
+		"@vscode/test-cli": "^0.0.12",
+		"@vscode/test-electron": "^2.5.2",
 		"typescript": "^6.0.3"
 	}
 }

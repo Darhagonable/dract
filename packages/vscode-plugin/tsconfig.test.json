@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"target": "ESNext",
+		"module": "CommonJS",
+		"moduleResolution": "bundler",
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"sourceMap": true,
+		"outDir": "dist/test",
+		"rootDir": "test",
+		"types": ["mocha", "node"]
+	},
+	"include": ["test"],
+	"exclude": ["test/fixture"]
+}
