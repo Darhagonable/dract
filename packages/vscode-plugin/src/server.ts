@@ -1,7 +1,7 @@
 import { createConnection, createServer, createSimpleProject } from '@volar/language-server/node';
 import { create as createCssService } from 'volar-service-css';
 import { create as createHtmlService } from 'volar-service-html';
-import { getDarTsxLanguagePlugin } from 'dartsx-typescript-plugin/dist/language';
+import { getDarTsxLanguagePlugin } from 'dartsx-typescript-plugin/language';
 
 const connection = createConnection();
 const server = createServer(connection);

@@ -4,6 +4,16 @@
 	"private": true,
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./language": {
+			"types": "./dist/language.d.ts",
+			"default": "./dist/language.js"
+		}
+	},
 	"scripts": {
 		"build": "tsc -b"
 	},
@@ -14,6 +24,6 @@
 	"dependencies": {
 		"@volar/language-core": "~2.4.28",
 		"@volar/typescript": "~2.4.28",
-		"magic-string": "^0.30.21"
+		"dartsx": "workspace:*"
 	}
 }

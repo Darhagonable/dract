@@ -12,7 +12,7 @@
 
 import { createLanguageServicePlugin } from '@volar/typescript/lib/quickstart/createLanguageServicePlugin';
 import { getDarTsxLanguagePlugin } from './language';
-import { isDarTsxFile, findSuppressZones, type SuppressZone } from './dartsx-to-tsx';
+import { isDarTsxFile, findSuppressZones, type SuppressZone } from 'dartsx/dartsx-to-tsx';
 import * as fs from 'fs';
 import { analyzeUnusedCss, DARTSX_UNUSED_CSS_CODE } from './unused-css';
 

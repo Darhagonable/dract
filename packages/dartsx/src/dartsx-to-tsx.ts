@@ -17,12 +17,15 @@
  */
 
 import MagicString from 'magic-string';
+import type { SourceMap } from 'magic-string';
+
+export type { SourceMap };
 
 export interface TransformResult {
 	/** The transformed valid TSX code */
 	code: string;
-	/** MagicString instance (for generating source maps) */
-	ms: MagicString;
+	/** Full V3 source map object */
+	map: SourceMap;
 }
 
 /**
@@ -55,7 +58,9 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformBindAttributes(ms, source);
 	blankStyleBlocks(ms, source);
 
-	return { code: ms.toString(), ms };
+	const code = ms.toString();
+	const map = ms.generateMap({ hires: 'boundary' });
+	return { code, map };
 }
 
 // ── Comment detection ──────────────────────────────────────────────

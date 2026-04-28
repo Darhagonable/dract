@@ -1,0 +1,31 @@
+{
+	"name": "dartsx-package",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Package DarTsx libraries for npm distribution",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc -b"
+	},
+	"dependencies": {
+		"dartsx": "workspace:*",
+		"kleur": "^4.1.5",
+		"chokidar": "^5.0.0"
+	},
+	"peerDependencies": {
+		"typescript": ">=5.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^25.6.0",
+		"typescript": "^6.0.3"
+	}
+}

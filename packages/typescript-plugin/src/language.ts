@@ -16,7 +16,7 @@ import type {
 // `typescript` property to LanguagePlugin
 import type { } from '@volar/typescript';
 import { forEachEmbeddedCode } from '@volar/language-core';
-import { dartsxToTsx, isDarTsxFile } from './dartsx-to-tsx';
+import { dartsxToTsx, isDarTsxFile } from 'dartsx/dartsx-to-tsx';
 import { skipBracedExpression } from './unused-css';
 import * as fs from 'fs';
 
@@ -50,13 +50,10 @@ class DarTsxVirtualCode implements VirtualCode {
 			this.scriptKind = this.serviceExtension === '.tsx' ? 4 : 3;
 		}
 
-		const { code, ms } = dartsxToTsx(source);
+		const { code, map } = dartsxToTsx(source);
 
-		// Build a single mapping that covers the whole file.
-		// MagicString tracks all mutations, so we can build fine-grained
-		// mappings from its internal state. For now, use the generated
-		// source map to build Volar CodeMappings.
-		this.mappings = buildMappings(ms, source, code);
+		// Build Volar CodeMappings from the VLQ source map mappings
+		this.mappings = buildMappings(map.mappings, source, code);
 
 		this.snapshot = {
 			getText: (start, end) => code.substring(start, end),
@@ -72,25 +69,19 @@ class DarTsxVirtualCode implements VirtualCode {
 	}
 }
 
-// ── Build Volar CodeMappings from MagicString ──────────────────────
+// ── Build Volar CodeMappings from VLQ source map ───────────────────
 
 function buildMappings(
-	ms: import('magic-string').default,
+	vlqMappings: string,
 	_source: string,
 	generated: string,
 ): CodeMapping[] {
-	// Generate a V3 source map from MagicString
-	const map = ms.generateMap({ hires: 'boundary' });
-
-	// We need to decode the mappings string into Volar's CodeMapping format.
+	// Decode the VLQ mappings string into Volar's CodeMapping format.
 	// Each mapping segment in a V3 source map is a VLQ-encoded tuple:
 	// [generatedColumn, sourceIndex, sourceLine, sourceColumn, ?nameIndex]
-	//
-	// We'll parse the decoded mappings and build contiguous Volar mappings.
 	const mappings: CodeMapping[] = [];
 
-	// Decode the VLQ mappings manually using the raw mappings string
-	const decoded = decodeMappings(map.mappings);
+	const decoded = decodeMappings(vlqMappings);
 
 	if (decoded.length === 0) {
 		// Fallback: single identity mapping

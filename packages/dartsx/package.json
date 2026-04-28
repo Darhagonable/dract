@@ -4,6 +4,9 @@
 	"private": true,
 	"type": "module",
 	"types": "./dist/runtime/external/index.d.ts",
+	"bin": {
+		"dartsx": "./bin/dartsx.js"
+	},
 	"exports": {
 		".": {
 			"types": "./dist/runtime/external/index.d.ts",
@@ -24,6 +27,10 @@
 		"./compiler": {
 			"types": "./dist/compiler/index.d.ts",
 			"default": "./dist/compiler/index.js"
+		},
+		"./dartsx-to-tsx": {
+			"types": "./dist/dartsx-to-tsx.d.ts",
+			"default": "./dist/dartsx-to-tsx.js"
 		}
 	},
 	"scripts": {
@@ -33,8 +40,10 @@
 	},
 	"dependencies": {
 		"clsx": "^2.1.1",
+		"dartsx-package": "workspace:*",
 		"entities": "^8.0.0",
 		"esrap": "^2.2.5",
+		"magic-string": "^0.30.21",
 		"oxc-parser": "^0.128.0",
 		"oxc-transform": "^0.128.0",
 		"postcss": "^8.5.12",

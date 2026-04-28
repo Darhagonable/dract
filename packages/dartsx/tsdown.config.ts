@@ -7,7 +7,8 @@ export default defineConfig({
 		'jsx-dev-runtime': 'src/jsx-dev-runtime.ts',
 		'runtime/internal/client/index': 'src/runtime/internal/client/index.ts',
 		'compiler/index': 'src/compiler/index.ts',
+		'dartsx-to-tsx': 'src/dartsx-to-tsx.ts',
 	},
 	fixedExtension: false,
-	external: ['oxc-parser', 'oxc-transform', 'postcss', 'postcss-selector-parser', 'zimmerframe', 'esrap'],
+	external: ['oxc-parser', 'oxc-transform', 'postcss', 'postcss-selector-parser', 'zimmerframe', 'esrap', 'magic-string'],
 });
