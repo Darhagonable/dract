@@ -1,4 +1,4 @@
-import { effect } from '../reactivity/effect';
+import { effect, collectEffects, disposeEffects, type Effect } from '../reactivity/effect';
 
 export interface SwitchCase {
 	values: unknown[] | null;
@@ -16,6 +16,7 @@ export function switch_block(
 	frag.appendChild(end);
 
 	let currentCaseIndex: number = -1;
+	let branchEffects: Effect[] = [];
 
 	effect(() => {
 		const value = discriminantFn();
@@ -34,16 +35,21 @@ export function switch_block(
 		if (matchIndex === currentCaseIndex) return;
 		currentCaseIndex = matchIndex;
 
+		disposeEffects(branchEffects);
+		branchEffects = [];
+
 		while (start.nextSibling !== end) {
 			start.nextSibling!.remove();
 		}
 
 		if (matchIndex !== -1) {
-			const result = cases[matchIndex].fn();
-			if (result instanceof Node) {
-				end.parentNode!.insertBefore(result, end);
-			} else if (result != null && result !== false && result !== true) {
-				end.parentNode!.insertBefore(document.createTextNode(String(result)), end);
+			const result = collectEffects(() => cases[matchIndex].fn());
+			branchEffects = result.effects;
+			const node = result.value;
+			if (node instanceof Node) {
+				end.parentNode!.insertBefore(node, end);
+			} else if (node != null && node !== false && node !== true) {
+				end.parentNode!.insertBefore(document.createTextNode(String(node)), end);
 			}
 		}
 	});

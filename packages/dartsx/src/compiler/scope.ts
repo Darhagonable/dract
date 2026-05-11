@@ -74,6 +74,8 @@ export class Binding {
 	declaration_kind: DeclarationKind;
 	/** The original AST node for this binding */
 	node: AstNode | null = null;
+	/** The initializer expression (for recursive proxy detection) */
+	initial: AstNode | null = null;
 	/** Whether this binding is exported from the module */
 	exported = false;
 	/** Whether the state initializer is an object/array (proxy-backed, direct member access) */
@@ -242,6 +244,10 @@ export function create_scopes(
 			if (stmt.type === 'VariableDeclaration') {
 				for (const decl of stmt.declarations) {
 					collectBindingNames(decl.id, scope, varDeclKind(stmt.kind));
+					if (decl.id.type === 'Identifier' && decl.init) {
+						const binding = scope.get(decl.id.name);
+						if (binding) binding.initial = decl.init;
+					}
 				}
 			}
 			if (stmt.type === 'FunctionDeclaration') {

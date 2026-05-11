@@ -126,7 +126,7 @@ export function transform(
 			const body: AstNode[] = [];
 			let needsRuntime = false;
 
-			if (state.analysis.components.size > 0 || hasModuleReactiveDecls(state.analysis)) {
+			if (state.analysis.components.size > 0 || hasModuleReactiveDecls(state.analysis) || hasModuleLevelJsx(node, state.analysis)) {
 				needsRuntime = true;
 			}
 
@@ -522,8 +522,9 @@ function transformIdentifier(node: AstNode, state: TransformState, path: AstNode
 	if (parent.type === 'MemberExpression' && parent.property === node && !parent.computed) return;
 	if (parent.type === 'Property' && parent.key === node && !parent.computed) return;
 
-	// Proxy/derived/bind-prop: direct member access (obj.foo), no $.get() on the root
+	// Proxy/derived/bind-prop: direct member access (obj.foo) or direct call (fn()), no $.get() on the root
 	if (parent.type === 'MemberExpression' && parent.object === node && binding.directMemberAccess) return;
+	if (parent.type === 'CallExpression' && parent.callee === node && binding.directMemberAccess) return;
 
 	// Signal forwarding: don't unwrap when passing to a reactive-param function
 	if (isInReactiveCallArg(node, path, state.reactiveCallTargets)) return;
@@ -1163,6 +1164,34 @@ function hasModuleReactiveDecls(analysis: AnalysisResult): boolean {
 			if (binding.kind === 'state' || binding.kind === 'derived') return true;
 			if (binding.kind === 'prop' && binding.reactive) return true;
 		}
+	}
+	return false;
+}
+
+function hasModuleLevelJsx(program: AstNode, analysis: AnalysisResult): boolean {
+	// Check if there are JSX nodes outside of component functions
+	function containsJsx(node: any): boolean {
+		if (!node || typeof node !== 'object') return false;
+		if (node.type === 'JSXElement' || node.type === 'JSXFragment') return true;
+		for (const key of Object.keys(node)) {
+			if (key === 'type' || key === 'start' || key === 'end') continue;
+			const val = node[key];
+			if (Array.isArray(val)) {
+				for (const item of val) {
+					if (item && typeof item === 'object' && containsJsx(item)) return true;
+				}
+			} else if (val && typeof val === 'object' && containsJsx(val)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	if (program.type !== 'Program' || !('body' in program)) return false;
+	for (const stmt of (program as any).body) {
+		// Skip component functions — they already trigger needsRuntime via components.size
+		if (analysis.components.has(stmt)) continue;
+		if (containsJsx(stmt)) return true;
 	}
 	return false;
 }

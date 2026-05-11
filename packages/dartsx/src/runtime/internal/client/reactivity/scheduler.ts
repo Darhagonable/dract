@@ -21,7 +21,7 @@ function flushEffects(): void {
 		const effects = pendingEffects;
 		pendingEffects = new Set();
 		for (const effect of effects) {
-			if (effect.dirty) {
+			if (effect.dirty && !effect.disposed) {
 				effect.dirty = false;
 				effect.run();
 			}

@@ -39,15 +39,23 @@ class DarTsxVirtualCode implements VirtualCode {
 
 	update(fileName: string, snapshot: IScriptSnapshot): void {
 		const source = snapshot.getText(0, snapshot.getLength());
-		const hasJsxSyntax = /\brender\s*\(/.test(source) || /<\w/.test(source);
-		const isJavaScriptFile = fileName.endsWith('.js') || fileName.endsWith('.jsx');
 
-		if (isJavaScriptFile) {
-			this.serviceExtension = hasJsxSyntax || fileName.endsWith('.jsx') ? '.jsx' : '.js';
-			this.scriptKind = this.serviceExtension === '.jsx' ? 2 : 1;
+		// Determine service extension from the original file extension.
+		// We must NOT use content heuristics (like /<\w/) because that
+		// matches TypeScript generics (e.g. <TData>) and would incorrectly
+		// assign .tsx to .ts files, causing a scriptKind mismatch crash.
+		if (fileName.endsWith('.jsx')) {
+			this.serviceExtension = '.jsx';
+			this.scriptKind = 2;
+		} else if (fileName.endsWith('.tsx')) {
+			this.serviceExtension = '.tsx';
+			this.scriptKind = 4;
+		} else if (fileName.endsWith('.js')) {
+			this.serviceExtension = '.js';
+			this.scriptKind = 1;
 		} else {
-			this.serviceExtension = hasJsxSyntax || fileName.endsWith('.tsx') ? '.tsx' : '.ts';
-			this.scriptKind = this.serviceExtension === '.tsx' ? 4 : 3;
+			this.serviceExtension = '.ts';
+			this.scriptKind = 3;
 		}
 
 		let code: string;
@@ -514,7 +522,7 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 				const filePath = fileName.startsWith('file://')
 					? decodeURIComponent(fileName.slice(7))
 					: fileName;
-				const content = fs.readFileSync(filePath, 'utf-8').slice(0, 4096);
+				const content = fs.readFileSync(filePath, 'utf-8');
 				if (isDarTsxFile(content)) {
 					return 'dartsx';
 				}
@@ -540,7 +548,7 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 
 			// For non-dartsx languageIds, verify content is actually DarTsx
 			if (languageId !== 'dartsx') {
-				const source = snapshot.getText(0, Math.min(snapshot.getLength(), 4096));
+				const source = snapshot.getText(0, snapshot.getLength());
 				if (!isDarTsxFile(source)) return undefined;
 			}
 

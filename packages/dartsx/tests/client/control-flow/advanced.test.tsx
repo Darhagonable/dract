@@ -257,3 +257,82 @@ describe('control-flow > reactive nested for + if', () => {
 		expect(sections[2].querySelectorAll('li').length).toBe(3);
 	});
 });
+
+describe('control-flow > nested if with derived data disposal', () => {
+	it('disposes inner effects when outer branch is removed', async () => {
+		component SelectionDetail() {
+			state selectedId: number | null = 1;
+
+			derived item = selectedId !== null
+				? { title: `Post ${selectedId}`, body: `Body of post ${selectedId}` }
+				: null;
+
+			render (
+				<div>
+					<button class="select" onclick={() => selectedId = 2}>select 2</button>
+					<button class="clear" onclick={() => selectedId = null}>clear</button>
+					{if (selectedId !== null) {
+						<div class="detail">
+							{if (item) {
+								<div>
+									<h4>{item.title}</h4>
+									<p>{item.body}</p>
+								</div>
+							}}
+						</div>
+					}}
+				</div>
+			);
+		}
+
+		mountComponent(SelectionDetail);
+		expect(container.querySelector('h4').textContent).toBe('Post 1');
+		expect(container.querySelector('p').textContent).toBe('Body of post 1');
+
+		// Change selection — inner effects should update
+		container.querySelector('.select').click();
+		await tick();
+		expect(container.querySelector('h4').textContent).toBe('Post 2');
+		expect(container.querySelector('p').textContent).toBe('Body of post 2');
+
+		// Clear selection — should not crash accessing item.title when item is null
+		container.querySelector('.clear').click();
+		await tick();
+		expect(container.querySelector('.detail')).toBeNull();
+		expect(container.querySelector('h4')).toBeNull();
+	});
+
+	it('disposes deeply nested if effects on outer branch swap', async () => {
+		component DeepNested() {
+			state show = true;
+			state data = { name: 'Alice', age: 30 };
+
+			render (
+				<div>
+					<button class="toggle" onclick={() => show = !show}>toggle</button>
+					<button class="nullify" onclick={() => { data = null as any; show = false; }}>nullify</button>
+					{if (show) {
+						<div class="outer">
+							{if (data) {
+								<div class="inner">
+									<span class="name">{data.name}</span>
+									<span class="age">{data.age}</span>
+								</div>
+							}}
+						</div>
+					}}
+				</div>
+			);
+		}
+
+		mountComponent(DeepNested);
+		expect(container.querySelector('.name').textContent).toBe('Alice');
+		expect(container.querySelector('.age').textContent).toBe('30');
+
+		// Simultaneously null data and hide — must not crash reading data.name
+		container.querySelector('.nullify').click();
+		await tick();
+		expect(container.querySelector('.outer')).toBeNull();
+		expect(container.querySelector('.inner')).toBeNull();
+	});
+});

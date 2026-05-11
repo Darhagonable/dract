@@ -33,16 +33,14 @@ export interface TransformResult {
 
 /**
  * Detect whether a .tsx file contains DarTsx syntax.
- * Only checks the first 4KB for performance.
  */
 export function isDarTsxFile(content: string): boolean {
-	const sample = content.slice(0, 4096);
-	return /\bcomponent\s+\w+\s*\(/.test(sample)
-		|| /\bstate\s+\w+/.test(sample)
-		|| /\bderived\s+\w+/.test(sample)
-		|| /\bderived\s+[{[]/.test(sample)
-		|| /\brender\s*[(<]/.test(sample)
-		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
+	return /\bcomponent\s+\w+\s*\(/.test(content)
+		|| /\bstate\s+\w+/.test(content)
+		|| /\bderived\s+\w+/.test(content)
+		|| /\bderived\s+[{[]/.test(content)
+		|| /\brender\s*[(<]/.test(content)
+		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(content);
 }
 
 /**
@@ -386,13 +384,28 @@ function findDefaultEquals(s: string): number {
 // ── state x = → let x = ───────────────────────────────────────────
 
 function transformStateDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+\w+)/g;
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+(\w+))/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		if (isInComment(commentRanges, match.index)) continue;
 		const stateStart = match.index + (match[1]?.length ?? 0);
 		const stateEnd = stateStart + 'state'.length;
 		ms.overwrite(stateStart, stateEnd, 'let');
+
+		// If there's a type annotation, move it to `satisfies T as T` on the
+		// initializer to prevent TS control-flow narrowing while keeping
+		// type validation. `state x: T = init;` → `let x = init satisfies T as T;`
+		const afterVar = stateEnd + match[2].length;
+		const colonIdx = source.indexOf(':', afterVar);
+		const eqIdx = source.indexOf('=', afterVar);
+		if (colonIdx !== -1 && eqIdx !== -1 && colonIdx < eqIdx) {
+			const typeText = source.slice(colonIdx + 1, eqIdx).trim();
+			ms.overwrite(colonIdx, eqIdx, ' ');
+			const semiIdx = source.indexOf(';', eqIdx);
+			if (semiIdx !== -1) {
+				ms.appendLeft(semiIdx, ` satisfies ${typeText} as ${typeText}`);
+			}
+		}
 	}
 }
 
@@ -490,9 +503,9 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 			if (/^if\s*\(/.test(kw) || /^for\s*[\s(]/.test(kw) || /^switch\s*\(/.test(kw) || /^try\s*\{/.test(kw)) {
 				ms.appendLeft(i + 1, '(() => { ');
 				ms.appendLeft(closeBrace, ' })()');
-				// Recurse inside to handle nested control flow in JSX
-				wrapControlFlowBlocks(ms, source, i + 1, closeBrace);
 			}
+			// Always recurse into brace blocks to find nested control flow
+			wrapControlFlowBlocks(ms, source, i + 1, closeBrace);
 
 			i = closeBrace + 1;
 			continue;

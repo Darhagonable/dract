@@ -23,12 +23,11 @@ const semanticLegend = new vscode.SemanticTokensLegend([
 ]);
 
 function isDarTsxContent(content: string): boolean {
-	const sample = content.slice(0, 4096);
-	return /\bcomponent\s+\w+\s*\(/.test(sample)
-		|| /\bstate\s+\w+\s*=/.test(sample)
-		|| /\bderived\s+\w+\s*=/.test(sample)
-		|| /\brender\s*\(/.test(sample)
-		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
+	return /\bcomponent\s+\w+\s*\(/.test(content)
+		|| /\bstate\s+\w+\s*=/.test(content)
+		|| /\bderived\s+\w+\s*=/.test(content)
+		|| /\brender\s*\(/.test(content)
+		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(content);
 }
 
 function tokenTypeIndex(type: 'keyword' | 'function' | 'variable' | 'parameter' | 'property' | 'string'): number {

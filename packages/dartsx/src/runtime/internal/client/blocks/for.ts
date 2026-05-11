@@ -1,8 +1,9 @@
-import { effect } from '../reactivity/effect';
+import { effect, collectEffects, disposeEffects, type Effect } from '../reactivity/effect';
 
 interface KeyedEntry {
 	key: unknown;
 	nodes: Node[];
+	effects: Effect[];
 }
 
 function collectNodes(result: unknown): Node[] {
@@ -46,11 +47,13 @@ export function for_block(
 
 		if (!keyFn) {
 			// No key function — simple rebuild
+			for (const entry of mapped) disposeEffects(entry.effects);
 			mapped = [];
 			for (let i = 0; i < items.length; i++) {
-				const nodes = collectNodes(bodyFn(items[i], i));
+				const result = collectEffects(() => bodyFn(items[i], i));
+				const nodes = collectNodes(result.value);
 				insertNodes(nodes, end);
-				mapped.push({ key: i, nodes });
+				mapped.push({ key: i, nodes, effects: result.effects });
 			}
 			return;
 		}
@@ -73,10 +76,15 @@ export function for_block(
 				oldMap.delete(key);
 			} else {
 				// Create new DOM nodes for this item
-				const nodes = collectNodes(bodyFn(items[i], i));
+				const result = collectEffects(() => bodyFn(items[i], i));
+				const nodes = collectNodes(result.value);
 				insertNodes(nodes, end);
-				newMapped.push({ key, nodes });
+				newMapped.push({ key, nodes, effects: result.effects });
 			}
+		}
+		// Dispose effects of removed entries
+		for (const entry of oldMap.values()) {
+			disposeEffects(entry.effects);
 		}
 
 		mapped = newMapped;

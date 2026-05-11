@@ -37,6 +37,10 @@ export interface Subscriber {
 	deps: Set<State>;
 	/** For derived: marks whether the cached value may be stale */
 	dirty: boolean;
+	/** Set when an effect is disposed — prevents execution after teardown */
+	disposed?: boolean;
+	/** Parent in the effect tree (the effect that was running when this one was created) */
+	parent?: Subscriber | null;
 }
 
 // ── Public helpers used by the rest of the runtime ─────────────────
@@ -54,7 +58,7 @@ export function setSubscriber(s: Subscriber | null): Subscriber | null {
 // ── Type guard ─────────────────────────────────────────────────────
 
 export function isSignal<T>(value: Signal<T> | T): value is Signal<T> {
-	return !!value && typeof value === 'object' && SIGNAL in value;
+	return !!value && (typeof value === 'object' || typeof value === 'function') && SIGNAL in value;
 }
 
 export function isState<T>(value: Signal<T> | T): value is State<T> {
@@ -86,20 +90,20 @@ function bridgeProxyToSignal(proxyValue: any, sig: State): void {
 export function state<T = undefined>(): State<T | undefined>
 export function state<T>(initialValue: T): State<T>
 export function state<T>(initialValue?: T): State<T> {
-	// Object/array: create proxy, then share subs between proxy root & State signal
-	const value = (typeof initialValue === 'object' && initialValue !== null && !isProxy(initialValue))
-		? proxy(initialValue)
-		: initialValue;
+	// Object/array/function: create proxy, then share subs between proxy root & State signal
+	const shouldWrap = (typeof initialValue === 'object' && initialValue !== null && !isProxy(initialValue))
+		|| typeof initialValue === 'function';
+	const value = shouldWrap ? proxy(initialValue) : initialValue;
 
 	const sig: State<T> = { v: value as T, version: 0, subs: new Set(), [SIGNAL]: true };
 
 	// Bridge: proxy root mutations should notify the State signal
-	if (typeof value === 'object' && value !== null && isProxy(value)) {
+	if ((typeof value === 'object' || typeof value === 'function') && value !== null && isProxy(value)) {
 		bridgeProxyToSignal(value, sig);
 	}
 
-	// Object/array state: wrap in signalProxy so deep access works directly
-	if (typeof value === 'object' && value !== null) {
+	// Object/array/function state: wrap in signalProxy so deep access works directly
+	if ((typeof value === 'object' || typeof value === 'function') && value !== null) {
 		return signalProxy(sig, (raw) => {
 			// Track the read so effects/deriveds subscribe to root changes
 			const sub = currentSubscriber;
@@ -149,12 +153,12 @@ export function set<T>(signal: Signal<T> | T, value: T): T {
 		signal[SETTER](value);
 		return value;
 	}
-	// Auto-proxy object values being stored in a signal (for reassignable objects)
-	const stored = (typeof value === 'object' && value !== null) ? proxy(value) : value;
+	// Auto-proxy object/function values being stored in a signal (for reassignable objects)
+	const stored = ((typeof value === 'object' || typeof value === 'function') && value !== null) ? proxy(value) : value;
 	if (Object.is(signal.v, stored)) return value;
 	signal.v = stored;
 	// Re-bridge new proxy to signal so future mutations notify subscribers
-	if (typeof stored === 'object' && stored !== null && isProxy(stored)) {
+	if ((typeof stored === 'object' || typeof stored === 'function') && stored !== null && isProxy(stored)) {
 		bridgeProxyToSignal(stored, signal);
 	}
 	notify(signal);

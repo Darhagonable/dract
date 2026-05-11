@@ -427,7 +427,7 @@ function upgradeBindingKinds(
 			if (prevName?.startsWith(STATE_MARKER)) {
 				binding.kind = 'state';
 				binding.exported = exported;
-				if (decl.init && isProxyInit(decl.init)) binding.proxy = true;
+				if (decl.init && isProxyInit(decl.init, scope)) binding.proxy = true;
 			}
 			if (prevName?.startsWith(DERIVED_MARKER)) {
 				binding.kind = 'derived';
@@ -474,6 +474,53 @@ function upgradeBindingKinds(
 			if (stmt.type === 'BlockStatement') {
 				const blockScope = scopes.get(stmt) || scope;
 				visitStmts(stmt.body, blockScope);
+			}
+
+			// Recurse into if/else
+			if (stmt.type === 'IfStatement') {
+				if (stmt.consequent.type === 'BlockStatement') {
+					const blockScope = scopes.get(stmt.consequent) || scope;
+					visitStmts(stmt.consequent.body, blockScope);
+				}
+				if (stmt.alternate) {
+					if (stmt.alternate.type === 'BlockStatement') {
+						const blockScope = scopes.get(stmt.alternate) || scope;
+						visitStmts(stmt.alternate.body, blockScope);
+					} else {
+						visitStmts([stmt.alternate], scope);
+					}
+				}
+			}
+
+			// Recurse into loops
+			if (stmt.type === 'ForStatement' || stmt.type === 'ForInStatement' || stmt.type === 'ForOfStatement' || stmt.type === 'WhileStatement' || stmt.type === 'DoWhileStatement') {
+				if (stmt.body.type === 'BlockStatement') {
+					const blockScope = scopes.get(stmt.body) || scope;
+					visitStmts(stmt.body.body, blockScope);
+				}
+			}
+
+			// Recurse into switch cases
+			if (stmt.type === 'SwitchStatement') {
+				for (const c of stmt.cases) {
+					visitStmts(c.consequent, scope);
+				}
+			}
+
+			// Recurse into try/catch/finally
+			if (stmt.type === 'TryStatement') {
+				if (stmt.block) {
+					const blockScope = scopes.get(stmt.block) || scope;
+					visitStmts(stmt.block.body, blockScope);
+				}
+				if (stmt.handler?.body) {
+					const blockScope = scopes.get(stmt.handler.body) || scope;
+					visitStmts(stmt.handler.body.body, blockScope);
+				}
+				if (stmt.finalizer) {
+					const blockScope = scopes.get(stmt.finalizer) || scope;
+					visitStmts(stmt.finalizer.body, blockScope);
+				}
 			}
 
 			// Export wrapped function declarations
@@ -720,10 +767,35 @@ function extractFunctionDecl(node: AstNode): FnInfo | null {
 
 /**
  * Detect whether a state initializer will produce a proxy at runtime.
+ * Known non-proxyable types return false; identifiers are resolved recursively
+ * through their bindings when possible (like Svelte's should_proxy).
  */
-function isProxyInit(initNode: Expression): boolean {
-	const t = initNode.type;
-	return t === 'ObjectExpression' || t === 'ArrayExpression' || t === 'NewExpression';
+function isProxyInit(node: Expression, scope: Scope | null): boolean {
+	switch (node.type) {
+		case 'Literal':
+		case 'TemplateLiteral':
+		case 'ArrowFunctionExpression':
+		case 'FunctionExpression':
+		case 'UnaryExpression':
+		case 'BinaryExpression':
+		case 'LogicalExpression':
+		case 'ConditionalExpression':
+		case 'SequenceExpression':
+		case 'TaggedTemplateExpression':
+		case 'MemberExpression':
+			return false;
+		case 'Identifier':
+			if (node.name === 'undefined') return false;
+			if (scope) {
+				const binding = scope.get(node.name);
+				if (binding && !binding.reassigned && binding.initial) {
+					return isProxyInit(binding.initial as Expression, null);
+				}
+			}
+			return false;
+		default:
+			return true;
+	}
 }
 
 /**

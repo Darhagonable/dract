@@ -10,13 +10,13 @@ export interface DarTsxTransformContext {
 
 function isDarTsxSource(code: string): boolean {
 	// Strip comments and string literals to avoid false positives from JSDoc, etc.
-	const sample = code.slice(0, 4096).replace(
+	const sample = code.replace(
 		/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g,
 		(_, str) => str ?? ''
 	);
 	return /\bcomponent\s+\w+\s*\(/.test(sample)
-		|| /\bstate\s+\w+\s*=/.test(sample)
-		|| /\bderived\s+\w+\s*=/.test(sample)
+		|| /\bstate\s+\w+\s*[=:]/.test(sample)
+		|| /\bderived\s+\w+\s*[=:]/.test(sample)
 		|| /\bderived\s+[{[]/.test(sample);
 }
 

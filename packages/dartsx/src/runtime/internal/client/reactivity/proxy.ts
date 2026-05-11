@@ -21,7 +21,7 @@ export function getProxyState(p: any): State | undefined {
 }
 
 export function isProxy(value: unknown): boolean {
-	return !!value && typeof value === 'object' && STATE_SYMBOL in value;
+	return !!value && (typeof value === 'object' || typeof value === 'function') && STATE_SYMBOL in value;
 }
 
 // ── Signal proxy (value-forwarding wrapper) ────────────────────────
@@ -50,55 +50,69 @@ export function signalProxy<T extends object>(
 	signal: T,
 	getValue: (raw: T) => unknown,
 ): T {
-	const p = new Proxy<T>(signal, {
-		get(target, key) {
-			if (key === SIGNAL) return true;
-			if (key === SETTER) return (target as any)[SETTER];
+	// If the value is a function, we need a callable target for the proxy
+	// so that [[Call]] is available as an internal method.
+	const currentValue = getValue(signal);
+	const target = typeof currentValue === 'function'
+		? Object.assign(function () { }, { [SIGNAL]: true }) as unknown as T
+		: signal;
 
-			const value = getValue(target);
+	const p = new Proxy<T>(target, {
+		get(_target, key) {
+			if (key === SIGNAL) return true;
+			if (key === SETTER) return (signal as any)[SETTER];
+
+			const value = getValue(signal);
 			if (value == null) return undefined;
 
 			const prop = (value as any)[key];
 			if (typeof prop === 'function') return prop.bind(value);
 			return prop;
 		},
-		set(target, key, newValue) {
+		set(_target, key, newValue) {
 			if (key === SETTER) {
-				(target as any)[SETTER] = newValue;
+				(signal as any)[SETTER] = newValue;
 				return true;
 			}
-			const current = getValue(target);
+			const current = getValue(signal);
 			if (!isObjectLike(current)) return false;
 			return Reflect.set(current, key, newValue);
 		},
-		has(target, key) {
+		has(_target, key) {
 			if (key === SIGNAL) return true;
-			if (key === SETTER) return SETTER in target;
-			const value = getValue(target);
+			if (key === SETTER) return SETTER in signal;
+			const value = getValue(signal);
 			return isObjectLike(value) ? key in value : false;
 		},
-		ownKeys(target) {
-			const value = getValue(target);
+		ownKeys(_target) {
+			const value = getValue(signal);
 			return isObjectLike(value) ? Reflect.ownKeys(value) : [];
 		},
-		getOwnPropertyDescriptor(target, key) {
+		getOwnPropertyDescriptor(_target, key) {
 			if (key === SIGNAL) {
 				return { configurable: true, enumerable: false, value: true, writable: false };
 			}
-			if (key === SETTER && SETTER in target) {
-				return { configurable: true, enumerable: false, value: target[SETTER], writable: true };
+			if (key === SETTER && SETTER in signal) {
+				return { configurable: true, enumerable: false, value: (signal as any)[SETTER], writable: true };
 			}
-			const value = getValue(target);
+			const value = getValue(signal);
 			if (!isObjectLike(value)) return undefined;
 			const desc = Reflect.getOwnPropertyDescriptor(value, key);
 			if (!desc) return undefined;
 			return { ...desc, configurable: true };
 		},
-		deleteProperty(target, key) {
+		deleteProperty(_target, key) {
 			if (key === SIGNAL || key === SETTER) return false;
-			const value = getValue(target);
+			const value = getValue(signal);
 			if (!isObjectLike(value)) return false;
 			return Reflect.deleteProperty(value, key);
+		},
+		apply(_target, thisArg, argList) {
+			const value = getValue(signal);
+			if (typeof value === 'function') {
+				return Reflect.apply(value, thisArg, argList);
+			}
+			throw new TypeError('not a function');
 		},
 	});
 
@@ -129,6 +143,7 @@ function isPlainObject(value: any): value is Record<string | symbol, any> {
 }
 
 function shouldProxy(value: any): boolean {
+	if (typeof value === 'function') return true;
 	if (typeof value !== 'object' || value === null) return false;
 	if (isProxy(value)) return false; // already proxied
 	return (
@@ -145,7 +160,8 @@ function shouldProxy(value: any): boolean {
 // ── Main entry ─────────────────────────────────────────────────────
 
 export function proxy<T>(value: T, _parentRoot?: State): T {
-	if (typeof value !== 'object' || value === null) return value;
+	if (typeof value !== 'object' && typeof value !== 'function') return value;
+	if (value === null) return value;
 	if (!shouldProxy(value)) return value;
 	if (proxyCache.has(value)) return proxyCache.get(value);
 

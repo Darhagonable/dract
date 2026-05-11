@@ -1,4 +1,4 @@
-import { effect } from '../reactivity/effect';
+import { effect, collectEffects, disposeEffects, type Effect } from '../reactivity/effect';
 
 export function if_block(
 	condFn: () => unknown,
@@ -12,21 +12,31 @@ export function if_block(
 	frag.appendChild(end);
 
 	let currentBranch: boolean | null = null;
+	let branchEffects: Effect[] = [];
 
 	effect(() => {
 		const cond = !!condFn();
 		if (cond === currentBranch) return;
 		currentBranch = cond;
 
+		// Dispose inner effects from previous branch
+		disposeEffects(branchEffects);
+		branchEffects = [];
+
 		while (start.nextSibling !== end) {
 			start.nextSibling!.remove();
 		}
 
-		const result = cond ? trueFn() : (falseFn ? falseFn() : null);
-		if (result instanceof Node) {
-			end.parentNode!.insertBefore(result, end);
-		} else if (result != null && result !== false && result !== true) {
-			end.parentNode!.insertBefore(document.createTextNode(String(result)), end);
+		const result = collectEffects(() => {
+			return cond ? trueFn() : (falseFn ? falseFn() : null);
+		});
+		branchEffects = result.effects;
+
+		const node = result.value;
+		if (node instanceof Node) {
+			end.parentNode!.insertBefore(node, end);
+		} else if (node != null && node !== false && node !== true) {
+			end.parentNode!.insertBefore(document.createTextNode(String(node)), end);
 		}
 	});
 

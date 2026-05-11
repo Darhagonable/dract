@@ -43,6 +43,12 @@ export function analyze(relativePath: string, inputDir: string): PackageFile {
 	}
 
 	if (name.endsWith('.ts')) {
+		const fullPath = path.join(inputDir, name);
+		const content = fs.readFileSync(fullPath, 'utf-8');
+		if (isDarTsxFile(content)) {
+			// DarTsx .ts files ship as .ts — consumer's vite plugin compiles them
+			return { name, dest: name, isDartsx: true, isDeclaration: false };
+		}
 		// .ts → .js
 		return { name, dest: name.replace(/\.ts$/, '.js'), isDartsx: false, isDeclaration: false };
 	}

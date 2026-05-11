@@ -24,6 +24,10 @@ export function rewriteImportExtensions(
 		if (!importPath.startsWith('.')) return importPath;
 
 		if (importPath.endsWith('.ts')) {
+			const resolved = resolveRelative(currentFile, importPath);
+			if (dartsxFiles.has(resolved)) {
+				return importPath;
+			}
 			return importPath.slice(0, -3) + '.js';
 		}
 
@@ -41,6 +45,10 @@ export function rewriteImportExtensions(
 			// Check if target is a DarTsx file (.tsx that we ship as source)
 			if (dartsxFiles.has(resolved + '.tsx')) {
 				return importPath + '.tsx';
+			}
+			// Check if target is a DarTsx file (.ts that we ship as source)
+			if (dartsxFiles.has(resolved + '.ts')) {
+				return importPath + '.ts';
 			}
 			// Check if target is a .ts file (becomes .js)
 			if (allFiles.has(resolved + '.ts')) {
