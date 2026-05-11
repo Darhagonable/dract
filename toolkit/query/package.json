@@ -1,5 +1,5 @@
 {
-	"name": "@dartsx-toolkit/router",
+	"name": "@dartsx-toolkit/query",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",

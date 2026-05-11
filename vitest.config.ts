@@ -40,6 +40,16 @@ export default defineConfig({
 					include: ['packages/vite-plugin/tests/*.test.ts'],
 				},
 			},
+			{
+				plugins: [dartsx()],
+				test: {
+					name: 'query',
+					include: ['toolkit/query/tests/*.test.tsx'],
+					environment: 'jsdom',
+					setupFiles: ['packages/dartsx/tests/setup-client.js'],
+					globals: true,
+				},
+			},
 		],
 	},
 });

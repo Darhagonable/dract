@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"declaration": true,
+		"declarationMap": true,
+		"sourceMap": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"jsx": "preserve",
+		"outDir": "dist",
+		"rootDir": "."
+	},
+	"include": ["src", "tests"]
+}

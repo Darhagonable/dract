@@ -9,6 +9,7 @@ import { RouterDemo } from "./RouterDemo";
 import { EffectDemo } from "./EffectDemo";
 import { StorageSyncDemo } from "./StorageSyncDemo";
 import { HtmlDemo } from "./HtmlDemo";
+import { QueryDemo } from "./QueryDemo";
 import { test } from "./helper-test";
 
 export default component App() {
@@ -49,6 +50,8 @@ export default component App() {
       <StorageSyncDemo />
       <hr />
       <HtmlDemo />
+      <hr />
+      <QueryDemo />
       <hr />
       <RouterDemo />
     </div>

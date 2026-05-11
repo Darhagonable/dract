@@ -26,6 +26,7 @@ export const docs: DocEntry[] = [
 
 	// Toolkit
 	{ slug: 'router', title: 'Router', group: 'Toolkit' },
+	{ slug: 'query', title: 'Query', group: 'Toolkit' },
 
 	// Under the Hood
 	{ slug: 'how-it-works', title: 'How It Works', group: 'Under the Hood' },
