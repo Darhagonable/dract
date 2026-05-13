@@ -12,7 +12,9 @@ function SearchBox() {
 
 	return $.jsx("ul", {
 		children: [
-			$.for(() => $.get(results), (r) => $.jsx("li", { children: [r] }))
+			$.for(() => $.get(results), (r) => {
+				$.jsx("li", { children: [r] });
+			})
 		]
 	});
 }

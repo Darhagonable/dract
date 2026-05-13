@@ -1,25 +1,31 @@
 {
 	"scopeName": "source.dartsx.render.injection",
-	"injectionSelector": "L:source.js, L:source.js.jsx, L:source.jsx, L:source.ts, L:source.tsx",
+	"injectionSelector": "L:source.js - comment, L:source.js.jsx - comment, L:source.jsx - comment, L:source.ts - comment, L:source.tsx - comment, L:meta.embedded.expression.tsx - comment, L:meta.embedded.expression.js - comment, L:meta.objectliteral.tsx - comment, L:meta.objectliteral.js - comment",
 	"patterns": [
 		{ "include": "#component" },
 		{ "include": "#state" },
 		{ "include": "#derived" },
 		{ "include": "#render-inline" },
-		{ "include": "#render-block" }
+		{ "include": "#render-block" },
+		{ "include": "#jsx-control-keywords" },
+		{ "include": "#jsx-tag" }
 	],
 	"repository": {
 		"component": {
-			"begin": "\\b(component)\\s+([A-Za-z_$][\\w$]*)\\s*(\\()",
+			"begin": "(?:\\b(export)\\s+(?:(default)\\s+)?(?:(async)\\s+)?)?\\b(component)\\s+([A-Za-z_$][\\w$]*)\\s*(\\()",
 			"beginCaptures": {
-				"1": { "name": "storage.type.component.dartsx" },
-				"2": { "name": "entity.name.function.component.dartsx" },
-				"3": { "name": "punctuation.definition.parameters.begin.tsx" }
+				"1": { "name": "keyword.control.export.tsx" },
+				"2": { "name": "keyword.control.default.tsx" },
+				"3": { "name": "storage.modifier.async.tsx" },
+				"4": { "name": "storage.type.component.dartsx" },
+				"5": { "name": "entity.name.function.component.dartsx" },
+				"6": { "name": "punctuation.definition.parameters.begin.tsx" }
 			},
 			"end": "(\\))\\s*(?=\\{)",
 			"endCaptures": {
 				"1": { "name": "punctuation.definition.parameters.end.tsx" }
 			},
+			"contentName": "meta.parameters.tsx",
 			"patterns": [
 				{
 					"match": "\\b(bind)(?=\\s+(?:['\"]|[A-Za-z_$]))",
@@ -30,37 +36,35 @@
 					"name": "keyword.control.as.dartsx"
 				},
 				{
-					"match": "\\b(string|number|boolean|any|void|never|undefined|null|unknown|object|bigint|symbol)\\b",
-					"name": "support.type.primitive.ts"
-				},
-				{
-					"match": "\\b([A-Z][\\w$]*)\\b",
-					"name": "entity.name.type.ts"
-				},
-				{
-					"match": "\\.\\.\\.",
-					"name": "keyword.operator.spread.ts"
-				},
-				{
-					"include": "source.tsx#string"
-				},
-				{
-					"include": "source.tsx#numeric-literal"
+					"include": "source.tsx#function-parameters-body"
 				}
 			]
 		},
 		"state": {
-			"match": "\\b(state)\\s+([A-Za-z_$][\\w$]*)",
-			"captures": {
-				"1": { "name": "storage.type.state.dartsx" },
-				"2": { "name": "variable.other.readwrite.tsx" }
-			}
+			"begin": "(?:(export)\\s+)?\\b(state)\\s+([A-Za-z_$][\\w$]*)",
+			"beginCaptures": {
+				"1": { "name": "keyword.control.export.tsx" },
+				"2": { "name": "storage.type.state.dartsx" },
+				"3": { "name": "variable.other.readwrite.tsx" }
+			},
+			"end": "(?=;|$)",
+			"patterns": [
+				{ "include": "source.tsx#type-annotation" },
+				{ "include": "source.tsx#expression" }
+			]
 		},
 		"derived": {
-			"match": "\\b(derived)\\s+(?=[A-Za-z_$\\{\\[])",
-			"captures": {
-				"1": { "name": "storage.type.derived.dartsx" }
-			}
+			"begin": "(?:(export)\\s+)?\\b(derived)\\s+([A-Za-z_$][\\w$]*)",
+			"beginCaptures": {
+				"1": { "name": "keyword.control.export.tsx" },
+				"2": { "name": "storage.type.derived.dartsx" },
+				"3": { "name": "variable.other.constant.tsx" }
+			},
+			"end": "(?=;|$)",
+			"patterns": [
+				{ "include": "source.tsx#type-annotation" },
+				{ "include": "source.tsx#expression" }
+			]
 		},
 		"render-inline": {
 			"begin": "\\b(render)\\s*(?=<)",
@@ -74,7 +78,7 @@
 				"1": { "name": "keyword.control.render.dartsx" },
 				"2": { "name": "meta.brace.round.tsx" }
 			},
-			"end": "^(\\s*)(\\))",
+			"end": "^(\\s*)(\\));?\\s*$",
 			"endCaptures": { "2": { "name": "meta.brace.round.tsx" } },
 			"patterns": [{ "include": "#jsx" }]
 		},
@@ -112,20 +116,20 @@
 			"patterns": [
 				{ "include": "#jsx" },
 				{ "include": "#jsx-control-keywords" },
-				{ "include": "source.tsx#var-expr" },
-				{ "include": "source.tsx#expression" },
-				{ "include": "source.tsx#punctuation-semicolon" }
+				{ "include": "source.tsx#statements" }
 			]
 		},
 		"jsx-control-keywords": {
 			"patterns": [
 				{ "match": "\\b(if|else)\\b", "name": "keyword.control.conditional.tsx" },
 				{ "match": "\\b(for|while|do)\\b", "name": "keyword.control.loop.tsx" },
-				{ "match": "\\b(break|continue)\\b", "name": "keyword.control.loop.tsx" },
+				{ "match": "\\b(const|let|var)\\b", "name": "storage.type.tsx" },
+				{ "match": "\\b(of|in)\\b", "name": "keyword.operator.expression.of.tsx" },
+				{ "match": "\\b(break|continue|return)\\b", "name": "keyword.control.flow.tsx" },
 				{ "match": "\\b(switch|case|default)\\b", "name": "keyword.control.switch.tsx" },
 				{ "match": "\\b(try|catch|finally|throw)\\b", "name": "keyword.control.trycatch.tsx" },
-				{ "match": "\\b(return)\\b", "name": "keyword.control.flow.tsx" },
-				{ "match": "\\b(index)\\b", "name": "keyword.other.dartsx" }
+				{ "match": "\\b(pending)\\b", "name": "keyword.control.dartsx" },
+				{ "match": "\\b(index|key)\\b", "name": "keyword.other.dartsx" }
 			]
 		},
 		"jsx-attributes": {

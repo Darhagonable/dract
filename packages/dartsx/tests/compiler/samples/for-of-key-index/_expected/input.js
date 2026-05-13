@@ -5,7 +5,13 @@ function App() {
 
 	return $.jsx("ul", {
 		children: [
-			$.for(() => $.get(todos), (todo, i) => $.jsx("li", { children: [todo.text] }), (todo) => todo.id)
+			$.for(
+				() => $.get(todos),
+				(todo, i) => {
+					$.jsx("li", { children: [todo.text] });
+				},
+				(todo) => todo.id
+			)
 		]
 	});
 }

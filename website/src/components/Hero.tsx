@@ -75,7 +75,7 @@ export component Hero() {
                 <div class="pt-4 pl-4">
                   <TrafficLightsIcon />
                   <div class="mt-4 flex space-x-2 text-xs">
-                    {for (const tab of tabs) {
+                    {for (const tab of tabs) (
                       <div
                         key={tab.name}
                         class={`flex h-6 rounded-full ${tab.isActive ? 'bg-linear-to-r from-sky-400/30 via-sky-400 to-sky-400/30 p-px font-medium text-sky-300' : 'text-slate-500'}`}
@@ -84,7 +84,7 @@ export component Hero() {
                           {tab.name}
                         </div>
                       </div>
-                    }}
+										)}
                   </div>
                   <div class="mt-6 flex items-start px-1 text-sm">
                     <div aria-hidden="true" class="border-r border-slate-300/5 pr-4 font-mono text-[13px] leading-[1.7] text-slate-600 select-none" innerHTML={lineNumbers.replace(/\n/g, '<br/>')} />

@@ -3,14 +3,14 @@ component App() {
   render (
     <div>
       {if (mode === 'a') {
-        if (mode === 'a') {
+        if (mode === 'a') (
           <p>Nested A</p>
-        } else {
+        ) else (
           <p>Nested B</p>
-        }
-      } else {
+        )
+      } else (
         <span>Fallback</span>
-      }}
+      )}
     </div>
   )
 }

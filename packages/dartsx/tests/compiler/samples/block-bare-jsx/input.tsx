@@ -1,7 +1,7 @@
 component App() {
   render (
     <div>
-      { const msg = 'hi'; <p>{msg}</p> }
+      { const msg = 'hi'; render <p>{msg}</p> }
     </div>
   )
 }

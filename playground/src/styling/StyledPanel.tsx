@@ -8,9 +8,9 @@ export component StyledPanel(children, title: string = "Panel") {
         <h4>{title}</h4>
         <span class="toggle">{collapsed ? "▸" : "▾"}</span>
       </div>
-      {if (!collapsed) {
-        render <div class="panel-body">{children}</div>
-      }}
+      {if (!collapsed) (
+        <div class="panel-body">{children}</div>
+      )}
     </div>
     <style>
       .panel {

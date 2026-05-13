@@ -58,9 +58,9 @@ describe('component > anonymous-block', () => {
 				<ul>
 					{
 						const items = ['a', 'b', 'c']
-						for (const item of items) {
+						for (const item of items) (
 							<li>{item}</li>
-						}
+						)
 					}
 				</ul>
 			);
@@ -80,9 +80,9 @@ describe('component > anonymous-block', () => {
 				<div>
 					{
 						const greeting = 'Hello'
-						if (true) {
+						if (true) (
 							<p>{greeting}</p>
-						}
+						)
 					}
 				</div>
 			);
@@ -96,7 +96,7 @@ describe('component > anonymous-block', () => {
 		component Test() {
 			render (
 				<div>
-					{ const x = 'bare'; <span>{x}</span> }
+					{ const x = 'bare'; render <span>{x}</span> }
 				</div>
 			);
 		}

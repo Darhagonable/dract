@@ -1,21 +1,63 @@
 # Control Flow
 
+Control flow blocks are embedded directly in JSX using curly braces. They follow the same semantics as JavaScript arrow functions:
+
+- **Expression body** — bare JSX or parenthesized expression, implicit render
+- **Block body `{}`** — requires explicit `render`, just like `return` in a block arrow
+
 ## If statements
 
-If blocks can be embedded directly in JSX-like expressions using curly braces. This makes control flow easier to read and reason about.
+### Expression body — direct JSX
+
+A single JSX element after the condition is rendered directly:
 
 ```tsx
-export component Truthy(x) {
+{if (loggedIn) <p>Welcome back!</p>}
+```
+
+### Expression body — parenthesized
+
+Use parentheses to group a larger expression across multiple lines:
+
+```tsx
+{if (loggedIn) (
+  <div>
+    <h2>Welcome back!</h2>
+    <p>You have 3 new messages.</p>
+  </div>
+) else (
+  <p>Please sign in.</p>
+)}
+```
+
+### Block body — explicit render
+
+Use a block when you need logic before rendering. `render` is required, just like `return` in a block arrow:
+
+```tsx
+{if (loggedIn) {
+  const user = getUser();
   render (
     <div>
-      {if (x) {
-        <span>x is truthy</span>
-      } else {
-        <span>x is falsy</span>
-      }}
+      <h2>Welcome, {user.name}</h2>
+      <p>{user.email}</p>
     </div>
-  );
-}
+  )
+} else {
+  render (<p>Please sign in.</p>)
+}}
+```
+
+### if / else if / else
+
+```tsx
+{if (status === 'loading') (
+  <Spinner />
+) else if (status === 'error') (
+  <p>Something went wrong.</p>
+) else (
+  <Content data={data} />
+)}
 ```
 
 ## Early render (guard clauses)
@@ -43,131 +85,118 @@ export component AuthGate() {
 
 ## Switch statements
 
-Switch statements let you conditionally render content based on a value. They work with both static and reactive values.
+### Expression body
+
+Each case renders a bare JSX expression:
 
 ```tsx
-export component StatusIndicator(status) {
-  render (
-    <div>
-      {switch (status) {
-        case 'init':
-          // fall-through to the next
-        case 'loading':
-          <p>Loading...</p>
-          break;
-        case 'success':
-          <p>Success!</p>
-          break;
-        case 'error':
-          <p>Error!</p>
-          break;
-        default:
-          <p>Unknown status</p>
-      }}
-    </div>
-  );
-}
+{switch (status) {
+  case 'loading': <Spinner />; break;
+  case 'success': <p>Done!</p>; break;
+  case 'error': <p>Failed.</p>; break;
+  default: <p>Unknown</p>
+}}
 ```
 
-You can also use reactive values with switch statements.
+### Block body — explicit render
+
+Use a block per case when you need logic:
 
 ```tsx
-export component InteractiveStatus() {
-  state status = 'loading';
-
-  render (
-    <div>
-      <button onclick={() => status = 'success'}>Success</button>
-      <button onclick={() => status = 'error'}>Error</button>
-
-      <div>
-        {switch (status) {
-          case 'init':
-            <p>Init</p>
-            // fall-through to the next
-          case 'loading':
-            <p>Loading...</p>
-            break;
-          case 'success':
-            <p>Success!</p>
-            break;
-          case 'error':
-            <p>Error!</p>
-            break;
-          default:
-            <p>Unknown status</p>
-        }}
-      </div>
-    </div>
-  );
-}
+{switch (status) {
+  case 'loading': {
+    render (<Spinner />)
+    break;
+  }
+  case 'error': {
+    const msg = formatError(error);
+    render (<p class="error">{msg}</p>)
+    break;
+  }
+  default: {
+    render (<Content />)
+  }
+}}
 ```
+
+Cases support fall-through (omit `break`), just like regular JavaScript switch statements.
 
 ## For statements
 
-You can render collections using a `for...of` loop embedded in JSX.
+### Expression body — direct JSX
 
 ```tsx
-component ListView(title, items) {
-  render (
-    <div>
-      <h2>{title}</h2>
-      <ul>
-        {for (const item of items) {
-          <li>{item.text}</li>
-        }}
-      </ul>
-    </div>
-  );
-}
-
-// usage
-export default component App() {
-  render (
-    <ListView
-      title="My List"
-      items={[
-        { text: "Item 1" },
-        { text: "Item 2" },
-        { text: "Item 3" },
-      ]}
-    />
-  );
-}
+{for (const item of items) <li>{item.text}</li>}
 ```
 
-The `for...of` loop has built-in support for accessing the loop's numerical index using `index`:
+### Expression body — parenthesized
 
 ```tsx
-{for (const item of items; index i) {
-  <div>{item.label} at index {i}</div>
+{for (const item of items) (
+  <li>
+    <span>{item.name}</span>
+    <span>{item.price}</span>
+  </li>
+)}
+```
+
+### Block body — explicit render
+
+```tsx
+{for (const item of items) {
+  const cls = item.active ? 'active' : 'inactive';
+  render (
+    <li class={cls}>{item.name.toUpperCase()}</li>
+  )
 }}
 ```
 
-You can also provide a `key` for efficient list updates and reconciliation:
+### Index and key
+
+Access the loop index and provide a key for efficient reconciliation:
 
 ```tsx
-{for (const item of items; index i; key item.id) {
-  <div>{item.label} at index {i}</div>
-}}
+{for (const item of items; index i; key item.id) (
+  <li>{i}: {item.name}</li>
+)}
+```
+
+### Other loop types
+
+```tsx
+// C-style for loop
+{for (let i = 0; i < 5; i++) <span>{i}</span>}
+
+// for...in
+{for (const key in obj) <li>{key}: {obj[key]}</li>}
+
+// Destructuring
+{for (const { name, age } of people) (
+  <p>{name} is {age}</p>
+)}
 ```
 
 ## Try statements (Error Boundaries)
 
-Try blocks enable error boundaries — when the runtime encounters an error in the `try` block, you can render a fallback in the `catch` block.
+### Expression body
 
 ```tsx
-export component ErrorBoundary() {
-  render (
-    <div>
-      {try {
-        <ComponentThatFails />
-      } catch (e) {
-        <div>An error occurred! {e.message}</div>
-      }}
-    </div>
-  );
-}
+{try (
+  <ComponentThatFails />
+) catch (e) (
+  <p>Error: {e.message}</p>
+)}
+```
+
+### Block body — explicit render
+
+```tsx
+{try {
+  render (<RiskyComponent />)
+} catch (e) {
+  const msg = formatError(e);
+  render (<div class="error">{msg}</div>)
+}}
 ```
 
 ## Async (Suspense boundaries)
@@ -193,13 +222,13 @@ Wrap the component in a `try/pending` block to handle the suspended state:
 ```tsx
 export component App() {
   render (
-    {try {
+    {try (
       <UserProfile id={1} />
-    } pending {
+    ) pending (
       <p>Loading...</p>
-    } catch (e) {
+    ) catch (e) (
       <p>Error: {e.message}</p>
-    }}
+    )}
   );
 }
 ```

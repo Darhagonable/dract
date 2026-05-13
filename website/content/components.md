@@ -56,11 +56,11 @@ component Button(label: string = "Click me", variant: string = "primary") {
 ```tsx
 component Avatar(src?: string) {
   render (
-    {if (src) {
+    {if (src) (
       <img src={src} />
-    } else {
+    ) else (
       <div class="placeholder">?</div>
-    }}
+    )}
   )
 }
 ```
@@ -138,9 +138,9 @@ export component App() {
   render (
     <div>
       <Button label="Toggle" onClick={() => open = !open} />
-      {if (open) {
-        <p>Visible!</p>
-      }}
+      {if (open)
+			  <p>Visible!</p>
+			}
     </div>
   )
 }

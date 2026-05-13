@@ -46,7 +46,7 @@ export component MobileNavigation() {
       <button type="button" onclick={open} class="relative" aria-label="Open navigation">
         <MenuIcon />
       </button>
-      {if (isOpen) {
+      {if (isOpen) (
         <div
           class="fixed inset-0 z-50 flex items-start overflow-y-auto bg-slate-900/50 pr-10 backdrop-blur lg:hidden"
           aria-label="Navigation"
@@ -64,7 +64,7 @@ export component MobileNavigation() {
             <Navigation className="mt-5 px-1" />
           </div>
         </div>
-      }}
+      )}
     </div>
   )
 }

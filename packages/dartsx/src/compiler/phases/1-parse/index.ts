@@ -10,8 +10,6 @@ import {
 	type BindingPattern,
 	type BindingProperty,
 	type BindingRestElement,
-	type IfStatement,
-	type Statement,
 	type SwitchStatement,
 } from 'oxc-parser';
 
@@ -864,114 +862,45 @@ function findStatementEnd(code: string, start: number): number {
 // ── Control flow block transformation ──────────────────────────────
 
 /**
- * Wraps a control flow block body as an arrow function callback.
- * Detects block-render patterns (statements + `return (...)` from
- * step-4 preprocessing) and produces a block-body arrow; otherwise
- * produces an inline arrow: `(params) => (<>body</>)`.
+ * Wrap a body string as an arrow function.
+ * Maps 1:1 to arrow function semantics — the body IS the arrow body:
+ * - `{ stmts }` → `() => { stmts }`
+ * - `(expr)` → `() => (expr)`
+ * - `<jsx/>` → `() => (<><jsx/></>)`
+ * - `expr` → `() => (expr)`
+ *
+ * Special cases:
+ * - Block with `return` (from `render`) but missing outer braces → wraps in `{ }`
+ * - Nested CF statement → recursively transforms and fragment-wraps
  */
 function buildCFCallback(body: string, params?: string): string {
 	const arrow = params ? `(${params}) =>` : `() =>`;
-
-	// JSX body: starts with `<` (element/fragment)
-	// → wrap in fragment so OXC parses as JSX children.
-	// Check this FIRST: even if the body contains nested callbacks with `return`,
-	// a body that starts with `<` is JSX and needs fragment wrapping.
 	const trimmed = body.trim();
-	if (trimmed.startsWith('<')) {
-		return `${arrow} (<>${body}</>)`;
+
+	// Block body: `{ ... }` → `() => { ... }`
+	if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+		const inner = trimmed.slice(1, -1).trim();
+		// Block containing only a CF statement → transform to expression body
+		if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(inner)) {
+			const transformed = transformControlFlowBlocks(`{${inner}}`);
+			return `${arrow} (${transformed.slice(1, -1).trim()})`;
+		}
+		return `${arrow} ${body}`;
 	}
 
-	// Transformed render block: body contains `return (...)` from step-4/4b preprocessing.
-	// This matches multi-statement bodies like `const x = ...; return (<>...</>)`.
-	// Only match `return` at the top level (not inside nested `{ }` braces) to avoid
-	// false matches on nested CF callbacks.
-	if (containsTopLevelReturn(body)) {
-		return `${arrow} { ${body} }`;
-	}
-
-	// Nested control flow statement in branch body: the body is a bare
-	// `if/for/switch/try` statement (not a JSX expression container).
-	// E.g. inside `{if (a) { if (b) { <X/> } else { <Y/> } } else { <Z/> }}`
-	// the outer true-branch body is `if (b) { ... } else { ... }`.
-	// Wrap as `{body}` and recursively transform so it becomes `{__if(...)}`,
-	// then wrap the result as a JSX fragment.
-	if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*\{)/.test(trimmed)) {
+	// Nested CF statement → transform and fragment-wrap
+	if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(trimmed)) {
 		const transformed = transformControlFlowBlocks(`{${body}}`);
 		return `${arrow} (<>${transformed}</>)`;
 	}
 
-	// Bare JS expression (count, "text", 6, {name: "John"}.name, etc.)
-	// → return directly without wrapping in JSX fragment
+	// Bare JSX → fragment-wrap
+	if (trimmed.startsWith('<')) {
+		return `${arrow} (<>${body}</>)`;
+	}
+
+	// Expression
 	return `${arrow} (${body})`;
-}
-
-/** Check if body contains a `return` keyword at the top brace level (not inside nested { }) */
-function containsTopLevelReturn(body: string): boolean {
-	let depth = 0;
-	for (let i = 0; i < body.length; i++) {
-		const ch = body[i];
-		if (ch === '{') depth++;
-		else if (ch === '}') depth--;
-		else if (ch === "'" || ch === '"') {
-			const q = ch;
-			i++;
-			while (i < body.length && body[i] !== q) { if (body[i] === '\\') i++; i++; }
-		} else if (ch === '`') {
-			i++;
-			while (i < body.length && body[i] !== '`') { if (body[i] === '\\') i++; i++; }
-		} else if (depth === 0 && ch === 'r') {
-			const slice = body.slice(i, i + 7);
-			if (/^return[\s(]/.test(slice) && (i === 0 || !/\w/.test(body[i - 1]))) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-/**
- * Wraps bare-JSX brace bodies with a fragment expression so OXC can parse them.
- * Finds `{ <jsx>... }` patterns (whose trimmed content starts with `<` and
- * doesn't already contain a top-level `return`) and wraps the inner content
- * in `(<>...</>)`. Skips parens (conditions) to avoid touching object literals.
- */
-function wrapJSXBranchBodies(text: string): string {
-	let result = '';
-	let i = 0;
-	while (i < text.length) {
-		if (text[i] === "'" || text[i] === '"') {
-			const end = skipString(text, i);
-			result += text.slice(i, end);
-			i = end;
-			continue;
-		}
-		if (text[i] === '`') {
-			const end = skipTemplateLiteral(text, i);
-			result += text.slice(i, end);
-			i = end;
-			continue;
-		}
-		// Skip parentheses entirely (conditions, sub-expressions) to avoid
-		// wrapping object literals like `if ({a:1}.a) {`
-		if (text[i] === '(') {
-			const close = findMatchingParen(text, i);
-			result += text.slice(i, close + 1);
-			i = close + 1;
-			continue;
-		}
-		if (text[i] === '{') {
-			const close = findMatchingBrace(text, i);
-			const inner = text.slice(i + 1, close).trim();
-			if (inner.startsWith('<') && !containsTopLevelReturn(inner)) {
-				result += '{ (<>' + text.slice(i + 1, close) + '</>) }';
-				i = close + 1;
-				continue;
-			}
-		}
-		result += text[i];
-		i++;
-	}
-	return result;
 }
 
 interface ControlFlowResult {
@@ -1148,7 +1077,7 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 	if (/^if\s*\(/.test(rest)) return tryParseIfBlock(code, openBrace);
 	if (/^for\s*\(/.test(rest)) return tryParseForBlock(code, openBrace);
 	if (/^switch\s*\(/.test(rest)) return tryParseSwitchBlock(code, openBrace);
-	if (/^try\s*\{/.test(rest)) return tryParseTryBlock(code, openBrace);
+	if (/^try\s*[({]/.test(rest)) return tryParseTryBlock(code, openBrace);
 
 	// ── Case 2: Block scope (starts with variable declaration) ──
 	if (/^(?:const |let |var )/.test(rest)) {
@@ -1160,15 +1089,15 @@ function tryParseJSXBlock(code: string, openBrace: number): ControlFlowResult | 
 }
 
 /**
- * Parses a block scope `{ stmts; body }` where body is render/CF/bare-JSX.
+ * Parses a block scope `{ stmts; body }` where body is render/CF.
  *
  * By the time we get here, `render <jsx>` has already become `return (<>jsx</>)`
  * from step 4b. We split the content into preamble statements and a trailing
- * body (CF keyword, return, or bare JSX), then emit `__block(() => { ... })`.
+ * body (CF keyword or return), then emit `__block(() => { ... })`.
  */
 function tryParseBlock(content: string, outerClose: number): ControlFlowResult | null {
-	// Scan for where the body starts: the first top-level CF keyword,
-	// `return` (from render), or `<` (bare JSX).
+	// Scan for where the body starts: the first top-level CF keyword
+	// or `return` (from render).
 	let bodyIdx = -1;
 	let i = 0;
 	while (i < content.length) {
@@ -1180,8 +1109,7 @@ function tryParseBlock(content: string, outerClose: number): ControlFlowResult |
 
 		const tail = content.slice(i);
 		const wb = i === 0 || !/\w/.test(content[i - 1]);
-		if (wb && /^(?:if\s*\(|for\s*\(|switch\s*\(|try\s*\{|return[\s(])/.test(tail)) { bodyIdx = i; break; }
-		if (ch === '<' && /[A-Za-z]/.test(content[i + 1] || '') && content[i + 1] !== '=' && content[i + 1] !== '<') { bodyIdx = i; break; }
+		if (wb && /^(?:if\s*\(|for\s*\(|switch\s*\(|try\s*[({]|return[\s(])/.test(tail)) { bodyIdx = i; break; }
 		i++;
 	}
 	if (bodyIdx === -1) return null;
@@ -1201,9 +1129,6 @@ function tryParseBlock(content: string, outerClose: number): ControlFlowResult |
 		// CF keyword — transform through CF handlers, wrap result as return
 		const transformed = transformControlFlowBlocks(`{${body}}`);
 		finalBody = `return (<>${transformed}</>)`;
-	} else if (body.startsWith('<')) {
-		// Bare JSX — wrap as return
-		finalBody = `return (<>${body}</>)`;
 	} else {
 		return null;
 	}
@@ -1211,83 +1136,96 @@ function tryParseBlock(content: string, outerClose: number): ControlFlowResult |
 	return { text: `{__block(() => { ${preamble} ${finalBody} })}`, end: outerClose + 1 };
 }
 
+/**
+ * Extract a branch body starting at position `pos` in `text`.
+ * Returns the raw body text ready to be passed to `buildCFCallback`.
+ */
+function extractBody(text: string, pos: number): { body: string; end: number } | null {
+	if (pos >= text.length) return null;
+	const ch = text[pos];
+
+	if (ch === '{') {
+		const close = findMatchingBrace(text, pos);
+		return { body: text.slice(pos, close + 1), end: close + 1 };
+	}
+
+	if (ch === '(') {
+		const close = findMatchingParen(text, pos);
+		let inner = text.slice(pos + 1, close).trim();
+		if (inner.startsWith('<')) inner = `<>${inner}</>`;
+		return { body: `(${inner})`, end: close + 1 };
+	}
+
+	if (ch === '<') {
+		const end = findJSXElementEnd(text, pos);
+		return { body: text.slice(pos, end), end };
+	}
+
+	const end = findExpressionEnd(text, pos);
+	return { body: text.slice(pos, end), end };
+}
+
 function tryParseIfBlock(code: string, outerBrace: number): ControlFlowResult | null {
-	// Find the matching brace of the JSX expression container {if (...) {...}}
 	const outerClose = findMatchingBrace(code, outerBrace);
 	const content = code.slice(outerBrace + 1, outerClose).trim();
 
 	if (!content.startsWith('if')) return null;
 
-	// Recursively transform nested control flow blocks first,
-	// so the content becomes valid TSX that OXC can parse.
+	// Recursively transform nested control flow blocks first.
 	const transformed = transformControlFlowBlocks(content);
 
-	// Wrap bare-JSX branch bodies in fragments so OXC can parse them.
-	// E.g. `{ <A/><B/> }` → `{ (<><A/><B/></>) }` since multiple bare
-	// JSX elements in a block aren't valid JS expression statements.
-	const wrapped = wrapJSXBranchBodies(transformed);
+	// Text-based parsing — no OXC needed.
+	// The body after `if (cond)` maps 1:1 to an arrow function body.
+	const output = parseIfChain(transformed);
+	if (!output) return null;
 
-	// Parse the transformed if statement with OXC.
-	// If bodies contain `return` (from block-render), wrap in a function
-	// so the return is valid.
-	let source = wrapped;
-	let result = oxcParseSync('if-block.tsx', source, {
-		sourceType: 'script',
-		lang: 'tsx',
-	});
-	if (result.errors.length > 0) {
-		source = `function __(){${wrapped}}`;
-		result = oxcParseSync('if-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
-		if (result.errors.length > 0) return null;
-		const fnDecl = result.program.body[0];
-		if (!fnDecl || fnDecl.type !== 'FunctionDeclaration') return null;
-		if (!fnDecl.body) return null;
-		const firstStmt = fnDecl.body.body[0];
-		if (!firstStmt || firstStmt.type !== 'IfStatement') return null;
-		const output = buildIfCall(source, firstStmt);
-		return { text: `{${output}}`, end: outerClose + 1 };
-	}
-
-	const firstStmt = result.program.body[0];
-	if (!firstStmt || firstStmt.type !== 'IfStatement') return null;
-
-	const output = buildIfCall(source, firstStmt);
 	return { text: `{${output}}`, end: outerClose + 1 };
 }
 
 /**
- * Recursively build __if() calls from an OXC IfStatement AST node.
- * Handles else-if chains naturally through AST recursion.
+ * Parse an if/else-if/else chain by text scanning.
+ * Returns the `__if(...)` call string.
  */
-function buildIfCall(source: string, stmt: IfStatement): string {
-	const condition = source.slice(stmt.test.start, stmt.test.end);
-	const trueBody = extractBranchBody(source, stmt.consequent);
+function parseIfChain(text: string): string | null {
+	let pos = 0;
 
-	if (stmt.alternate) {
-		if (stmt.alternate.type === 'IfStatement') {
-			// else if — recurse to build nested __if, wrapped in expression container
-			const nestedCall = buildIfCall(source, stmt.alternate);
-			return `__if(() => (${condition}), ${buildCFCallback(trueBody)}, () => (<>{${nestedCall}}</>))`;
+	// Skip `if`
+	if (text.slice(pos, pos + 2) !== 'if') return null;
+	pos += 2;
+	while (pos < text.length && /\s/.test(text[pos])) pos++;
+
+	// Extract condition
+	if (text[pos] !== '(') return null;
+	const condEnd = findMatchingParen(text, pos);
+	const condition = text.slice(pos + 1, condEnd);
+	pos = condEnd + 1;
+	while (pos < text.length && /\s/.test(text[pos])) pos++;
+
+	// Extract consequent body
+	const trueBranch = extractBody(text, pos);
+	if (!trueBranch) return null;
+	pos = trueBranch.end;
+	while (pos < text.length && /\s/.test(text[pos])) pos++;
+
+	// Check for else
+	if (pos < text.length && text.slice(pos, pos + 4) === 'else' && !/\w/.test(text[pos + 4] || '')) {
+		pos += 4;
+		while (pos < text.length && /\s/.test(text[pos])) pos++;
+
+		// else if → recurse
+		if (text.slice(pos, pos + 2) === 'if') {
+			const nestedCall = parseIfChain(text.slice(pos));
+			if (!nestedCall) return null;
+			return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, () => (<>{${nestedCall}}</>))`;
 		}
-		// else block
-		const falseBody = extractBranchBody(source, stmt.alternate);
-		return `__if(() => (${condition}), ${buildCFCallback(trueBody)}, ${buildCFCallback(falseBody)})`;
+
+		// else body
+		const falseBranch = extractBody(text, pos);
+		if (!falseBranch) return null;
+		return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, ${buildCFCallback(falseBranch.body)})`;
 	}
 
-	return `__if(() => (${condition}), ${buildCFCallback(trueBody)})`;
-}
-
-/** Extract body text from a branch node — strips braces for BlockStatement, uses full text otherwise */
-function extractBranchBody(source: string, node: Statement): string {
-	if (node.type === 'BlockStatement') {
-		const inner = source.slice(node.start + 1, node.end - 1).trim();
-		// Unwrap fragment added by wrapJSXBranchBodies: `(<>...</>)` → inner JSX
-		if (inner.startsWith('(<>') && inner.endsWith('</>)')) {
-			return inner.slice(3, -4);
-		}
-		return inner;
-	}
-	return source.slice(node.start, node.end).trim();
+	return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)})`;
 }
 
 function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult | null {
@@ -1302,17 +1240,15 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
 	const parenEnd = findMatchingParen(content, parenStart);
 	const fullHeader = content.slice(parenStart + 1, parenEnd).trim();
 
-	// Extract body (everything after the header parens)
+	// Extract body (everything after the header parens), keep braces if present
 	const bodyText = content.slice(parenEnd + 1).trim();
-	let body: string;
+	let transformedBody: string;
 	if (bodyText.startsWith('{') && bodyText.endsWith('}')) {
-		body = bodyText.slice(1, -1).trim();
+		const inner = bodyText.slice(1, -1).trim();
+		transformedBody = `{${transformControlFlowBlocks(inner)}}`;
 	} else {
-		body = bodyText;
+		transformedBody = transformControlFlowBlocks(bodyText);
 	}
-
-	// Recursively transform nested control flow
-	const transformedBody = transformControlFlowBlocks(body);
 
 	// Try parsing the full header to determine loop type
 	const forSource = `for (${fullHeader}) {}`;
@@ -1413,18 +1349,15 @@ function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResul
 	// Recursively transform nested control flow blocks first
 	const transformed = transformControlFlowBlocks(content);
 
-	// Wrap bare-JSX branch bodies in fragments for OXC parsing
-	const wrapped = wrapJSXBranchBodies(transformed);
-
 	// Parse the transformed switch statement with OXC.
 	// If cases contain `return` (from block-render), wrap in a function.
-	let source = wrapped;
+	let source = transformed;
 	let result = oxcParseSync('switch-block.tsx', source, {
 		sourceType: 'script',
 		lang: 'tsx',
 	});
 	if (result.errors.length > 0) {
-		source = `function __(){${wrapped}}`;
+		source = `function __(){${transformed}}`;
 		result = oxcParseSync('switch-block.tsx', source, { sourceType: 'script', lang: 'tsx' });
 		if (result.errors.length > 0) return null;
 		const fnDecl = result.program.body[0];
@@ -1497,7 +1430,9 @@ function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discrimi
 		} else {
 			args.push(`[${g.values.join(', ')}]`);
 		}
-		args.push(buildCFCallback(g.body));
+		// Case bodies with statements (from `render` → `return`) need braces
+		const body = /\breturn\b/.test(g.body) ? `{${g.body}}` : g.body;
+		args.push(buildCFCallback(body));
 	}
 
 	const output = `__switch(${args.join(', ')})`;
@@ -1510,15 +1445,24 @@ function tryParseTryBlock(code: string, outerBrace: number): ControlFlowResult |
 
 	if (!content.startsWith('try')) return null;
 
-	// Manually parse: try { ... } [pending { ... }] [catch (param) { ... }]
+	// Manually parse: try {/( ... }/)} [pending {/( ... }/) ] [catch (param) {/( ... }/)]
 	// Can't use OXC because "pending { }" isn't valid JavaScript
+	// Supports both block `{ }` and expression `( )` delimiters
 	let pos = 3; // skip "try"
 	while (pos < content.length && /\s/.test(content[pos])) pos++;
-	if (content[pos] !== '{') return null;
 
-	const tryBodyEnd = findMatchingBrace(content, pos);
-	const tryBody = content.slice(pos + 1, tryBodyEnd).trim();
-	pos = tryBodyEnd + 1;
+	let tryBody: string;
+	if (content[pos] === '{') {
+		const tryBodyEnd = findMatchingBrace(content, pos);
+		tryBody = content.slice(pos, tryBodyEnd + 1);
+		pos = tryBodyEnd + 1;
+	} else if (content[pos] === '(') {
+		const tryBodyEnd = findMatchingParen(content, pos);
+		tryBody = content.slice(pos + 1, tryBodyEnd).trim();
+		pos = tryBodyEnd + 1;
+	} else {
+		return null;
+	}
 
 	let catchParam: string | null = null;
 	let catchBody: string | null = null;
@@ -1534,10 +1478,17 @@ function tryParseTryBlock(code: string, outerBrace: number): ControlFlowResult |
 		if (remaining.startsWith('pending')) {
 			pos += 7;
 			while (pos < content.length && /\s/.test(content[pos])) pos++;
-			if (content[pos] !== '{') return null;
-			const pendEnd = findMatchingBrace(content, pos);
-			pendingBody = content.slice(pos + 1, pendEnd).trim();
-			pos = pendEnd + 1;
+			if (content[pos] === '{') {
+				const pendEnd = findMatchingBrace(content, pos);
+				pendingBody = content.slice(pos, pendEnd + 1);
+				pos = pendEnd + 1;
+			} else if (content[pos] === '(') {
+				const pendEnd = findMatchingParen(content, pos);
+				pendingBody = content.slice(pos + 1, pendEnd).trim();
+				pos = pendEnd + 1;
+			} else {
+				return null;
+			}
 		} else if (remaining.startsWith('catch')) {
 			pos += 5;
 			while (pos < content.length && /\s/.test(content[pos])) pos++;
@@ -1550,19 +1501,32 @@ function tryParseTryBlock(code: string, outerBrace: number): ControlFlowResult |
 			}
 
 			while (pos < content.length && /\s/.test(content[pos])) pos++;
-			if (content[pos] !== '{') return null;
-			const catchEnd = findMatchingBrace(content, pos);
-			catchBody = content.slice(pos + 1, catchEnd).trim();
-			pos = catchEnd + 1;
+			if (content[pos] === '{') {
+				const catchEnd = findMatchingBrace(content, pos);
+				catchBody = content.slice(pos, catchEnd + 1);
+				pos = catchEnd + 1;
+			} else if (content[pos] === '(') {
+				const catchEnd = findMatchingParen(content, pos);
+				catchBody = content.slice(pos + 1, catchEnd).trim();
+				pos = catchEnd + 1;
+			} else {
+				return null;
+			}
 		} else {
 			break;
 		}
 	}
 
-	// Transform nested control flow in bodies
-	const transformedTryBody = transformControlFlowBlocks(tryBody);
-	const transformedCatchBody = catchBody ? transformControlFlowBlocks(catchBody) : null;
-	const transformedPendingBody = pendingBody ? transformControlFlowBlocks(pendingBody) : null;
+	// Transform nested control flow in bodies (only inner content for block bodies)
+	const transformedTryBody = tryBody.startsWith('{')
+		? `{${transformControlFlowBlocks(tryBody.slice(1, -1))}}`
+		: transformControlFlowBlocks(tryBody);
+	const transformedCatchBody = catchBody
+		? (catchBody.startsWith('{') ? `{${transformControlFlowBlocks(catchBody.slice(1, -1))}}` : transformControlFlowBlocks(catchBody))
+		: null;
+	const transformedPendingBody = pendingBody
+		? (pendingBody.startsWith('{') ? `{${transformControlFlowBlocks(pendingBody.slice(1, -1))}}` : transformControlFlowBlocks(pendingBody))
+		: null;
 
 	// Build __try call: tryFn [, catchFn] [, pendingFn]
 	let call = `__try(${buildCFCallback(transformedTryBody)}`;

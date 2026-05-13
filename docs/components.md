@@ -88,11 +88,11 @@ component Button(label: string = "Click me", variant: "primary" | "secondary" = 
 component Avatar(src?: string, alt: string = "User avatar") {
   render (
     <div>
-      {if (src) {
+      {if (src) (
         <img src={src} alt={alt} />
-      } else {
+      ) else (
         <div class="avatar-placeholder">{alt[0]}</div>
-      }}
+      )}
     </div>
   );
 }
@@ -225,14 +225,14 @@ component Button(label: string, onClick: () => void) {
 
 component Dialog(title: string, children, isOpen: boolean) {
   render (
-    {if (isOpen) {
+    {if (isOpen) (
       <div class="dialog-overlay">
         <div class="dialog">
           <h2>{title}</h2>
           {children}
         </div>
       </div>
-    }}
+    )}
   );
 }
 

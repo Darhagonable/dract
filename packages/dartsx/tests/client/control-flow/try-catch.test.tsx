@@ -9,11 +9,11 @@ describe('control-flow > try catch', () => {
 
 		component TryCatchBlock() {
 			render (
-				{try {
+				{try (
 					<BrokenComponent />
-				} catch (e) {
+				) catch (e) (
 					<span>caught</span>
-				}}
+				)}
 			);
 		}
 
@@ -34,13 +34,13 @@ describe('control-flow > try pending catch', () => {
 
 		component TryPendingCatchBlock() {
 			render (
-				{try {
+				{try (
 					<AsyncContent />
-				} pending {
+				) pending (
 					<span>loading</span>
-				} catch (e) {
+				) catch (e) (
 					<span>error</span>
-				}}
+				)}
 			);
 		}
 

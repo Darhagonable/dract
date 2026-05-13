@@ -3,12 +3,14 @@ component Test() {
 
   render (
     {for (const item of items) {
-      <div>
-        {if (item.ok) {
-          <span>{item.a}</span>
-          <span>{item.b}</span>
-        }}
-      </div>
+      render (
+        <div>
+          {if (item.ok) (
+            <span>{item.a}</span>
+            <span>{item.b}</span>
+          )}
+        </div>
+      )
     }}
   )
 }

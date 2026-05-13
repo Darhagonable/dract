@@ -169,11 +169,11 @@ setTodos(prev => {
 #### This Framework
 ```tsx
 <div>
-  {if (isLoading) {
+  {if (isLoading) (
     <p>Loading...</p>
-  } else {
+  ) else (
     <p>Done!</p>
-  }}
+  )}
 </div>
 ```
 
@@ -202,9 +202,9 @@ setTodos(prev => {
 #### This Framework
 ```tsx
 <ul>
-  {for (const item of items; key item.id) {
+  {for (const item of items; key item.id) (
     <li>{item.name}</li>
-  }}
+  )}
 </ul>
 ```
 
@@ -585,11 +585,11 @@ useEffect(() => {
 ### This Framework
 ```tsx
 <div>
-  {try {
+  {try (
     <RiskyComponent />
-  } catch (e) {
+  ) catch (e) (
     <p>Error: {e.message}</p>
-  }}
+  )}
 </div>
 ```
 
@@ -610,7 +610,7 @@ useEffect(() => {
 **Key Differences:**
 - This framework has built-in try/catch in templates
 - React requires a separate Error Boundary component
-- Svelte includes a built in <svelte:boundary> component 
+- Svelte includes a built in <svelte:boundary> component
 - This framework integrates error handling directly into control flow
 
 ---
@@ -631,13 +631,13 @@ async component UserProfile(id: number) {
 }
 
 // Usage with suspense
-{try {
+{try (
   <UserProfile id={1} />
-} pending {
+) pending (
   <p>Loading...</p>
-} catch (e) {
+) catch (e) (
   <p>Error: {e.message}</p>
-}}
+)}
 ```
 
 ### React

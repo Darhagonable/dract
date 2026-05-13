@@ -2,11 +2,11 @@ component App() {
   state show = true
   render (
     <div>
-      {if (show) {
+      {if (show) (
         <p>Visible</p>
-      } else {
+      ) else (
         <span>Hidden</span>
-      }}
+      )}
     </div>
   )
 }

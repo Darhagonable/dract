@@ -139,9 +139,9 @@ describe('component > object and array props', () => {
 		component List(items) {
 			render (
 				<ul>
-					{for (const item of items) {
+					{for (const item of items) (
 						<li>{item}</li>
-					}}
+					)}
 				</ul>
 			);
 		}
@@ -183,9 +183,9 @@ describe('component > object and array props', () => {
 		component Tags(items) {
 			render (
 				<ul>
-					{for (const t of items) {
+					{for (const t of items) (
 						<li>{t}</li>
-					}}
+					)}
 				</ul>
 			);
 		}

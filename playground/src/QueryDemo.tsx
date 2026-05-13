@@ -48,41 +48,41 @@ export component QueryDemo() {
       <h2>Query Demo</h2>
 
       <h3>Posts List</h3>
-      {if (posts.loading) {
+      {if (posts.loading) (
         <p>Loading posts...</p>
-      }}
-      {if (posts.error) {
+      )}
+      {if (posts.error) (
         <p>Error: {(posts.error as Error).message}</p>
-      }}
-      {if (posts.data) {
+      )}
+      {if (posts.data) (
         <ul>
-          {for (const p of posts.data) {
+          {for (const p of posts.data) (
             <li key={p.id}>
               <button onclick={() => selectedId = p.id}>{p.title}</button>
             </li>
-          }}
+          )}
         </ul>
-      }}
+      )}
       <button onclick={() => posts.refetch()}>Refetch Posts</button>
 
-      {if (selectedId !== null) {
+      {if (selectedId !== null) (
         <div>
           <h3>Selected Post</h3>
-          {if (post.loading) {
+          {if (post.loading) (
             <p>Loading post...</p>
-          }}
-          {if (post.error) {
+          )}
+          {if (post.error) (
             <p>Error: {(post.error as unknown as Error).message}</p>
-          }}
-          {if (post.data) {
+          )}
+          {if (post.data) (
             <div>
               <h4>{post.data!.title}</h4>
               <p>{post.data!.body}</p>
             </div>
-          }}
+          )}
           <button onclick={() => selectedId = null}>Clear Selection</button>
         </div>
-      }}
+      )}
 
       <hr />
       <h3>Actions Demo</h3>
@@ -125,12 +125,12 @@ component CreatePostForm() {
       >
         {createPost.loading ? 'Creating...' : 'Create Post'}
       </button>
-      {if (createPost.error) {
+      {if (createPost.error) (
         <p style="color: red">Error: {(createPost.error as Error).message}</p>
-      }}
-      {if (createPost.success && createPost.data) {
+      )}
+      {if (createPost.success && createPost.data) (
         <p style="color: green">Created post #{createPost.data.id}: {createPost.data.title}</p>
-      }}
+      )}
       <button onclick={() => createPost.reset()} disabled={!createPost.success && !createPost.error}>
         Reset
       </button>
@@ -161,12 +161,12 @@ component DeletePostDemo() {
       >
         {deletePost.loading ? 'Deleting...' : `Delete Post #${postId}`}
       </button>
-      {if (deletePost.error) {
+      {if (deletePost.error) (
         <p style="color: red">Error: {(deletePost.error as Error).message}</p>
-      }}
-      {if (deletePost.success) {
+      )}
+      {if (deletePost.success) (
         <p style="color: green">Post deleted successfully!</p>
-      }}
+      )}
     </div>
   )
 }

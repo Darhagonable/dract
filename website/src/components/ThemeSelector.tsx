@@ -87,9 +87,9 @@ export component ThemeSelector(className: string = '') {
         <LightIcon className={`h-4 w-4 ${selectedTheme === 'system' && !document.documentElement.classList.contains('dark') ? 'fill-slate-400' : 'hidden'}`} />
         <DarkIcon className={`h-4 w-4 ${selectedTheme === 'system' && document.documentElement.classList.contains('dark') ? 'fill-slate-400' : 'hidden'}`} />
       </button>
-      {if (isOpen) {
+      {if (isOpen) (
         <div class="absolute top-full left-1/2 mt-3 w-36 -translate-x-1/2 space-y-1 rounded-xl bg-white p-3 text-sm font-medium shadow-md shadow-black/5 ring-1 ring-black/5 dark:bg-slate-800 dark:ring-white/5">
-          {for (const theme of themes) {
+          {for (const theme of themes) (
             <button
               key={theme.value}
               type="button"
@@ -97,21 +97,21 @@ export component ThemeSelector(className: string = '') {
               class={`flex w-full cursor-pointer items-center rounded-[0.625rem] p-1 ${selectedTheme === theme.value ? 'text-sky-500' : 'text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900/40'}`}
             >
               <div class="rounded-md bg-white p-1 shadow ring-1 ring-slate-900/5 dark:bg-slate-700 dark:ring-inset dark:ring-white/5">
-                {if (theme.value === 'light') {
+                {if (theme.value === 'light') (
                   <LightIcon className={`h-4 w-4 ${selectedTheme === theme.value ? 'fill-sky-400' : 'fill-slate-400'}`} />
-                }}
-                {if (theme.value === 'dark') {
+                )}
+                {if (theme.value === 'dark') (
                   <DarkIcon className={`h-4 w-4 ${selectedTheme === theme.value ? 'fill-sky-400' : 'fill-slate-400'}`} />
-                }}
-                {if (theme.value === 'system') {
+                )}
+                {if (theme.value === 'system') (
                   <SystemIcon className={`h-4 w-4 ${selectedTheme === theme.value ? 'fill-sky-400' : 'fill-slate-400'}`} />
-                }}
+                )}
               </div>
               <div class="ml-3">{theme.name}</div>
             </button>
-          }}
+          )}
         </div>
-      }}
+      )}
     </div>
   )
 }

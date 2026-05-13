@@ -16,9 +16,9 @@ describe('control-flow > for with nested if', () => {
 						render (
 							<li>
 								{item.text}
-								{if (item.highlight) {
+								{if (item.highlight) (
 									<strong> ★</strong>
-								}}
+								)}
 							</li>
 						)
 					}}
@@ -51,11 +51,11 @@ describe('control-flow > for with nested if-else', () => {
 						render (
 							<li>
 								{item.text}:
-								{if (item.role === 'admin') {
+								{if (item.role === 'admin') (
 									<span class="badge">Admin</span>
-								} else {
+								) else (
 									<span class="badge">User</span>
-								}}
+								)}
 							</li>
 						)
 					}}
@@ -127,18 +127,18 @@ describe('control-flow > nested for with conditional children', () => {
 
 			render (
 				<ol>
-					{for (const group of groups) {
+					{for (const group of groups) (
 						<li>
 							{group.name}
-							{if (group.children.length > 0) {
+							{if (group.children.length > 0) (
 								<ol>
 									{for (const child of group.children) {
 										render ( <li>{child}</li> )
 									}}
 								</ol>
-							}}
+							)}
 						</li>
-					}}
+					)}
 				</ol>
 			);
 		}
@@ -224,15 +224,15 @@ describe('control-flow > reactive nested for + if', () => {
 						render (
 							<section>
 								<h3>{group.name}</h3>
-								{if (group.children.length > 0) {
+								{if (group.children.length > 0) (
 									<ul>
 										{for (const child of group.children) {
 											render ( <li>{child}</li> )
 										}}
 									</ul>
-								} else {
+								) else (
 									<p>empty</p>
-								}}
+								)}
 							</section>
 						)
 					}}
@@ -271,16 +271,16 @@ describe('control-flow > nested if with derived data disposal', () => {
 				<div>
 					<button class="select" onclick={() => selectedId = 2}>select 2</button>
 					<button class="clear" onclick={() => selectedId = null}>clear</button>
-					{if (selectedId !== null) {
+					{if (selectedId !== null) (
 						<div class="detail">
-							{if (item) {
+							{if (item) (
 								<div>
 									<h4>{item.title}</h4>
 									<p>{item.body}</p>
 								</div>
-							}}
+							)}
 						</div>
-					}}
+					)}
 				</div>
 			);
 		}
@@ -311,16 +311,16 @@ describe('control-flow > nested if with derived data disposal', () => {
 				<div>
 					<button class="toggle" onclick={() => show = !show}>toggle</button>
 					<button class="nullify" onclick={() => { data = null as any; show = false; }}>nullify</button>
-					{if (show) {
+					{if (show) (
 						<div class="outer">
-							{if (data) {
+							{if (data) (
 								<div class="inner">
 									<span class="name">{data.name}</span>
 									<span class="age">{data.age}</span>
 								</div>
-							}}
+							)}
 						</div>
-					}}
+					)}
 				</div>
 			);
 		}

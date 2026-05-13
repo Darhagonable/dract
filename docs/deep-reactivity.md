@@ -162,7 +162,7 @@ Converts custom keywords into valid TSX that OXC can parse:
 | `derived doubled = count * 2` | `const doubled = count * 2` |
 | `render (...)` | `return (<>...</>)` |
 | `bind:{x}` | `bind:value={x}` |
-| `{if (cond) { ... }}` | `{__if(() => (cond), () => (<>...</>))}` |
+| `{if (cond) <jsx />}` | `{__if(() => (cond), () => (<>...</>))}` |
 
 The preprocessor also records metadata: which names are state vars, which are derived vars, and which functions are components.
 

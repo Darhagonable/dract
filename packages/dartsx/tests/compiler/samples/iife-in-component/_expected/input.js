@@ -15,7 +15,9 @@ export default function IIFEComponent() {
 
 	return $.jsx("ul", {
 		children: [
-			$.for(() => $.get(grouped), (g) => $.jsx("li", { children: [g.label, ": ", g.upper] }))
+			$.for(() => $.get(grouped), (g) => {
+				return $.jsx("li", { children: [g.label, ": ", g.upper] });
+			})
 		]
 	});
 }

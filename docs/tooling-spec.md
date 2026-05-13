@@ -41,11 +41,13 @@ DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts
 ### Inline Control Flow
 | Syntax | Example |
 |---|---|
-| `{if (cond) { <jsx /> }}` | `{if (x) { <p>yes</p> } else { <p>no</p> }}` |
-| `{switch (val) { case ...: <jsx /> }}` | `{switch (status) { case 'ok': <p>OK</p> break; }}` |
-| `{for (const x of items) { ... }}` | `{for (const item of list) { <li>{item}</li> }}` |
-| `{try { <jsx /> } catch (e) { <jsx /> }}` | `{try { <Body /> } catch (e) { <ErrorView /> }}` |
-| `{try { <jsx /> } pending { <jsx /> } catch { ... }}` | Suspense-style flow |
+| `{if (cond) <jsx />}` | `{if (x) <p>yes</p>}` |
+| `{if (cond) (<jsx />) else (<jsx />)}` | `{if (x) (<p>yes</p>) else (<p>no</p>)}` |
+| `{if (cond) { render (<jsx />) }}` | `{if (x) { render (<p>yes</p>) } else { render (<p>no</p>) }}` |
+| `{switch (val) { case ...: <jsx /> }}` | `{switch (status) { case 'ok': <p>OK</p>; break; }}` |
+| `{for (const x of items) <jsx />}` | `{for (const item of list) <li>{item}</li>}` |
+| `{try (<jsx />) catch (e) (<jsx />)}` | `{try (<Body />) catch (e) (<ErrorView />)}` |
+| `{try (<jsx />) pending (<jsx />) catch ...}` | Suspense-style flow |
 
 ## 3. Tooling Goals
 

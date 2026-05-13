@@ -12,9 +12,9 @@ describe('control-flow > for basic', () => {
 
 			render (
 				<ul>
-					{for (const item of items) {
+					{for (const item of items) (
 						<li>{item.text}</li>
-					}}
+					)}
 				</ul>
 			);
 		}
@@ -35,9 +35,9 @@ describe('control-flow > for with index', () => {
 
 			render (
 				<ul>
-					{for (const item of items; index i) {
+					{for (const item of items; index i) (
 						<li>{i}: {item}</li>
-					}}
+					)}
 				</ul>
 			);
 		}
@@ -62,9 +62,9 @@ describe('control-flow > for with key', () => {
 			render (
 				<button onclick={() => items.reverse()}>reverse</button>
 				<ul>
-					{for (const item of items; key item.id) {
+					{for (const item of items; key item.id) (
 						<li>{item.text}</li>
-					}}
+					)}
 				</ul>
 			);
 		}
@@ -95,9 +95,9 @@ describe('control-flow > for with key and index (index first)', () => {
 			render (
 				<button onclick={() => items.reverse()}>reverse</button>
 				<ul>
-					{for (const item of items; index i; key item.id) {
+					{for (const item of items; index i; key item.id) (
 						<li>{i}: {item.text}</li>
-					}}
+					)}
 				</ul>
 			);
 		}
@@ -128,9 +128,9 @@ describe('control-flow > for with key and index (key first)', () => {
 			render (
 				<button onclick={() => items.reverse()}>reverse</button>
 				<ul>
-					{for (const item of items; key item.id; index i) {
+					{for (const item of items; key item.id; index i) (
 						<li>{i}: {item.text}</li>
-					}}
+					)}
 				</ul>
 			);
 		}
@@ -156,9 +156,9 @@ describe('control-flow > C-style for loop', () => {
 
 			render (
 				<ul>
-					{for (let i = 0; i < count; i++) {
+					{for (let i = 0; i < count; i++) (
 						<li>{i}</li>
-					}}
+					)}
 				</ul>
 			);
 		}

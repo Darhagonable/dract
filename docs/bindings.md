@@ -129,13 +129,13 @@ export component Checkbox() {
     <form>
       <input type="checkbox" bind:checked bind:indeterminate />
 
-      {if (indeterminate) {
+      {if (indeterminate) (
         <p>waiting...</p>
-      } else if (checked) {
+      ) else if (checked) (
         <p>checked</p>
-      } else {
+      ) else (
         <p>unchecked</p>
-      }}
+      )}
     </form>
   );
 }

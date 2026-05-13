@@ -14,7 +14,9 @@ export default function TypedComponent() {
 	return $.jsx("div", {
 		children: [
 			$.jsx("h1", { children: [() => $.get(activeId)] }),
-			$.for(() => labels, (label) => $.jsx("span", { children: [label] }))
+			$.for(() => labels, (label) => {
+				return $.jsx("span", { children: [label] });
+			})
 		]
 	});
 }

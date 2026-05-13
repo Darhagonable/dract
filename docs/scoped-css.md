@@ -323,9 +323,7 @@ component List() {
   state items = ['a', 'b', 'c'];
   render (
     <ul>
-      {for (const item of items)}
-        <li>{item}</li>
-      {/for}
+      {for (const item of items) <li>{item}</li>}
     </ul>
     <style>li { padding: 4px; }</style>
   )

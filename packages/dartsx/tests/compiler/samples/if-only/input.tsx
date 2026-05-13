@@ -2,9 +2,9 @@ component App() {
   state loaded = false
   render (
     <div>
-      {if (loaded) {
+      {if (loaded) (
         <p>Content</p>
-      }}
+      )}
     </div>
   )
 }

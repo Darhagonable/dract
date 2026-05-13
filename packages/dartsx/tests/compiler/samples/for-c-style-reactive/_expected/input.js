@@ -13,7 +13,9 @@ function App() {
 
 					return __a;
 				},
-				(i) => $.jsx("li", { children: [i] })
+				(i) => {
+					$.jsx("li", { children: [i] });
+				}
 			)
 		]
 	});

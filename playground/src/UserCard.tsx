@@ -9,9 +9,9 @@ export component UserCard(bind name: string, age: number, active: boolean = true
       </label>
       <p>Age: {age}</p>
       <p>Status: {status}</p>
-      {for (let i = 0; i < age; i++) {
+      {for (let i = 0; i < age; i++) (
         <span>🎂</span>
-      }}
+      )}
     </div>
   )
 }

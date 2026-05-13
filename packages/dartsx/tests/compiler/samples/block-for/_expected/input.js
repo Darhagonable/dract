@@ -8,7 +8,9 @@ function App() {
 			() => {
 				const filtered = items.filter((i) => i.name !== "a");
 
-				return $.for(() => filtered, (item) => $.jsx("p", { children: [item.name] }));
+				return $.for(() => filtered, (item) => {
+					$.jsx("p", { children: [item.name] });
+				});
 			}
 		]
 	});

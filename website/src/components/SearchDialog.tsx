@@ -159,14 +159,14 @@ export default component SearchDialog(open: boolean, onClose: () => void) {
             <kbd class="rounded border border-slate-300 px-1.5 py-0.5 font-sans text-xs dark:border-slate-600">Esc</kbd>
           </kbd>
         </div>
-        {if (query.trim() && results.length === 0) {
+        {if (query.trim() && results.length === 0) (
           <div class="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
             No results for "<span class="font-semibold text-slate-900 dark:text-white">{query}</span>"
           </div>
-        }}
-        {if (results.length > 0) {
+        )}
+        {if (results.length > 0) (
           <ul class="max-h-80 overflow-y-auto py-2">
-            {for (const result of results; index i) {
+            {for (const result of results; index i) (
               <li>
                 <button
                   class={`flex w-full items-center px-4 py-2 text-left text-sm ${i === activeIndex ? 'bg-sky-500 text-white' : 'text-slate-700 dark:text-slate-300'}`}
@@ -174,29 +174,29 @@ export default component SearchDialog(open: boolean, onClose: () => void) {
                   onclick={() => navigate(result)}
                 >
                   <div class="flex-auto">
-                    {if (result.section) {
+                    {if (result.section) (
                       <div class={`text-xs ${i === activeIndex ? 'text-sky-200' : 'text-slate-400 dark:text-slate-500'}`}>
                         {result.title}
                       </div>
                       <div class="font-medium">{result.section}</div>
-                    }}
-                    {if (!result.section) {
+                    )}
+                    {if (!result.section) (
                       <div class="font-medium">{result.title}</div>
-                    }}
+                    )}
                   </div>
                   <div class={`flex-none text-xs ${i === activeIndex ? 'text-sky-200' : 'text-slate-400 dark:text-slate-500'}`}>
                     {result.group}
                   </div>
                 </button>
               </li>
-            }}
+            )}
           </ul>
-        }}
-        {if (!query.trim()) {
+        )}
+        {if (!query.trim()) (
           <div class="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
             Type to search the documentation
           </div>
-        }}
+        )}
       </div>
     </div>
   )

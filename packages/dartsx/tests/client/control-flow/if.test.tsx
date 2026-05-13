@@ -8,9 +8,9 @@ describe('control-flow > if', () => {
 
 			render (
 				<button onclick={() => x = !x}>toggle</button>
-				{if (x) {
+				{if (x) (
 					<span>truthy</span>
-				}}
+				)}
 			);
 		}
 
@@ -34,11 +34,11 @@ describe('control-flow > if-else', () => {
 
 			render (
 				<button onclick={() => x = !x}>toggle</button>
-				{if (x) {
+				{if (x) (
 					<span>truthy</span>
-				} else {
+				) else (
 					<span>falsy</span>
-				}}
+				)}
 			);
 		}
 
@@ -62,13 +62,13 @@ describe('control-flow > else-if', () => {
 
 			render (
 				<button onclick={() => mode = mode === 'a' ? 'b' : mode === 'b' ? 'c' : 'a'}>cycle</button>
-				{if (mode === 'a') {
+				{if (mode === 'a') (
 					<span>A</span>
-				} else if (mode === 'b') {
+				) else if (mode === 'b') (
 					<span>B</span>
-				} else {
+				) else (
 					<span>C</span>
-				}}
+				)}
 			);
 		}
 
@@ -167,11 +167,11 @@ describe('control-flow > if bare expressions', () => {
 			render (
 				<button onclick={() => count = 0}>zero</button>
 				<div>
-					{if (count > 0) {
+						{if (count > 0) (
 						count
-					} else {
+					) else (
 						0
-					}}
+					)}
 				</div>
 			);
 		}
@@ -191,11 +191,11 @@ describe('control-flow > if bare expressions', () => {
 			render (
 				<button onclick={() => count = 3}>set</button>
 				<div>
-					{if (count > 0) {
+					{if (count > 0) (
 						"has items"
-					} else {
+					) else (
 						"no items"
-					}}
+					)}
 				</div>
 			);
 		}

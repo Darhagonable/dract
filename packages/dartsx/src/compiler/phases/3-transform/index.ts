@@ -200,14 +200,14 @@ export function transform(
 			]);
 		},
 
-		CallExpression(node, { state, visit, next }) {
+		CallExpression(node, { state, next }) {
 			if (node.callee.type !== 'Identifier') return next();
 			const fn = node.callee.name;
-			if (fn === '__if') return transformIfCall(node, state, visit);
-			if (fn === '__for') return transformForCall(node, state, visit);
-			if (fn === '__switch') return transformSwitchCall(node, state, visit);
-			if (fn === '__try') return transformTryCall(node, state, visit);
-			if (fn === '__block') return transformBlockCall(node, state, visit);
+			if (fn === '__if') return transformIfCall(node, state);
+			if (fn === '__for') return transformForCall(node, state);
+			if (fn === '__switch') return transformSwitchCall(node, state);
+			if (fn === '__try') return transformTryCall(node, state);
+			if (fn === '__block') return transformBlockCall(node, state);
 			if (fn === '__html') return transformHtmlCall(node, state);
 			return transformReactiveCallOrNext(node, state, next);
 		},
@@ -398,14 +398,14 @@ function walkNode(node: AstNode, state: TransformState): AstNode {
 				b.object([b.prop('children', b.array(children))]),
 			]);
 		},
-		CallExpression(node, { state: s, visit, next }) {
+		CallExpression(node, { state: s, next }) {
 			if (node.callee.type !== 'Identifier') return next();
 			const fn = node.callee.name;
-			if (fn === '__if') return transformIfCall(node, s, visit);
-			if (fn === '__for') return transformForCall(node, s, visit);
-			if (fn === '__switch') return transformSwitchCall(node, s, visit);
-			if (fn === '__try') return transformTryCall(node, s, visit);
-			if (fn === '__block') return transformBlockCall(node, s, visit);
+			if (fn === '__if') return transformIfCall(node, s);
+			if (fn === '__for') return transformForCall(node, s);
+			if (fn === '__switch') return transformSwitchCall(node, s);
+			if (fn === '__try') return transformTryCall(node, s);
+			if (fn === '__block') return transformBlockCall(node, s);
 			if (fn === '__html') return transformHtmlCall(node, s);
 			return transformReactiveCallOrNext(node, s, next);
 		},
@@ -929,89 +929,65 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 
 // ── Control flow transforms ────────────────────────────────────────
 
-function transformIfCall(node: CallExpression, state: TransformState, visit: WalkContext['visit']) {
-	const args = node.arguments;
-	const condArrow = args[0];
-	const trueArrow = args[1];
-	const falseArrow = args[2];
+/** Extract the expression from a condition arrow `() => (expr)` */
+function transformConditionArrow(node: Argument | undefined, state: TransformState, fallback: AstNode): AstNode {
+	if (!node || node.type !== 'ArrowFunctionExpression') return fallback;
+	if (node.body.type === 'BlockStatement') return walkNode(node.body, state);
+	return walkNode(unwrapParen(node.body), state);
+}
 
-	const condExpr = condArrow?.type === 'ArrowFunctionExpression'
-		? condArrow.body.type === 'BlockStatement' ? walkNode(condArrow.body, state) : walkNode(unwrapParen(condArrow.body), state)
-		: b.literal(true);
+function transformIfCall(node: CallExpression, state: TransformState) {
+	const args = node.arguments;
 
 	const resultArgs = [
-		b.arrow([], condExpr),
-		transformCFCallback(trueArrow, state),
+		b.arrow([], transformConditionArrow(args[0], state, b.literal(true))),
+		transformCFCallback(args[1], state),
 	];
 
-	if (falseArrow) {
-		resultArgs.push(transformCFCallback(falseArrow, state));
+	if (args[2]) {
+		resultArgs.push(transformCFCallback(args[2], state));
 	}
 
 	return b.call('$.if', resultArgs);
 }
 
-function transformForCall(node: CallExpression, state: TransformState, visit: WalkContext['visit']) {
+function transformForCall(node: CallExpression, state: TransformState) {
 	const args = node.arguments;
-	const collArrow = args[0];
-	const bodyArrow = args[1];
-	const keyArrow = args[2];
-
-	const collExpr = collArrow?.type === 'ArrowFunctionExpression'
-		? collArrow.body.type === 'BlockStatement' ? walkNode(collArrow.body, state) : walkNode(unwrapParen(collArrow.body), state)
-		: b.array([]);
 
 	const resultArgs = [
-		b.arrow([], collExpr),
-		transformCFCallback(bodyArrow, state),
+		b.arrow([], transformConditionArrow(args[0], state, b.array([]))),
+		transformCFCallback(args[1], state),
 	];
 
-	if (keyArrow && keyArrow.type === 'ArrowFunctionExpression') {
-		const keyExpr = keyArrow.body.type === 'BlockStatement'
-			? walkNode(keyArrow.body, state)
-			: walkNode(unwrapParen(keyArrow.body), state);
-		const keyParams = keyArrow.params.map((p: ParamPattern) => {
-			if (p.type === 'Identifier') return b.id(p.name);
-			if (p.type === 'RestElement' && p.argument.type === 'Identifier') return b.id(p.argument.name);
-			return b.id('item');
-		});
-		resultArgs.push(b.arrow(keyParams, keyExpr));
+	if (args[2] && args[2].type === 'ArrowFunctionExpression') {
+		resultArgs.push(transformCFCallback(args[2], state));
 	}
 
 	return b.call('$.for', resultArgs);
 }
 
-function transformSwitchCall(node: CallExpression, state: TransformState, visit: WalkContext['visit']) {
+function transformSwitchCall(node: CallExpression, state: TransformState) {
 	const args = node.arguments;
-	const discArrow = args[0];
-
-	const discExpr = discArrow?.type === 'ArrowFunctionExpression'
-		? discArrow.body.type === 'BlockStatement' ? walkNode(discArrow.body, state) : walkNode(unwrapParen(discArrow.body), state)
-		: b.literal('');
 
 	const cases: AstNode[] = [];
 	for (let i = 1; i < args.length; i += 2) {
 		const valuesArg = args[i];
 		const fnArg = args[i + 1];
 
-		let valuesExpr: AstNode;
-		if (valuesArg && valuesArg.type === 'ArrayExpression') {
-			valuesExpr = b.array(valuesArg.elements.map((el) => el ? walkNode(el, state) : b.literal(null)));
-		} else {
-			valuesExpr = b.literal(null);
-		}
+		const valuesExpr = valuesArg?.type === 'ArrayExpression'
+			? b.array(valuesArg.elements.map((el) => el ? walkNode(el, state) : b.literal(null)))
+			: b.literal(null);
 
-		const fn = fnArg ? transformCFCallback(fnArg, state) : b.arrow([], b.literal(null));
 		cases.push(b.object([
 			b.prop('values', valuesExpr),
-			b.prop('fn', fn),
+			b.prop('fn', fnArg ? transformCFCallback(fnArg, state) : b.arrow([], b.literal(null))),
 		]));
 	}
 
-	return b.call('$.switch', [b.arrow([], discExpr), b.array(cases)]);
+	return b.call('$.switch', [b.arrow([], transformConditionArrow(args[0], state, b.literal(''))), b.array(cases)]);
 }
 
-function transformTryCall(node: CallExpression, state: TransformState, visit: WalkContext['visit']) {
+function transformTryCall(node: CallExpression, state: TransformState) {
 	const args = node.arguments;
 	const resultArgs = [transformCFCallback(args[0], state)];
 
@@ -1028,7 +1004,7 @@ function transformTryCall(node: CallExpression, state: TransformState, visit: Wa
 	return b.call('$.try', resultArgs);
 }
 
-function transformBlockCall(node: CallExpression, state: TransformState, visit: WalkContext['visit']) {
+function transformBlockCall(node: CallExpression, state: TransformState) {
 	const arrowFn = node.arguments[0];
 	if (!arrowFn) return b.literal(null);
 	return walkNode(arrowFn, state);
@@ -1042,12 +1018,7 @@ function transformHtmlCall(node: CallExpression, state: TransformState) {
 }
 
 function transformCFCallback(arrowFn: Argument | undefined, state: TransformState): AstNode {
-	if (!arrowFn || arrowFn.type === 'SpreadElement') return b.arrow([], b.literal(null));
-
-	// Only arrow functions and function expressions have params/body
-	if (arrowFn.type !== 'ArrowFunctionExpression' && arrowFn.type !== 'FunctionExpression' && arrowFn.type !== 'FunctionDeclaration') {
-		return b.arrow([], walkNode(arrowFn, state));
-	}
+	if (!arrowFn || arrowFn.type !== 'ArrowFunctionExpression') return b.arrow([], b.literal(null));
 
 	const params = arrowFn.params.map((p: ParamPattern) => {
 		if (p.type === 'Identifier') return b.id(p.name);
@@ -1056,41 +1027,19 @@ function transformCFCallback(arrowFn: Argument | undefined, state: TransformStat
 		return b.id('item');
 	});
 
-	// Switch to the arrow function's scope if registered
 	const arrowScope = state.analysis.scopes.get(arrowFn);
 	const innerState = arrowScope ? { ...state, scope: arrowScope } : state;
 
-	if (arrowFn.type === 'ArrowFunctionExpression') {
-		if (arrowFn.body.type === 'BlockStatement') {
-			const transformedStmts: AstNode[] = [];
-			for (const stmt of arrowFn.body.body) {
-				transformedStmts.push(walkNode(stmt, innerState));
-			}
-			// Collapse single-return block to expression arrow
-			if (transformedStmts.length === 1 && transformedStmts[0].type === 'ReturnStatement' && transformedStmts[0].argument) {
-				return b.arrow(params, transformedStmts[0].argument);
-			}
-			return b.arrowBlock(params, transformedStmts);
-		}
-		// Expression body
-		const exprBody = unwrapParen(arrowFn.body);
-		const transformed = walkNode(exprBody, innerState);
-		return b.arrow(params, transformed);
-	}
-
-	// FunctionExpression / FunctionDeclaration
-	if (arrowFn.body) {
+	if (arrowFn.body.type === 'BlockStatement') {
 		const transformedStmts: AstNode[] = [];
 		for (const stmt of arrowFn.body.body) {
 			transformedStmts.push(walkNode(stmt, innerState));
 		}
-		if (transformedStmts.length === 1 && transformedStmts[0].type === 'ReturnStatement' && transformedStmts[0].argument) {
-			return b.arrow(params, transformedStmts[0].argument);
-		}
 		return b.arrowBlock(params, transformedStmts);
 	}
 
-	return b.arrow(params, b.literal(null));
+	// Expression body
+	return b.arrow(params, walkNode(unwrapParen(arrowFn.body), innerState));
 }
 
 // ── JSX pattern transforms ─────────────────────────────────────────

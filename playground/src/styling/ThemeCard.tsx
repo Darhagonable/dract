@@ -12,9 +12,9 @@ export component ThemeCard(accentColor: string = "#6366f1") {
       <p class="description">This card uses reactive CSS values.</p>
       <p class="accent-label">Accent: <code>{accentColor}</code></p>
       <div class="swatch" />
-      {if (hovered) {
-        render <span class="badge">Hovered!</span>
-      }}
+      {if (hovered) (
+        <span class="badge">Hovered!</span>
+      )}
     </div>
     <style>
       .theme-card {

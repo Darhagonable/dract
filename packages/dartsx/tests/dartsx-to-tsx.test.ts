@@ -285,6 +285,16 @@ describe('dartsxToTsx', () => {
 		expect(code).toContain('} catch (e) {');
 		expect(code).toContain('})()}');
 	});
+
+	it('wraps {try} paren body in JSX with IIFE', () => {
+		const { code } = dartsxToTsx(`component App() {
+  render (
+    <div>{try (<Data />) catch (e) (<p>Error</p>)}</div>
+  )
+}`);
+		expect(code).toContain('{(() => { try { return (<Data />) }');
+		expect(code).toContain('catch (e) { return (<p>Error</p>) } })()');
+	});
 });
 
 describe('dartsxToTsx produces valid TypeScript', () => {
@@ -299,10 +309,13 @@ describe('dartsxToTsx produces valid TypeScript', () => {
 		['bind shorthand', '<input bind:{value} />'],
 		['state + derived', 'component A() { state x = 0\n  derived y = x * 2 }'],
 		['component with props', 'component A(name: string, age?: number) {}'],
-		['if control flow', 'component A() { render (<div>{if (x) { <p>yes</p> }}</div>) }'],
-		['for control flow', 'component A() { render (<div>{for (const item of items) { <p>{item}</p> }}</div>) }'],
-		['switch control flow', 'component A() { render (<div>{switch (x) { case 1: <p>one</p> }}</div>) }'],
-		['try control flow', 'component A() { render (<div>{try { <Data /> } catch (e) { <p>Error</p> }}</div>) }'],
+		['if control flow (paren)', 'component A() { render (<div>{if (x) (<p>yes</p>)}</div>) }'],
+		['if control flow (block)', 'component A() { render (<div>{if (x) { render <p>yes</p> }}</div>) }'],
+		['for control flow (paren)', 'component A() { render (<div>{for (const item of items) (<p>{item}</p>)}</div>) }'],
+		['for control flow (block)', 'component A() { render (<div>{for (const item of items) { render <p>{item}</p> }}</div>) }'],
+		['switch control flow', 'component A() { render (<div>{switch (x) { case 1: render <p>one</p> }}</div>) }'],
+		['try control flow (paren)', 'component A() { render (<div>{try (<Data />) catch (e) (<p>Error</p>)}</div>) }'],
+		['try control flow (block)', 'component A() { render (<div>{try { render <Data /> } catch (e) { render <p>Error</p> }}</div>) }'],
 	];
 
 	for (const [name, source] of snippets) {

@@ -5,7 +5,9 @@ function App() {
 
 	return $.jsx("ul", {
 		children: [
-			$.for(() => Object.keys($.get(obj)), (key) => $.jsx("li", { children: [key] }))
+			$.for(() => Object.keys($.get(obj)), (key) => {
+				$.jsx("li", { children: [key] });
+			})
 		]
 	});
 }

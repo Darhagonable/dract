@@ -63,9 +63,9 @@ export component Gradient(color: ColorName = 'blue', ...rest: any[]) {
       gradientUnits="userSpaceOnUse"
       {...rest}
     >
-      {for (const [i, stop] of gradients[color].entries()) {
+      {for (const [i, stop] of gradients[color].entries()) (
         <stop key={i} {...stop} />
-      }}
+      )}
     </radialGradient>
   )
 }

@@ -12,7 +12,9 @@ function List() {
 	return $.jsx("div", {
 		children: [
 			$.jsx("p", { children: [() => handler($.get(items))] }),
-			$.for(() => $.get(items), (item) => $.jsx("span", { children: [item] }))
+			$.for(() => $.get(items), (item) => {
+				return $.jsx("span", { children: [item] });
+			})
 		]
 	});
 }

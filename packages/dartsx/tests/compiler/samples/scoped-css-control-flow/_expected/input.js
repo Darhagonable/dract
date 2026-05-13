@@ -8,7 +8,9 @@ function List() {
 	return $.jsx("ul", {
 		"data-scope": "feiky0",
 		children: [
-			$.for(() => $.get(items), (item) => $.jsx("li", { "data-scope": "feiky0", children: [item] }))
+			$.for(() => $.get(items), (item) => {
+				return $.jsx("li", { "data-scope": "feiky0", children: [item] });
+			})
 		]
 	});
 }

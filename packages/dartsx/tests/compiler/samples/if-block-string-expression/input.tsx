@@ -2,11 +2,11 @@ component App() {
   state count = 0
   render (
     <div>
-      {if (count > 0) {
+      {if (count > 0) (
         "has items"
-      } else {
+      ) else (
         "no items"
-      }}
+      )}
     </div>
   )
 }

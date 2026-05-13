@@ -38,12 +38,12 @@ export component Search() {
       >
         <SearchIcon />
         <span class="sr-only md:not-sr-only md:ml-2 md:text-slate-500 md:dark:text-slate-400">Search docs</span>
-        {if (modifierKey) {
+        {if (modifierKey) (
           <kbd class="ml-auto hidden font-medium text-slate-400 dark:text-slate-500 md:block">
             <kbd class="font-sans">{modifierKey}</kbd>
             <kbd class="font-sans">K</kbd>
           </kbd>
-        }}
+        )}
       </button>
       <SearchDialog open={isOpen} onClose={close} />
     </div>

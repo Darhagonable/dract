@@ -4,7 +4,9 @@ function App() {
 	return $.jsx("div", {
 		children: [
 			$.try(
-				() => $.jsx(AsyncContent),
+				() => {
+					$.jsx(AsyncContent);
+				},
 				(e) => {
 					const text = "error";
 

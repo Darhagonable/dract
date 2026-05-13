@@ -31,9 +31,9 @@ export default component Home() {
         <QuickLink title="Reactivity" description="Fine-grained reactivity with state and derived. Only the DOM that needs to change updates." href="/docs/reactivity" icon={reactivityIcon} />
         <QuickLink title="How It Works" description="Understand how the compiler transforms your code into efficient DOM operations at build time." href="/docs/how-it-works" icon={howItWorksIcon} />
       </QuickLinks>
-      {if (doc) {
+      {if (doc) (
         <div innerHTML={doc.html} />
-      }}
+      )}
     </div>
   )
 }

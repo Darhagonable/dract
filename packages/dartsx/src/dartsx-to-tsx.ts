@@ -144,26 +144,27 @@ function transformComponentDeclarations(ms: MagicString, source: string, comment
 		if (paramRanges.length === 0) continue;
 		const parsed = paramRanges.map(r => parseOneParam(r.text));
 
-		// Build destructuring prefix: ({name, ...rest}: {
-		const destructParts: string[] = [];
+		// Build the type annotation as new text (not mapped to original positions)
+		const typeParts: string[] = [];
 		for (const p of parsed) {
 			if (p.isRest) {
-				destructParts.push(`...${p.localName}`);
+				typeParts.push('[key: string]: any');
 			} else {
-				const key = p.externalName !== null ? `'${p.externalName}'` : null;
-				const base = key ? `${key}: ${p.localName}` : p.localName;
-				destructParts.push(p.defaultValue ? `${base} = ${p.defaultValue}` : base);
+				const key = p.externalName !== null ? `'${p.externalName}'` : p.localName;
+				const optional = (p.isOptional || p.defaultValue !== null) ? '?' : '';
+				const type = p.type ?? 'any';
+				typeParts.push(`${key}${optional}: ${type}`);
 			}
 		}
 
-		// Replace ( with ({destructuring}: {  — keeps original params at their positions
-		ms.overwrite(openParen, openParen + 1, `({${destructParts.join(', ')}}: {`);
-		// Replace ) with })
-		ms.overwrite(closeParen, closeParen + 1, '})');
+		// Replace ( with ({ — original param positions become destructuring bindings
+		ms.overwrite(openParen, openParen + 1, '({');
+		// Replace ) with }: {type annotation})
+		ms.overwrite(closeParen, closeParen + 1, `}: {${typeParts.join(', ')}})`);
 
-		// Edit each param IN PLACE to become its type annotation entry
+		// Edit each param IN PLACE to become a destructuring binding
 		for (let i = 0; i < paramRanges.length; i++) {
-			editParamForType(ms, source, paramRanges[i], parsed[i]);
+			editParamForDestructuring(ms, source, paramRanges[i], parsed[i]);
 		}
 	}
 }
@@ -207,20 +208,25 @@ function splitParamRanges(source: string, start: number, end: number): ParamRang
 }
 
 /**
- * Edit a param range in place so the original tokens become the type annotation entry.
- * e.g. `bind 'ext' as name: string = 'x'` → `'ext'?: string`
- * Preserves original character positions for correct source map hover.
+ * Edit a param range in place so the original tokens become a destructuring binding.
+ * e.g. `bind 'ext' as name: string = 'x'` → `'ext': name`  (with name at original pos)
+ * e.g. `age: number` → `age`
+ * e.g. `active: boolean = true` → `active = true`  (keeps default at original pos)
  */
-function editParamForType(
+function editParamForDestructuring(
 	ms: MagicString, source: string, range: ParamRange, param: ParsedParam,
 ): void {
 	const raw = range.text;
 	const leadingWs = raw.match(/^\s*/)![0].length;
 	const contentStart = range.start + leadingWs;
 
-	// Rest params → index signature
+	// Rest params: keep `...name` at original position
 	if (param.isRest) {
-		ms.overwrite(contentStart, range.end, '[key: string]: any');
+		// Already looks like `...name` or `...name: Type` — just remove type
+		const nameEnd = contentStart + 3 + param.localName.length; // `...` + name
+		if (nameEnd < range.end) {
+			ms.remove(nameEnd, range.end);
+		}
 		return;
 	}
 
@@ -235,69 +241,73 @@ function editParamForType(
 		}
 	}
 
-	// Handle renamed params: remove ` as localName[?]`, keep ext name
+	// Handle renamed params: `'ext-name' as localName: Type = default`
+	// Want: `'ext-name': localName = default` (rename syntax in destructuring)
 	if (param.externalName !== null) {
 		const quote = source[cursor];
 		const closeQuote = source.indexOf(quote, cursor + 1);
 		if (closeQuote > 0) {
 			const afterQuote = closeQuote + 1;
-			const asMatch = source.slice(afterQuote, range.end).match(/^\s+as\s+\w+\??/);
+			// Find `as localName`
+			const asMatch = source.slice(afterQuote, range.end).match(/^\s+as\s+/);
 			if (asMatch) {
-				ms.remove(afterQuote, afterQuote + asMatch[0].length);
+				// Replace ` as ` with `: ` (destructuring rename syntax)
+				ms.overwrite(afterQuote, afterQuote + asMatch[0].length, ': ');
 			}
-			// Insert ? if optional/has default
-			if (param.isOptional || param.defaultValue !== null) {
-				ms.appendLeft(afterQuote, '?');
+			// Find the localName end
+			const localStart = afterQuote + (asMatch ? asMatch[0].length : 0);
+			const localEnd = localStart + param.localName.length;
+			// Remove optional `?` after name
+			let afterName = localEnd;
+			if (source[afterName] === '?') {
+				ms.remove(afterName, afterName + 1);
+				afterName++;
 			}
-			// If no type, add `: any`
-			if (param.type === null) {
-				ms.appendLeft(afterQuote, ': any');
+			// Remove `: Type` but keep ` = default`
+			if (param.defaultValue !== null) {
+				const eqPos = findDefaultEquals(source, afterName, range.end);
+				if (eqPos >= 0) {
+					// Remove from afterName to just before `= default` (keep space before =)
+					let eqStart = eqPos;
+					while (eqStart > afterName && source[eqStart - 1] === ' ') eqStart--;
+					if (afterName < eqStart) {
+						ms.remove(afterName, eqStart);
+					}
+				}
+			} else {
+				// Remove everything after localName
+				if (afterName < range.end) {
+					ms.remove(afterName, range.end);
+				}
 			}
 		}
 	} else {
-		// Simple param: name[?]: Type [= default]
+		// Simple param: `name: Type = default` → `name = default` or just `name`
 		const nameEnd = cursor + param.localName.length;
-		if (param.isOptional || param.defaultValue !== null) {
-			if (source[nameEnd] !== '?') {
-				ms.appendLeft(nameEnd, '?');
+		// Remove optional `?` after name
+		let afterName = nameEnd;
+		if (source[afterName] === '?') {
+			ms.remove(afterName, afterName + 1);
+			afterName++;
+		}
+		// Remove `: Type` but keep ` = default`
+		if (param.defaultValue !== null) {
+			const eqPos = findDefaultEquals(source, afterName, range.end);
+			if (eqPos >= 0) {
+				// Remove from afterName to just before ` = default`
+				let eqStart = eqPos;
+				while (eqStart > afterName && source[eqStart - 1] === ' ') eqStart--;
+				if (afterName < eqStart) {
+					ms.remove(afterName, eqStart);
+				}
+			}
+		} else {
+			// No default — remove everything after name (the `: Type` part)
+			if (afterName < range.end) {
+				ms.remove(afterName, range.end);
 			}
 		}
-		// If no type, add `: any`
-		if (param.type === null) {
-			const insertPos = source[nameEnd] === '?' ? nameEnd + 1 : nameEnd;
-			ms.appendLeft(insertPos, ': any');
-		}
 	}
-
-	// Remove default value: ` = val`
-	if (param.defaultValue !== null) {
-		const eqPos = findDefaultEqualsPos(source, contentStart, range.end);
-		if (eqPos >= 0) {
-			// Include preceding whitespace
-			let removeStart = eqPos;
-			while (removeStart > contentStart && source[removeStart - 1] === ' ') removeStart--;
-			ms.remove(removeStart, range.end);
-		}
-	}
-}
-
-/** Find the last `=` at depth 0 in [start, end), skipping `=>` and `==` */
-function findDefaultEqualsPos(source: string, start: number, end: number): number {
-	let eqPos = -1;
-	let depth = 0;
-	for (let i = start; i < end; i++) {
-		const ch = source[i];
-		if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(source, i) - 1;
-			continue;
-		}
-		if (ch === '(' || ch === '[' || ch === '{') depth++;
-		else if (ch === ')' || ch === ']' || ch === '}') depth--;
-		else if (ch === '=' && depth === 0 && source[i + 1] !== '>' && source[i + 1] !== '=') {
-			eqPos = i;
-		}
-	}
-	return eqPos;
 }
 
 function parseOneParam(raw: string): ParsedParam {
@@ -363,18 +373,18 @@ function parseOneParam(raw: string): ParsedParam {
 	return { isBind, isRest: false, isOptional, externalName, localName, type, defaultValue };
 }
 
-/** Find `=` at depth 0, skipping `=>` and `==` */
-function findDefaultEquals(s: string): number {
+/** Find first `=` at depth 0 in [start, end), skipping `=>` and `==` */
+function findDefaultEquals(source: string, start = 0, end = source.length): number {
 	let depth = 0;
-	for (let i = 0; i < s.length; i++) {
-		const ch = s[i];
+	for (let i = start; i < end; i++) {
+		const ch = source[i];
 		if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(s, i) - 1;
+			i = skipString(source, i) - 1;
 			continue;
 		}
 		if (ch === '(' || ch === '[' || ch === '{') depth++;
 		else if (ch === ')' || ch === ']' || ch === '}') depth--;
-		else if (ch === '=' && depth === 0 && s[i + 1] !== '>' && s[i + 1] !== '=') return i;
+		else if (ch === '=' && depth === 0 && source[i + 1] !== '>' && source[i + 1] !== '=') return i;
 	}
 	return -1;
 }
@@ -412,24 +422,12 @@ function transformStateDeclarations(ms: MagicString, source: string, commentRang
 // ── derived x = → const x = ───────────────────────────────────────
 
 function transformDerivedDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
-	// Simple: derived varName = expr
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(\s+\w+)/g;
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[\w{[])/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		if (isInComment(commentRanges, match.index)) continue;
 		const derivedStart = match.index + (match[1]?.length ?? 0);
-		const derivedEnd = derivedStart + 'derived'.length;
-		ms.overwrite(derivedStart, derivedEnd, 'const');
-	}
-
-	// Destructuring: derived { ... } = expr  or  derived [ ... ] = expr
-	// Only the keyword needs rewriting here; TS can parse the rest natively.
-	const reDestructure = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[{[])/g;
-	while ((match = reDestructure.exec(source)) !== null) {
-		if (isInComment(commentRanges, match.index)) continue;
-		const derivedStart = match.index + (match[1]?.length ?? 0);
-		const derivedEnd = derivedStart + 'derived'.length;
-		ms.overwrite(derivedStart, derivedEnd, 'const');
+		ms.overwrite(derivedStart, derivedStart + 'derived'.length, 'const');
 	}
 }
 
@@ -453,15 +451,9 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 		ms.appendLeft(closeParen, '</>');
 	}
 
-	// render <JSX> → return <JSX> (inline render without parentheses)
-	const reInline = /\brender(\s+)(?=<)/g;
-	while ((match = reInline.exec(source)) !== null) {
-		ms.overwrite(match.index, match.index + 'render'.length, 'return');
-	}
-
-	// render <expression>; → return <expression>; (bare expression, not parens or JSX)
-	const reExpr = /\brender(\s+)(?![(<])/g;
-	while ((match = reExpr.exec(source)) !== null) {
+	// render <expr> or render <JSX> → return ...
+	const reOther = /\brender(\s+)(?!\()/g;
+	while ((match = reOther.exec(source)) !== null) {
 		ms.overwrite(match.index, match.index + 'render'.length, 'return');
 	}
 }
@@ -474,11 +466,15 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
  */
 function transformJsxControlFlow(ms: MagicString, source: string): void {
 	const re = /\brender\s*\(/g;
+	const processed: { start: number; end: number }[] = [];
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		const openParen = match.index + match[0].length - 1;
+		// Skip inner render blocks nested inside an already-processed outer render
+		if (processed.some(r => match!.index > r.start && match!.index < r.end)) continue;
 		const closeParen = findMatchingParen(source, openParen);
 		if (closeParen === -1) continue;
+		processed.push({ start: openParen, end: closeParen });
 		wrapControlFlowBlocks(ms, source, openParen + 1, closeParen);
 	}
 }
@@ -500,9 +496,16 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 			while (j < closeBrace && /\s/.test(source[j])) j++;
 			const kw = source.slice(j, j + 10);
 
-			if (/^if\s*\(/.test(kw) || /^for\s*[\s(]/.test(kw) || /^switch\s*\(/.test(kw) || /^try\s*\{/.test(kw)) {
+			if (/^if\s*\(/.test(kw) || /^for\s*[\s(]/.test(kw) || /^switch\s*\(/.test(kw) || /^try[\s({<]/.test(kw)) {
 				ms.appendLeft(i + 1, '(() => { ');
 				ms.appendLeft(closeBrace, ' })()');
+				// For for-loops, strip `; index <var>` and `; key <expr>` clauses
+				let keyExprRange: KeyExprRange | null = null;
+				if (/^for\s*[\s(]/.test(kw)) {
+					keyExprRange = stripForClauses(ms, source, j, closeBrace);
+				}
+				// Rewrite paren-body control flow to block-body with return
+				rewriteParenBodies(ms, source, j, closeBrace, keyExprRange);
 			}
 			// Always recurse into brace blocks to find nested control flow
 			wrapControlFlowBlocks(ms, source, i + 1, closeBrace);
@@ -514,6 +517,190 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 	}
 }
 
+/**
+ * Strip `; index <var>` and `; key <expr>` clauses from for-loop headers.
+ * `for (const x of items; index i; key x.id)` → `let i = 0; for (const x of items) { x.id; ...}`
+ * Uses ms.move() to preserve source mapping for the index variable.
+ * Moves the key expression into the for-body as a statement for type-checking.
+ */
+interface KeyExprRange {
+	start: number;
+	end: number;
+}
+
+function stripForClauses(ms: MagicString, source: string, forStart: number, end: number): KeyExprRange | null {
+	// Find the opening paren of the for-loop
+	let pos = forStart + 3; // skip 'for'
+	while (pos < end && /\s/.test(source[pos])) pos++;
+	if (source[pos] !== '(') return null;
+	const openParen = pos;
+	const closeParen = findMatchingParen(source, openParen);
+	if (closeParen === -1 || closeParen > end) return null;
+
+	// Look for `; index <var>` and `; key <expr>` within the for parens
+	const header = source.slice(openParen + 1, closeParen);
+	const clauseRe = /;\s*(index|key)\s+/g;
+	let firstClauseIdx = -1;
+	let indexVarStart = -1;
+	let indexVarEnd = -1;
+	let keyExprStart = -1;
+	let keyExprEnd = -1;
+	let clauseMatch;
+
+	while ((clauseMatch = clauseRe.exec(header)) !== null) {
+		if (firstClauseIdx === -1) firstClauseIdx = clauseMatch.index;
+		const afterKw = clauseMatch.index + clauseMatch[0].length;
+		if (clauseMatch[1] === 'index') {
+			const varMatch = header.slice(afterKw).match(/^([A-Za-z_$][\w$]*)/);
+			if (varMatch) {
+				indexVarStart = openParen + 1 + afterKw;
+				indexVarEnd = indexVarStart + varMatch[1].length;
+			}
+		} else if (clauseMatch[1] === 'key') {
+			// Key expression runs from after "key " to the next ";" or end of header
+			keyExprStart = openParen + 1 + afterKw;
+			const nextSemi = header.indexOf(';', afterKw);
+			keyExprEnd = nextSemi !== -1 ? openParen + 1 + nextSemi : closeParen;
+			// Trim trailing whitespace
+			while (keyExprEnd > keyExprStart && /\s/.test(source[keyExprEnd - 1])) keyExprEnd--;
+		}
+	}
+
+	if (firstClauseIdx === -1) return null;
+
+	const removeStart = openParen + 1 + firstClauseIdx;
+	const hasKey = keyExprStart !== -1 && keyExprEnd > keyExprStart;
+
+	if (indexVarStart !== -1) {
+		// Move the index variable to before `for`, preserving its source mapping.
+		ms.move(indexVarStart, indexVarEnd, forStart);
+		ms.appendLeft(forStart, 'let ');
+		ms.appendLeft(indexVarEnd, ' = 0; ');
+
+		if (hasKey) {
+			// Remove clause text but keep key expression range intact for later move()
+			if (indexVarStart < keyExprStart) {
+				// Order: ; index i; key item.id
+				ms.remove(removeStart, indexVarStart);
+				ms.remove(indexVarEnd, keyExprStart);
+				ms.remove(keyExprEnd, closeParen);
+			} else {
+				// Order: ; key item.id; index i
+				ms.remove(removeStart, keyExprStart);
+				ms.remove(keyExprEnd, indexVarStart);
+				ms.remove(indexVarEnd, closeParen);
+			}
+		} else {
+			ms.remove(removeStart, indexVarStart);
+			ms.remove(indexVarEnd, closeParen);
+		}
+		ms.overwrite(closeParen, closeParen + 1, ')');
+	} else if (hasKey) {
+		// No index variable, just key — remove surrounding text, keep key range
+		ms.remove(removeStart, keyExprStart);
+		ms.remove(keyExprEnd, closeParen);
+		ms.overwrite(closeParen, closeParen + 1, ')');
+	} else {
+		// No index, no key — just strip clauses
+		ms.overwrite(removeStart, closeParen, ')');
+		ms.remove(closeParen, closeParen + 1);
+	}
+
+	return hasKey ? { start: keyExprStart, end: keyExprEnd } : null;
+}
+
+/**
+ * Rewrite paren-body control flow to block-body with return so TS can type-check.
+ * Handles: if/for/while/else/try/catch/pending with paren bodies.
+ */
+function rewriteParenBodies(ms: MagicString, source: string, start: number, end: number, keyExprRange?: KeyExprRange | null): void {
+	let pos = start;
+	let isFirst = true;
+
+	/** Wrap a paren body `( ... )` → `{ return ( ... ) }` at current pos */
+	function wrapParenBody(prefix = '{ return '): boolean {
+		if (pos >= end || source[pos] !== '(') return false;
+		const closeBody = findMatchingParen(source, pos);
+		if (closeBody === -1 || closeBody > end) return false;
+		ms.appendLeft(pos, prefix);
+		ms.prependLeft(closeBody + 1, ' }');
+		pos = closeBody + 1;
+		return true;
+	}
+
+	/** Skip `(...)` condition/params */
+	function skipParens(): boolean {
+		if (pos >= end || source[pos] !== '(') return false;
+		const close = findMatchingParen(source, pos);
+		if (close === -1 || close >= end) return false;
+		pos = close + 1;
+		return true;
+	}
+
+	/** Skip whitespace */
+	function skipWs(): void {
+		while (pos < end && /\s/.test(source[pos])) pos++;
+	}
+
+	/** Skip or wrap the body (block body skipped, paren body wrapped) */
+	function handleBody(prefix = '{ return '): boolean {
+		skipWs();
+		if (pos >= end) return false;
+		if (source[pos] === '(') return wrapParenBody(prefix);
+		if (source[pos] === '{') {
+			const closeBlock = findMatchingBrace(source, pos);
+			if (closeBlock !== -1) { pos = closeBlock + 1; return true; }
+		}
+		return false;
+	}
+
+	while (pos < end) {
+		skipWs();
+		if (pos >= end) break;
+
+		const slice = source.slice(pos, pos + 10);
+
+		if (/^(if|for|while)\s*[\s(]/.test(slice)) {
+			const isFor = /^for\s/.test(slice);
+			// Skip keyword to opening paren
+			const kwEnd = source.indexOf('(', pos);
+			if (kwEnd === -1 || kwEnd >= end) break;
+			pos = kwEnd;
+			if (!skipParens()) break;
+			// Handle body
+			skipWs();
+			if (pos >= end) break;
+			if (isFor && isFirst && keyExprRange && source[pos] === '(') {
+				// For-loop with key: inject key expression before return
+				wrapParenBody('{ ');
+				// move() was already done by stripForClauses; just append the separator
+				ms.move(keyExprRange.start, keyExprRange.end, pos);
+				ms.appendLeft(keyExprRange.end, '; return ');
+			} else if (!handleBody()) break;
+			isFirst = false;
+		} else if (/^else/.test(slice)) {
+			pos += 4; // skip 'else'
+			skipWs();
+			if (pos >= end) break;
+			if (/^if\s*\(/.test(source.slice(pos, pos + 10))) continue; // else if → loop handles it
+			if (!handleBody()) break;
+		} else if (/^try/.test(slice)) {
+			pos += 3; // skip 'try'
+			if (!handleBody()) break;
+		} else if (/^catch/.test(slice)) {
+			pos += 5; // skip 'catch'
+			skipWs();
+			skipParens(); // skip (e)
+			if (!handleBody()) break;
+		} else if (/^pending/.test(slice)) {
+			pos += 7; // skip 'pending'
+			if (!handleBody()) break;
+		} else {
+			break;
+		}
+	}
+}
+
 function findMatchingBrace(code: string, openPos: number): number {
 	let depth = 1;
 	let i = openPos + 1;
@@ -521,11 +708,8 @@ function findMatchingBrace(code: string, openPos: number): number {
 		const ch = code[i];
 		if (ch === '{') depth++;
 		else if (ch === '}') { depth--; if (depth === 0) return i; }
-		else if (ch === "'" || ch === '"') {
+		else if (ch === "'" || ch === '"' || ch === '`') {
 			i = skipString(code, i);
-			continue;
-		} else if (ch === '`') {
-			i = skipTemplateLiteral(code, i);
 			continue;
 		}
 		i++;
@@ -564,36 +748,13 @@ function findMatchingParen(code: string, openPos: number): number {
 		const ch = code[i];
 		if (ch === '(') depth++;
 		else if (ch === ')') depth--;
-		else if (ch === "'" || ch === '"') {
+		else if (ch === "'" || ch === '"' || ch === '`') {
 			i = skipString(code, i);
-			continue;
-		} else if (ch === '`') {
-			i = skipTemplateLiteral(code, i);
 			continue;
 		}
 		if (depth > 0) i++;
 	}
 	return depth === 0 ? i : -1;
-}
-
-function skipTemplateLiteral(code: string, start: number): number {
-	let i = start + 1;
-	while (i < code.length) {
-		if (code[i] === '\\') { i += 2; continue; }
-		if (code[i] === '`') return i + 1;
-		if (code[i] === '$' && code[i + 1] === '{') {
-			i += 2;
-			let depth = 1;
-			while (i < code.length && depth > 0) {
-				if (code[i] === '{') depth++;
-				else if (code[i] === '}') depth--;
-				i++;
-			}
-			continue;
-		}
-		i++;
-	}
-	return i;
 }
 
 // ── {@html expr} → {expr} ─────────────────────────────────────────
@@ -695,12 +856,8 @@ function collectControlFlowZones(
 	let i = start;
 	while (i < end) {
 		const ch = source[i];
-		if (ch === "'" || ch === '"') {
+		if (ch === "'" || ch === '"' || ch === '`') {
 			i = skipString(source, i);
-			continue;
-		}
-		if (ch === '`') {
-			i = skipTemplateLiteral(source, i);
 			continue;
 		}
 		if (ch === '{') {
@@ -712,7 +869,7 @@ function collectControlFlowZones(
 			const kw = source.slice(j, j + 10);
 
 			if (/^if\s*[\s(]/.test(kw) || /^for\s*[\s(]/.test(kw) ||
-				/^switch\s*\(/.test(kw) || /^try\s*\{/.test(kw)) {
+				/^switch\s*\(/.test(kw) || /^try[\s({<]/.test(kw)) {
 				zones.push({ start: i, end: closeBrace + 1 });
 			}
 			// Recurse into nested content

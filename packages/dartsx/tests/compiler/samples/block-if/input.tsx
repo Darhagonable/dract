@@ -4,9 +4,9 @@ component App() {
     <div>
       {
         const label = show ? 'yes' : 'no'
-        if (show) {
+        if (show) (
           <span>{label}</span>
-        }
+        )
       }
     </div>
   )

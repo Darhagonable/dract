@@ -14,7 +14,15 @@ function ErrorBoundary() {
 
 	return $.jsx("div", {
 		children: [
-			$.if(() => $.get(error), () => $.jsx("p", { class: "error", children: [() => $.get(error)] }), () => $.jsx("button", { onclick: tryOperation, children: ["run"] }))
+			$.if(
+				() => $.get(error),
+				() => {
+					return $.jsx("p", { class: "error", children: [() => $.get(error)] });
+				},
+				() => {
+					return $.jsx("button", { onclick: tryOperation, children: ["run"] });
+				}
+			)
 		]
 	});
 }

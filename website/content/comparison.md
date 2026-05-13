@@ -68,8 +68,8 @@ $effect(() => { console.log(count); });
 
 ```tsx
 // DarTsx — native JS in JSX
-{if (show) { <p>Yes</p> }}
-{for (const item of items) { <li>{item}</li> }}
+{if (show) <p>Yes</p>}
+{for (const item of items) <li>{item}</li>}
 
 // React — ternaries and .map()
 {show ? <p>Yes</p> : null}

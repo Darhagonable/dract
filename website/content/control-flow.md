@@ -4,21 +4,24 @@ title: Control Flow
 
 # Control Flow
 
-Control flow blocks are embedded directly in JSX using curly braces.
+Control flow blocks are embedded directly in JSX using curly braces. They follow the same semantics as JavaScript arrow functions:
+
+- **Expression body** — bare JSX or parenthesized expression, implicit render
+- **Block body `{}`** — requires explicit `render`, just like `return` in a block arrow function
 
 ## If statements
 
-Expressions inside `if` blocks are eagerly rendered — bare JSX is output directly:
+Use parentheses for expression bodies:
 
 ```tsx
-{if (loggedIn) {
+{if (loggedIn) (
   <p>Welcome back!</p>
-} else {
+) else (
   <p>Please sign in.</p>
-}}
+)}
 ```
 
-For more complex logic, use full statements with an explicit `render`:
+For more complex logic, use a block body with explicit `render`:
 
 ```tsx
 {if (loggedIn) {
@@ -29,21 +32,21 @@ For more complex logic, use full statements with an explicit `render`:
       <p>{user.email}</p>
     </div>
   )
-} else {
+} else (
   <p>Please sign in.</p>
-}}
+)}
 ```
 
 ### if / else if / else
 
 ```tsx
-{if (status === 'loading') {
+{if (status === 'loading') (
   <Spinner />
-} else if (status === 'error') {
+) else if (status === 'error') (
   <p>Something went wrong.</p>
-} else {
+) else (
   <Content />
-}}
+)}
 ```
 
 ---
@@ -77,9 +80,9 @@ Cases support fall-through (omit `break`), just like regular JavaScript switch s
 Traditional C-style `for` loops work in JSX:
 
 ```tsx
-{for (let i = 0; i < 5; i++) {
+{for (let i = 0; i < 5; i++) (
   <span>{i}</span>
-}}
+)}
 ```
 
 ### for...of
@@ -87,9 +90,9 @@ Traditional C-style `for` loops work in JSX:
 Render collections with `for...of`:
 
 ```tsx
-{for (const item of items) {
+{for (const item of items) (
   <li>{item.name}</li>
-}}
+)}
 ```
 
 ### for...in
@@ -97,9 +100,9 @@ Render collections with `for...of`:
 Use `for...in` to iterate over object keys:
 
 ```tsx
-{for (const key in obj) {
+{for (const key in obj) (
   <li>{key}: {obj[key]}</li>
-}}
+)}
 ```
 
 ### Index and key
@@ -107,9 +110,9 @@ Use `for...in` to iterate over object keys:
 Access the loop index and provide a key for efficient reconciliation:
 
 ```tsx
-{for (const item of items; index i; key item.id) {
+{for (const item of items; index i; key item.id) (
   <li>{i}: {item.name}</li>
-}}
+)}
 ```
 
 ---
@@ -121,11 +124,11 @@ Access the loop index and provide a key for efficient reconciliation:
 Catch errors thrown during rendering:
 
 ```tsx
-{try {
+{try (
   <RiskyComponent />
-} catch (e) {
+) catch (e) (
   <p>Error: {e.message}</p>
-}}
+)}
 ```
 
 ### Async (Suspense boundaries)
@@ -144,13 +147,13 @@ async component UserProfile(id: number) {
 }
 
 // Usage
-{try {
+{try (
   <UserProfile id={1} />
-} pending {
+) pending (
   <p>Loading...</p>
-} catch (e) {
+) catch (e) (
   <p>Error: {e.message}</p>
-}}
+)}
 ```
 
 The `pending` clause renders while the async component is resolving. The `catch` clause handles both sync throws and async rejections.

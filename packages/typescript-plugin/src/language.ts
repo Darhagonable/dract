@@ -178,19 +178,28 @@ function buildMappings(
 		if (!continuable) {
 			// Emit a mapping for this region
 			const first = segments[regionStart];
+			const last = segments[i - 1];
 
-			// Compute length: from first segment to the next segment (or end of file)
-			const nextGenOffset = i < segments.length ? segments[i].genOffset : generated.length;
-			const nextSrcOffset = i < segments.length ? segments[i].srcOffset : _source.length;
+			// Length covers from first to last segment in this region (1:1 mapped)
+			// Use the minimum of source and generated gap to avoid bleeding into
+			// removed/inserted regions
+			const rawGenLength = (i < segments.length ? segments[i].genOffset : generated.length) - first.genOffset;
+			const rawSrcLength = (i < segments.length ? segments[i].srcOffset : _source.length) - first.srcOffset;
 
-			const genLength = nextGenOffset - first.genOffset;
-			const srcLength = nextSrcOffset - first.srcOffset;
+			// When rawSrcLength is negative (reordered segments from move()),
+			// the gap to the next segment is meaningless. Use only the confirmed
+			// range (first..last segment) + 1 char for the last token.
+			// When positive, use the tighter of source/generated gaps.
+			const confirmedLength = last.genOffset - first.genOffset + 1;
+			const length = rawSrcLength > 0
+				? Math.min(rawGenLength, rawSrcLength)
+				: confirmedLength;
 
 			mappings.push({
 				sourceOffsets: [first.srcOffset],
 				generatedOffsets: [first.genOffset],
-				lengths: [srcLength],
-				generatedLengths: [genLength],
+				lengths: [length],
+				generatedLengths: [length],
 				data: {
 					verification: true,
 					completion: true,
@@ -419,56 +428,28 @@ function extractHtmlVirtualCode(source: string): VirtualCode[] {
 
 /**
  * Blank {expression} blocks within a render region.
- * Control-flow blocks (containing `render`) are handled recursively:
- * the JS syntax is blanked but the HTML after `render` is preserved.
+ * If a block contains HTML tags, blank only the outer braces and
+ * recurse (so nested pure-expression blocks like {count} get blanked).
+ * Otherwise blank the entire block.
  */
 function blankExpressions(source: string, out: string[], start: number, end: number): void {
 	let i = start;
 	while (i < end) {
 		if (source[i] === '{') {
 			const braceEnd = skipBracedExpression(source, i);
-			if (/\brender[\s\n]/.test(source.slice(i, braceEnd))) {
-				// Control flow: blank everything, then restore HTML after render keywords
-				for (let j = i; j < braceEnd; j++) if (out[j] !== '\n') out[j] = ' ';
-				restoreRenderContent(source, out, i + 1, braceEnd - 1);
+			if (/<[a-zA-Z]/.test(source.slice(i + 1, braceEnd - 1))) {
+				// Contains HTML: blank outer braces, recurse into content
+				out[i] = ' ';
+				if (braceEnd - 1 < out.length) out[braceEnd - 1] = ' ';
+				blankExpressions(source, out, i + 1, braceEnd - 1);
 			} else {
 				// Pure expression like {count}: blank entirely
-				for (let j = i; j < braceEnd; j++) if (out[j] !== '\n') out[j] = ' ';
+				for (let k = i; k < braceEnd; k++) if (out[k] !== '\n') out[k] = ' ';
 			}
 			i = braceEnd;
 		} else {
 			i++;
 		}
-	}
-}
-
-/**
- * Within a blanked control-flow block, find `render` keywords and
- * restore the HTML/JSX that follows each one. Recursively blanks
- * any nested {expressions} inside the restored content.
- */
-function restoreRenderContent(source: string, out: string[], start: number, end: number): void {
-	const renderRe = /\brender[\s\n]/g;
-	renderRe.lastIndex = start;
-	let m;
-	while ((m = renderRe.exec(source)) !== null && m.index < end) {
-		let jsxStart = m.index + m[0].length;
-		while (jsxStart < end && /\s/.test(source[jsxStart])) jsxStart++;
-
-		// Find the closing } for this clause, skipping nested {…} blocks
-		let jsxEnd = end;
-		for (let k = jsxStart; k < end; k++) {
-			const ch = source[k];
-			if (ch === '{') { k = skipBracedExpression(source, k) - 1; }
-			else if (ch === '}') { jsxEnd = k; break; }
-		}
-
-		// Restore JSX characters
-		for (let k = jsxStart; k < jsxEnd; k++) out[k] = source[k];
-		// Recursively blank {expressions} within the restored JSX
-		blankExpressions(source, out, jsxStart, jsxEnd);
-
-		renderRe.lastIndex = jsxEnd;
 	}
 }
 
