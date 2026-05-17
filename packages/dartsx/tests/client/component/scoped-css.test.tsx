@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('scoped CSS > data attribute injection', () => {
 	it('adds data-scope attribute to all elements', () => {
@@ -16,10 +16,10 @@ describe('scoped CSS > data attribute injection', () => {
 			)
 		}
 
-		mountComponent(Card);
-		const div = container.querySelector('div');
-		const h2 = container.querySelector('h2');
-		const p = container.querySelector('p');
+		mount(Card, document.body);
+		const div = document.querySelector('div')!;
+		const h2 = document.querySelector('h2')!;
+		const p = document.querySelector('p')!;
 
 		// All elements should have a data-scope attribute with a scope hash
 		const hash = div.getAttribute('data-scope');
@@ -39,9 +39,9 @@ describe('scoped CSS > data attribute injection', () => {
 			)
 		}
 
-		mountComponent(Multi);
-		const h1 = container.querySelector('h1');
-		const p = container.querySelector('p');
+		mount(Multi, document.body);
+		const h1 = document.querySelector('h1')!;
+		const p = document.querySelector('p')!;
 
 		const h1Hash = h1.getAttribute('data-scope');
 		const pHash = p.getAttribute('data-scope');
@@ -65,11 +65,11 @@ describe('scoped CSS > data attribute injection', () => {
 			)
 		}
 
-		mountComponent(List);
-		const lis = container.querySelectorAll('li');
+		mount(List, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(2);
 
-		const ul = container.querySelector('ul');
+		const ul = document.querySelector('ul')!;
 		const hash = ul.getAttribute('data-scope');
 		expect(hash).toBeTruthy();
 
@@ -90,7 +90,7 @@ describe('scoped CSS > style injection', () => {
 			)
 		}
 
-		mountComponent(Styled);
+		mount(Styled, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		expect(styles.length).toBeGreaterThanOrEqual(1);
 
@@ -110,8 +110,8 @@ describe('scoped CSS > style injection', () => {
 			)
 		}
 
-		mountComponent(GlobalStyled);
-		const div = container.querySelector('div');
+		mount(GlobalStyled, document.body);
+		const div = document.querySelector('div')!;
 		expect(div.hasAttribute('data-scope')).toBe(false);
 	});
 
@@ -125,7 +125,7 @@ describe('scoped CSS > style injection', () => {
 			)
 		}
 
-		mountComponent(GlobalOnly);
+		mount(GlobalOnly, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		const hasGlobal = styleTexts.some(t => t.includes('.test-global { color: blue; }'));
@@ -153,24 +153,24 @@ describe('scoped CSS > multiple components', () => {
 			)
 		}
 
-		// Mount A
+		// Mount A into its own container
 		const divA = document.createElement('div');
 		document.body.appendChild(divA);
-		const { unmount: unmountA } = (globalThis as any).__mount_to
-			? (globalThis as any).__mount_to(CompA, divA)
-			: (() => { mountComponent(CompA); return { unmount: () => {} }; })();
+		mount(CompA, divA);
 
-		const attrA = container.querySelector('div').getAttribute('data-scope');
+		const attrA = divA.querySelector('div')?.getAttribute('data-scope');
 
-		// Mount B in a separate container
+		// Mount B into a separate container
 		const divB = document.createElement('div');
 		document.body.appendChild(divB);
+		mount(CompB, divB);
 
-		// Since we cannot easily mount two components separately with the test helper,
-		// just verify the first component has a scope attribute
+		const attrB = divB.querySelector('div')?.getAttribute('data-scope');
+
+		// Both should have scope attributes, and they should differ
 		expect(attrA).toBeTruthy();
-		divA.remove();
-		divB.remove();
+		expect(attrB).toBeTruthy();
+		expect(attrA).not.toBe(attrB);
 	});
 
 	it('supports mixed scoped and global styles', () => {
@@ -188,11 +188,11 @@ describe('scoped CSS > multiple components', () => {
 			)
 		}
 
-		mountComponent(MixedStyles);
+		mount(MixedStyles, document.body);
 
 		// Scoped: div and p should have data-scope attribute
-		const div = container.querySelector('div');
-		const p = container.querySelector('p');
+		const div = document.querySelector('div')!;
+		const p = document.querySelector('p')!;
 		const hash = div.getAttribute('data-scope');
 		expect(hash).toBeTruthy();
 		expect(p.getAttribute('data-scope')).toBe(hash);
@@ -216,7 +216,7 @@ describe('scoped CSS > selector rewriting', () => {
 			)
 		}
 
-		mountComponent(Simple);
+		mount(Simple, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		// Should have p[data-scope~="..."] not bare p
@@ -238,7 +238,7 @@ describe('scoped CSS > selector rewriting', () => {
 			)
 		}
 
-		mountComponent(Animated);
+		mount(Animated, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		// @keyframes should be hash-prefixed
@@ -261,7 +261,7 @@ describe('scoped CSS > selector rewriting', () => {
 			)
 		}
 
-		mountComponent(Responsive);
+		mount(Responsive, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		const hasScopedMedia = styleTexts.some(t =>
@@ -282,7 +282,7 @@ describe('scoped CSS > selector rewriting', () => {
 			)
 		}
 
-		mountComponent(DeepTest);
+		mount(DeepTest, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		// Should have div[data-scope~="..."] .child (no attr on .child)
@@ -303,7 +303,7 @@ describe('scoped CSS > selector rewriting', () => {
 			)
 		}
 
-		mountComponent(GlobalSelector);
+		mount(GlobalSelector, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		// :global(body) → bare body selector
@@ -332,8 +332,8 @@ describe('scoped CSS > children / slots', () => {
 			)
 		}
 
-		mountComponent(Parent);
-		const p = container.querySelector('p');
+		mount(Parent, document.body);
+		const p = document.querySelector('p')!;
 		// The <p> was authored by Parent so it should have Parent's scope hash
 		expect(p.getAttribute('data-scope')).toBeTruthy();
 	});
@@ -358,12 +358,12 @@ describe('scoped CSS > nested style blocks', () => {
 			)
 		}
 
-		mountComponent(Nested);
-		const divs = container.querySelectorAll('div');
+		mount(Nested, document.body);
+		const divs = document.querySelectorAll('div');
 		// divs[0] is the outer div, divs[1] is the inner div
 		const outerDiv = divs[0];
 		const innerDiv = divs[1];
-		const allP = container.querySelectorAll('p');
+		const allP = document.querySelectorAll('p');
 		const outerP = allP[0]; // "Outside"
 		const innerP = allP[1]; // "Inside"
 
@@ -400,8 +400,8 @@ describe('scoped CSS > reactive CSS values', () => {
 			)
 		}
 
-		mountComponent(Themed);
-		const div = container.querySelector('div');
+		mount(Themed, document.body);
+		const div = document.querySelector('div')!;
 		// CSS var should be on the component's root element (per-instance, like Vue)
 		expect(div.style.cssText).toContain('red');
 	});
@@ -417,8 +417,8 @@ describe('scoped CSS > reactive CSS values', () => {
 			)
 		}
 
-		mountComponent(ReactiveTheme);
-		const button = container.querySelector('button');
+		mount(ReactiveTheme, document.body);
+		const button = document.querySelector('button')!;
 		// Initial value — css var on component root
 		expect(button.style.cssText).toContain('16px');
 
@@ -439,7 +439,7 @@ describe('scoped CSS > reactive CSS values', () => {
 			)
 		}
 
-		mountComponent(VarRef);
+		mount(VarRef, document.body);
 		const styles = document.head.querySelectorAll('style[data-dartsx]');
 		const styleTexts = [...styles].map(s => s.textContent);
 		// Should contain var(--color) not the literal expression

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 import { defineQuery, useQuery } from '../src/index';
 
 function flush() {
@@ -19,16 +19,16 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await tick();
-		expect(container.querySelector('.loading').textContent).toBe('yes');
-		expect(container.querySelector('.data').textContent).toBe('');
+		expect(document.querySelector('.loading')!.textContent).toBe('yes');
+		expect(document.querySelector('.data')!.textContent).toBe('');
 
 		resolve!({ id: 1, title: 'Post 1' });
 		await flush();
 		await tick();
-		expect(container.querySelector('.loading').textContent).toBe('no');
-		expect(container.querySelector('.data').textContent).toBe('Post 1');
+		expect(document.querySelector('.loading')!.textContent).toBe('no');
+		expect(document.querySelector('.data')!.textContent).toBe('Post 1');
 	});
 
 	it('renders error state', async () => {
@@ -44,12 +44,12 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
 
-		expect(container.querySelector('.error').textContent).toBe('network fail');
-		expect(container.querySelector('.success').textContent).toBe('no');
+		expect(document.querySelector('.error')!.textContent).toBe('network fail');
+		expect(document.querySelector('.success')!.textContent).toBe('no');
 		expect(onError).toHaveBeenCalledWith(err);
 	});
 
@@ -65,13 +65,13 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
 
 		expect(fetcher).not.toHaveBeenCalled();
-		expect(container.querySelector('.loading').textContent).toBe('no');
-		expect(container.querySelector('.data').textContent).toBe('empty');
+		expect(document.querySelector('.loading')!.textContent).toBe('no');
+		expect(document.querySelector('.data')!.textContent).toBe('empty');
 	});
 
 	it('re-fetches when reactive args change', async () => {
@@ -87,22 +87,22 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('item-1');
+		expect(document.querySelector('.data')!.textContent).toBe('item-1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('item-2');
+		expect(document.querySelector('.data')!.textContent).toBe('item-2');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('item-3');
+		expect(document.querySelector('.data')!.textContent).toBe('item-3');
 		expect(fetcher).toHaveBeenCalledTimes(3);
 	});
 
@@ -119,24 +119,24 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('post-1');
+		expect(document.querySelector('.data')!.textContent).toBe('post-1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('post-2');
+		expect(document.querySelector('.data')!.textContent).toBe('post-2');
 		expect(fetcher).toHaveBeenCalledTimes(2);
 
 		// Switch back — serves cached data, but refetches
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('post-1');
+		expect(document.querySelector('.data')!.textContent).toBe('post-1');
 		expect(fetcher).toHaveBeenCalledTimes(3);
 	});
 
@@ -153,15 +153,15 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('v1');
+		expect(document.querySelector('.data')!.textContent).toBe('v1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('v2');
+		expect(document.querySelector('.data')!.textContent).toBe('v2');
 		expect(fetcher).toHaveBeenCalledTimes(2);
 	});
 
@@ -178,15 +178,15 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('v1');
+		expect(document.querySelector('.data')!.textContent).toBe('v1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('v2');
+		expect(document.querySelector('.data')!.textContent).toBe('v2');
 	});
 
 	it('clear removes cache', async () => {
@@ -202,14 +202,14 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
 		expect(fetcher).toHaveBeenCalledTimes(1);
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('gone');
+		expect(document.querySelector('.data')!.textContent).toBe('gone');
 
 		// Remount — should re-fetch
 		component App2() {
@@ -217,7 +217,7 @@ describe('useQuery', () => {
 			render <p class="data">{post.data ?? ''}</p>;
 		}
 
-		mountComponent(App2);
+		mount(App2, document.body);
 		await flush();
 		await tick();
 		expect(fetcher).toHaveBeenCalledTimes(2);
@@ -234,11 +234,11 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.success').textContent).toBe('yes');
-		expect(container.querySelector('.data').textContent).toBe('null');
+		expect(document.querySelector('.success')!.textContent).toBe('yes');
+		expect(document.querySelector('.data')!.textContent).toBe('null');
 	});
 
 	it('recovers from error on re-fetch', async () => {
@@ -257,16 +257,16 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.error').textContent).toBe('fail');
+		expect(document.querySelector('.error')!.textContent).toBe('fail');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await flush();
 		await tick();
-		expect(container.querySelector('.error').textContent).toBe('');
-		expect(container.querySelector('.data').textContent).toBe('ok');
+		expect(document.querySelector('.error')!.textContent).toBe('');
+		expect(document.querySelector('.data')!.textContent).toBe('ok');
 	});
 
 	it('discards stale response after invalidate', async () => {
@@ -284,13 +284,13 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
-		expect(container.querySelector('.loading').textContent).toBe('yes');
+		expect(document.querySelector('.loading')!.textContent).toBe('yes');
 
 		// Invalidate while first fetch is in-flight
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await flush();
 		await tick();
 		expect(resolvers).toHaveLength(2);
@@ -299,15 +299,15 @@ describe('useQuery', () => {
 		resolvers[0]!('stale');
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('');
-		expect(container.querySelector('.loading').textContent).toBe('yes');
+		expect(document.querySelector('.data')!.textContent).toBe('');
+		expect(document.querySelector('.loading')!.textContent).toBe('yes');
 
 		// Resolve second (current) response
 		resolvers[1]!('fresh');
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('fresh');
-		expect(container.querySelector('.loading').textContent).toBe('no');
+		expect(document.querySelector('.data')!.textContent).toBe('fresh');
+		expect(document.querySelector('.loading')!.textContent).toBe('no');
 	});
 
 	it('deduplicates fetches across multiple components', async () => {
@@ -327,13 +327,13 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
 
 		expect(fetcher).toHaveBeenCalledTimes(1);
-		expect(container.querySelector('.parent').textContent).toBe('shared');
-		expect(container.querySelector('.child').textContent).toBe('shared');
+		expect(document.querySelector('.parent')!.textContent).toBe('shared');
+		expect(document.querySelector('.child')!.textContent).toBe('shared');
 	});
 
 	it('refetchInterval polls periodically', async () => {
@@ -347,18 +347,18 @@ describe('useQuery', () => {
 			render <p class="data">{post.data ?? ''}</p>;
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await vi.advanceTimersByTimeAsync(0);
 		expect(fetcher).toHaveBeenCalledTimes(1);
-		expect(container.querySelector('.data').textContent).toBe('v1');
+		expect(document.querySelector('.data')!.textContent).toBe('v1');
 
 		await vi.advanceTimersByTimeAsync(1000);
 		expect(fetcher).toHaveBeenCalledTimes(2);
-		expect(container.querySelector('.data').textContent).toBe('v2');
+		expect(document.querySelector('.data')!.textContent).toBe('v2');
 
 		await vi.advanceTimersByTimeAsync(1000);
 		expect(fetcher).toHaveBeenCalledTimes(3);
-		expect(container.querySelector('.data').textContent).toBe('v3');
+		expect(document.querySelector('.data')!.textContent).toBe('v3');
 
 		vi.useRealTimers();
 	});
@@ -380,13 +380,13 @@ describe('useQuery', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
 		expect(signals).toHaveLength(1);
 		expect(signals[0].aborted).toBe(false);
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await flush();
 		await tick();
 		expect(signals).toHaveLength(2);
@@ -396,7 +396,7 @@ describe('useQuery', () => {
 		resolvers[1]!('fresh');
 		await flush();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('fresh');
+		expect(document.querySelector('.data')!.textContent).toBe('fresh');
 	});
 
 	it('passes signal to queryFn', async () => {
@@ -411,11 +411,11 @@ describe('useQuery', () => {
 			render <p class="data">{post.data ?? ''}</p>;
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await flush();
 		await tick();
 		expect(receivedSignal).toBeInstanceOf(AbortSignal);
 		expect(receivedSignal!.aborted).toBe(false);
-		expect(container.querySelector('.data').textContent).toBe('item-1');
+		expect(document.querySelector('.data')!.textContent).toBe('item-1');
 	});
 });

@@ -26,7 +26,7 @@ export async function emit_dts(
 	tsconfigPath: string | undefined,
 ): Promise<void> {
 	const ts = await loadTS();
-	const tmp = path.join(cwd, 'node_modules', '.dartsx-package-types');
+	const tmp = path.join(cwd, 'node_modules', '.dartsx-cli-types');
 	rimraf(tmp);
 	mkdirp(tmp);
 
@@ -185,7 +185,7 @@ async function loadTS(): Promise<typeof import('typescript')> {
 		return (await import('typescript')).default;
 	} catch {
 		throw new Error(
-			'TypeScript is required for dartsx-package. Install it as a dev dependency.',
+			'TypeScript is required for dartsx-cli. Install it as a dev dependency.',
 		);
 	}
 }

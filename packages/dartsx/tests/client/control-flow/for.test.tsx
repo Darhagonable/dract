@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('control-flow > for basic', () => {
 	it('renders a list with for...of', () => {
@@ -19,8 +19,8 @@ describe('control-flow > for basic', () => {
 			);
 		}
 
-		mountComponent(ForBasic);
-		const lis = container.querySelectorAll('li');
+		mount(ForBasic, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('Item 1');
 		expect(lis[1].textContent).toBe('Item 2');
@@ -42,8 +42,8 @@ describe('control-flow > for with index', () => {
 			);
 		}
 
-		mountComponent(ForIndex);
-		const lis = container.querySelectorAll('li');
+		mount(ForIndex, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('0: a');
 		expect(lis[1].textContent).toBe('1: b');
 		expect(lis[2].textContent).toBe('2: c');
@@ -69,15 +69,15 @@ describe('control-flow > for with key', () => {
 			);
 		}
 
-		mountComponent(ForKey);
-		let lis = container.querySelectorAll('li');
+		mount(ForKey, document.body);
+		let lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('first');
 		expect(lis[2].textContent).toBe('third');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 
-		lis = container.querySelectorAll('li');
+		lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('third');
 		expect(lis[2].textContent).toBe('first');
 	});
@@ -102,15 +102,15 @@ describe('control-flow > for with key and index (index first)', () => {
 			);
 		}
 
-		mountComponent(ForIndexKey);
-		let lis = container.querySelectorAll('li');
+		mount(ForIndexKey, document.body);
+		let lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('0: a');
 		expect(lis[2].textContent).toBe('2: c');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 
-		lis = container.querySelectorAll('li');
+		lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('2: c');
 		expect(lis[2].textContent).toBe('0: a');
 	});
@@ -135,15 +135,15 @@ describe('control-flow > for with key and index (key first)', () => {
 			);
 		}
 
-		mountComponent(ForKeyIndex);
-		let lis = container.querySelectorAll('li');
+		mount(ForKeyIndex, document.body);
+		let lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('0: x');
 		expect(lis[2].textContent).toBe('2: z');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 
-		lis = container.querySelectorAll('li');
+		lis = document.querySelectorAll('li');
 		expect(lis[0].textContent).toBe('2: z');
 		expect(lis[2].textContent).toBe('0: x');
 	});
@@ -163,8 +163,8 @@ describe('control-flow > C-style for loop', () => {
 			);
 		}
 
-		mountComponent(CStyleFor);
-		const lis = container.querySelectorAll('li');
+		mount(CStyleFor, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('0');
 		expect(lis[1].textContent).toBe('1');
@@ -184,8 +184,8 @@ describe('control-flow > .map() expression', () => {
 			);
 		}
 
-		mountComponent(MapList);
-		const lis = container.querySelectorAll('li');
+		mount(MapList, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('a');
 	});
@@ -210,8 +210,8 @@ describe('control-flow > for-of with block render', () => {
 			);
 		}
 
-		mountComponent(ForOfBlockRender);
-		const lis = container.querySelectorAll('li');
+		mount(ForOfBlockRender, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('Alice');
 		expect(lis[1].textContent).toBe('Bob');
@@ -234,8 +234,8 @@ describe('control-flow > C-style for with block render', () => {
 			);
 		}
 
-		mountComponent(CStyleBlockRender);
-		const lis = container.querySelectorAll('li');
+		mount(CStyleBlockRender, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('item-0');
 		expect(lis[1].textContent).toBe('item-1');

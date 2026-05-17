@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('html tag', () => {
 	it('renders raw HTML into the DOM', () => {
@@ -11,9 +11,9 @@ describe('html tag', () => {
 			)
 		}
 
-		mountComponent(Article);
-		expect(container.querySelector('article p')).not.toBeNull();
-		expect(container.querySelector('article p').innerHTML).toBe('hello <strong>world</strong>');
+		mount(Article, document.body);
+		expect(document.querySelector('article p')).not.toBeNull();
+		expect(document.querySelector('article p')!.innerHTML).toBe('hello <strong>world</strong>');
 	});
 
 	it('renders empty string as nothing', () => {
@@ -25,8 +25,8 @@ describe('html tag', () => {
 			)
 		}
 
-		mountComponent(Empty);
-		const div = container.querySelector('div');
+		mount(Empty, document.body);
+		const div = document.querySelector('div')!;
 		// Should contain just the anchor comment
 		expect(div.querySelector('p')).toBeNull();
 	});
@@ -43,12 +43,12 @@ describe('html tag', () => {
 			)
 		}
 
-		mountComponent(Preview);
-		expect(container.querySelector('div p').textContent).toBe('first');
+		mount(Preview, document.body);
+		expect(document.querySelector('div p')!.textContent).toBe('first');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('div p').textContent).toBe('second');
+		expect(document.querySelector('div p')!.textContent).toBe('second');
 	});
 
 	it('does not execute script tags', () => {
@@ -63,7 +63,7 @@ describe('html tag', () => {
 			)
 		}
 
-		mountComponent(ScriptTest);
+		mount(ScriptTest, document.body);
 		expect(executed).toBe(false);
 
 		delete (globalThis as any).__html_test_exec;

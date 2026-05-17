@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('component > composition', () => {
 	it('composes multiple child components', () => {
@@ -16,8 +16,8 @@ describe('component > composition', () => {
 			);
 		}
 
-		mountComponent(CompositionApp);
-		const buttons = container.querySelectorAll('button');
+		mount(CompositionApp, document.body);
+		const buttons = document.querySelectorAll('button');
 		expect(buttons.length).toBe(2);
 		expect(buttons[0].textContent).toBe('Click me');
 		expect(buttons[1].textContent).toBe('Submit');
@@ -43,10 +43,10 @@ describe('component > children', () => {
 			);
 		}
 
-		mountComponent(App);
-		const card = container.querySelector('.card');
-		expect(card.querySelector('h2').textContent).toBe('Title');
-		expect(card.querySelector('p').textContent).toBe('Content');
+		mount(App, document.body);
+		const card = document.querySelector('.card')!;
+		expect(card.querySelector('h2')!.textContent).toBe('Title');
+		expect(card.querySelector('p')!.textContent).toBe('Content');
 	});
 });
 
@@ -68,8 +68,8 @@ describe('component > reactive fragment return', () => {
 			);
 		}
 
-		mountComponent(Wrapper);
-		expect(container.querySelector('div').textContent).toBe('initial');
+		mount(Wrapper, document.body);
+		expect(document.querySelector('div')!.textContent).toBe('initial');
 	});
 
 	it('reactively updates when component returns function getter', async () => {
@@ -91,12 +91,12 @@ describe('component > reactive fragment return', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('#out').textContent).toBe('page-a');
+		mount(App, document.body);
+		expect(document.querySelector('#out')!.textContent).toBe('page-a');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('#out').textContent).toBe('page-b');
+		expect(document.querySelector('#out')!.textContent).toBe('page-b');
 	});
 
 	it('swaps DOM nodes when component returns different elements', async () => {
@@ -118,19 +118,19 @@ describe('component > reactive fragment return', () => {
 
 		component App() {
 			render (
-				<div id="container">
+				<div id="root">
 					<Switcher />
 				</div>
 				<button onclick={() => which = 'about'}>go about</button>
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('#container h2').textContent).toBe('Home');
+		mount(App, document.body);
+		expect(document.querySelector('#root h2')!.textContent).toBe('Home');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('#container h2').textContent).toBe('About');
+		expect(document.querySelector('#root h2')!.textContent).toBe('About');
 	});
 });
 
@@ -149,12 +149,12 @@ describe('component > nested in factory function', () => {
 		}
 
 		const Counter = createCounter();
-		mountComponent(Counter);
-		expect(container.querySelector('button').textContent).toBe('0');
+		mount(Counter, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('1');
+		expect(document.querySelector('button')!.textContent).toBe('1');
 	});
 
 	it('component inside factory with derived from parent state', async () => {
@@ -176,13 +176,13 @@ describe('component > nested in factory function', () => {
 		}
 
 		const Widget = createWidget();
-		mountComponent(Widget);
-		expect(container.querySelector('.v').textContent).toBe('5');
-		expect(container.querySelector('.d').textContent).toBe('10');
+		mount(Widget, document.body);
+		expect(document.querySelector('.v')!.textContent).toBe('5');
+		expect(document.querySelector('.d')!.textContent).toBe('10');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.v').textContent).toBe('10');
-		expect(container.querySelector('.d').textContent).toBe('20');
+		expect(document.querySelector('.v')!.textContent).toBe('10');
+		expect(document.querySelector('.d')!.textContent).toBe('20');
 	});
 });

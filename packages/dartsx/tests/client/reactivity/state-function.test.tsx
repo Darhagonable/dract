@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('reactivity > state with function object', () => {
 	it('reacts to property mutations on a function with Object.assign', async () => {
@@ -16,13 +16,13 @@ describe('reactivity > state with function object', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('.count').textContent).toBe('0');
-		expect(container.querySelector('.call').textContent).toBe('hello');
+		mount(App, document.body);
+		expect(document.querySelector('.count')!.textContent).toBe('0');
+		expect(document.querySelector('.call')!.textContent).toBe('hello');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.count').textContent).toBe('1');
+		expect(document.querySelector('.count')!.textContent).toBe('1');
 	});
 
 	it('function state remains callable after state proxy wrapping', async () => {
@@ -42,10 +42,10 @@ describe('reactivity > state with function object', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('.label').textContent).toBe('go');
+		mount(App, document.body);
+		expect(document.querySelector('.label')!.textContent).toBe('go');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		expect(callCount).toBe(1);
 	});
@@ -67,11 +67,11 @@ describe('reactivity > state with function object', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('.data').textContent).toBe('none');
+		mount(App, document.body);
+		expect(document.querySelector('.data')!.textContent).toBe('none');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('executed');
+		expect(document.querySelector('.data')!.textContent).toBe('executed');
 	});
 });

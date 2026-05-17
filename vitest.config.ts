@@ -25,7 +25,6 @@ export default defineConfig({
 					include: ['packages/dartsx/tests/client/**/*.test.tsx'],
 					environment: 'jsdom',
 					setupFiles: ['packages/dartsx/tests/setup-client.js'],
-					globals: true,
 				},
 			},
 			{
@@ -47,7 +46,6 @@ export default defineConfig({
 					include: ['toolkit/query/tests/*.test.tsx'],
 					environment: 'jsdom',
 					setupFiles: ['packages/dartsx/tests/setup-client.js'],
-					globals: true,
 				},
 			},
 		],

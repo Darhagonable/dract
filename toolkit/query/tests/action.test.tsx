@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 import { defineAction, useAction } from '../src/index';
 
 function flush() {
@@ -20,19 +20,19 @@ describe('useAction', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await tick();
-		expect(container.querySelector('.loading').textContent).toBe('no');
+		expect(document.querySelector('.loading')!.textContent).toBe('no');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.loading').textContent).toBe('yes');
+		expect(document.querySelector('.loading')!.textContent).toBe('yes');
 
 		resolve!({ id: 1, title: 'Hello' });
 		await flush();
 		await tick();
-		expect(container.querySelector('.loading').textContent).toBe('no');
-		expect(container.querySelector('.data').textContent).toBe('Hello');
+		expect(document.querySelector('.loading')!.textContent).toBe('no');
+		expect(document.querySelector('.data')!.textContent).toBe('Hello');
 	});
 
 	it('renders error state', async () => {
@@ -47,14 +47,14 @@ describe('useAction', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await tick();
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await flush();
 		await tick();
 
-		expect(container.querySelector('.error').textContent).toBe('fail');
+		expect(document.querySelector('.error')!.textContent).toBe('fail');
 		expect(onError).toHaveBeenCalled();
 	});
 
@@ -71,19 +71,19 @@ describe('useAction', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await tick();
 
-		container.querySelector('.go').click();
+		document.querySelector<HTMLElement>('.go')!.click();
 		await flush();
 		await tick();
-		expect(container.querySelector('.success').textContent).toBe('yes');
-		expect(container.querySelector('.data').textContent).toBe('data');
+		expect(document.querySelector('.success')!.textContent).toBe('yes');
+		expect(document.querySelector('.data')!.textContent).toBe('data');
 
-		container.querySelector('.reset').click();
+		document.querySelector<HTMLElement>('.reset')!.click();
 		await tick();
-		expect(container.querySelector('.success').textContent).toBe('no');
-		expect(container.querySelector('.data').textContent).toBe('');
+		expect(document.querySelector('.success')!.textContent).toBe('no');
+		expect(document.querySelector('.data')!.textContent).toBe('');
 	});
 
 	it('sequential calls — latest wins', async () => {
@@ -102,12 +102,12 @@ describe('useAction', () => {
 			);
 		}
 
-		mountComponent(App);
+		mount(App, document.body);
 		await tick();
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await new Promise((r) => setTimeout(r, 100));
 		await tick();
-		expect(container.querySelector('.data').textContent).toBe('result-2');
+		expect(document.querySelector('.data')!.textContent).toBe('result-2');
 	});
 });

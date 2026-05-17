@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('component > render expression', () => {
 	it('renders a static expression', () => {
@@ -7,8 +7,8 @@ describe('component > render expression', () => {
 			render "hello"
 		}
 
-		mountComponent(Static);
-		expect(container.textContent).toBe('hello');
+		mount(Static, document.body);
+		expect(document.body.textContent).toBe('hello');
 	});
 
 	it('renders null', () => {
@@ -16,8 +16,8 @@ describe('component > render expression', () => {
 			render null
 		}
 
-		mountComponent(Nil);
-		expect(container.textContent).toBe('');
+		mount(Nil, document.body);
+		expect(document.body.textContent).toBe('');
 	});
 
 	it('reactively updates when state changes', async () => {
@@ -27,16 +27,16 @@ describe('component > render expression', () => {
 			render count
 		}
 
-		mountComponent(Counter);
-		expect(container.textContent).toBe('0');
+		mount(Counter, document.body);
+		expect(document.body.textContent).toBe('0');
 
 		count++;
 		await tick();
-		expect(container.textContent).toBe('1');
+		expect(document.body.textContent).toBe('1');
 
 		count = 42;
 		await tick();
-		expect(container.textContent).toBe('42');
+		expect(document.body.textContent).toBe('42');
 	});
 
 	it('reactively updates proxy member access', async () => {
@@ -46,12 +46,12 @@ describe('component > render expression', () => {
 			render data.label
 		}
 
-		mountComponent(Label);
-		expect(container.textContent).toBe('initial');
+		mount(Label, document.body);
+		expect(document.body.textContent).toBe('initial');
 
 		data.label = 'updated';
 		await tick();
-		expect(container.textContent).toBe('updated');
+		expect(document.body.textContent).toBe('updated');
 	});
 
 	it('reactively updates complex expression with nullish coalescing', async () => {
@@ -61,15 +61,15 @@ describe('component > render expression', () => {
 			render match?.name ?? "none"
 		}
 
-		mountComponent(Display);
-		expect(container.textContent).toBe('none');
+		mount(Display, document.body);
+		expect(document.body.textContent).toBe('none');
 
 		match = { name: 'home' };
 		await tick();
-		expect(container.textContent).toBe('home');
+		expect(document.body.textContent).toBe('home');
 
 		match = null;
 		await tick();
-		expect(container.textContent).toBe('none');
+		expect(document.body.textContent).toBe('none');
 	});
 });

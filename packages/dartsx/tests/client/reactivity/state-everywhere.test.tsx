@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick, createContext, provide } from 'dartsx';
+import { tick, createContext, provide, mount } from 'dartsx';
 
 describe('reactivity > state in non-component scopes', () => {
 	it('state works inside a regular function', async () => {
@@ -20,12 +20,12 @@ describe('reactivity > state in non-component scopes', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('0');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 
 	it('state works inside an arrow function', async () => {
@@ -46,12 +46,12 @@ describe('reactivity > state in non-component scopes', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('off');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('off');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('on');
+		expect(document.querySelector('span')!.textContent).toBe('on');
 	});
 
 	it('state works inside a createContext factory', async () => {
@@ -73,16 +73,16 @@ describe('reactivity > state in non-component scopes', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('button').textContent).toBe('Count: 0');
+		mount(Parent, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('Count: 0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('Count: 1');
+		expect(document.querySelector('button')!.textContent).toBe('Count: 1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('Count: 2');
+		expect(document.querySelector('button')!.textContent).toBe('Count: 2');
 	});
 
 	it('derived destructuring tracks multiple reactive properties', async () => {
@@ -111,16 +111,16 @@ describe('reactivity > state in non-component scopes', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('.name').textContent).toBe('');
-		expect(container.querySelector('.email').textContent).toBe('');
+		mount(Parent, document.body);
+		expect(document.querySelector('.name')!.textContent).toBe('');
+		expect(document.querySelector('.email')!.textContent).toBe('');
 
-		container.querySelector('.set-name').click();
+		document.querySelector<HTMLElement>('.set-name')!.click();
 		await tick();
-		expect(container.querySelector('.name').textContent).toBe('Alice');
+		expect(document.querySelector('.name')!.textContent).toBe('Alice');
 
-		container.querySelector('.set-email').click();
+		document.querySelector<HTMLElement>('.set-email')!.click();
 		await tick();
-		expect(container.querySelector('.email').textContent).toBe('a@b.c');
+		expect(document.querySelector('.email')!.textContent).toBe('a@b.c');
 	});
 });

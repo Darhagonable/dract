@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { mount } from 'dartsx';
 
 describe('component > multiple root elements', () => {
 	it('renders multiple root elements without wrapper', () => {
@@ -10,9 +11,9 @@ describe('component > multiple root elements', () => {
 			);
 		}
 
-		mountComponent(MultiRoot);
-		expect(container.querySelector('header').textContent).toBe('Header');
-		expect(container.querySelector('main').textContent).toBe('Content');
-		expect(container.querySelector('footer').textContent).toBe('Footer');
+		mount(MultiRoot, document.body);
+		expect(document.querySelector('header')!.textContent).toBe('Header');
+		expect(document.querySelector('main')!.textContent).toBe('Content');
+		expect(document.querySelector('footer')!.textContent).toBe('Footer');
 	});
 });

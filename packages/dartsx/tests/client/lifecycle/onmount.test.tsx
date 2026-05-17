@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { onMount, onCleanup, tick } from 'dartsx';
+import { onMount, onCleanup, tick, mount } from 'dartsx';
 
 describe('lifecycle > onMount', () => {
 	it('calls onMount after component is in the DOM', async () => {
@@ -15,9 +15,9 @@ describe('lifecycle > onMount', () => {
 			);
 		}
 
-		mountComponent(OnMountBasic);
+		mount(OnMountBasic, document.body);
 		await tick();
-		expect(container.querySelector('p').textContent).toBe('Mounted');
+		expect(document.querySelector('p')!.textContent).toBe('Mounted');
 	});
 
 	it('runs cleanup registered inside onMount on unmount', () => {
@@ -35,7 +35,7 @@ describe('lifecycle > onMount', () => {
 			);
 		}
 
-		const { unmount } = mountComponent(CleanupInMount);
+		const { unmount } = mount(CleanupInMount, document.body);
 		expect(cleanedUp).toBe(false);
 
 		unmount();

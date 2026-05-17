@@ -65,7 +65,8 @@
 		]
 	},
 	"scripts": {
-		"build": "tsc",
+		"build": "tsc --build",
+		"check": "tsc --noEmit",
 		"test": "tsc -p tsconfig.test.json && vscode-test",
 		"package": "vsce package --no-dependencies"
 	},

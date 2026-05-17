@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('component > anonymous-block', () => {
 	it('renders anonymous block with local vars and render', () => {
@@ -14,8 +14,8 @@ describe('component > anonymous-block', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p').textContent).toBe('Hello');
+		mount(Test, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('Hello');
 	});
 
 	it('renders anonymous block with reactive state', async () => {
@@ -29,12 +29,12 @@ describe('component > anonymous-block', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('span').textContent).toBe('Count: 0');
+		mount(Test, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Count: 0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Count: 1');
+		expect(document.querySelector('span')!.textContent).toBe('Count: 1');
 	});
 
 	it('renders multiple anonymous blocks', () => {
@@ -47,9 +47,9 @@ describe('component > anonymous-block', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p').textContent).toBe('First');
-		expect(container.querySelector('span').textContent).toBe('Second');
+		mount(Test, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('First');
+		expect(document.querySelector('span')!.textContent).toBe('Second');
 	});
 
 	it('renders block with local var and for loop', () => {
@@ -66,8 +66,8 @@ describe('component > anonymous-block', () => {
 			);
 		}
 
-		mountComponent(Test);
-		const lis = container.querySelectorAll('li');
+		mount(Test, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('a');
 		expect(lis[1].textContent).toBe('b');
@@ -88,8 +88,8 @@ describe('component > anonymous-block', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p').textContent).toBe('Hello');
+		mount(Test, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('Hello');
 	});
 
 	it('renders block with bare JSX (no render keyword)', () => {
@@ -101,7 +101,7 @@ describe('component > anonymous-block', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('span').textContent).toBe('bare');
+		mount(Test, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('bare');
 	});
 });

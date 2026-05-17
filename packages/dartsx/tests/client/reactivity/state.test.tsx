@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { effect, tick } from 'dartsx';
+import { effect, tick, mount } from 'dartsx';
 
 describe('reactivity > state basic counter', () => {
 	it('increments count on click', async () => {
@@ -13,8 +13,8 @@ describe('reactivity > state basic counter', () => {
 			);
 		}
 
-		mountComponent(Counter);
-		const btn = container.querySelector('button');
+		mount(Counter, document.body);
+		const btn = document.querySelector('button')!;
 		expect(btn.textContent).toBe('clicks: 0');
 
 		btn.click();
@@ -36,12 +36,12 @@ describe('reactivity > state basic counter', () => {
 			);
 		}
 
-		mountComponent(SameValue);
-		expect(container.querySelector('span').textContent).toBe('5');
+		mount(SameValue, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('5');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('5');
+		expect(document.querySelector('span')!.textContent).toBe('5');
 	});
 });
 
@@ -56,12 +56,12 @@ describe('reactivity > state proxy object', () => {
 			);
 		}
 
-		mountComponent(ProxyObj);
-		expect(container.querySelector('span').textContent).toBe('Alice');
+		mount(ProxyObj, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Alice');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Bob');
+		expect(document.querySelector('span')!.textContent).toBe('Bob');
 	});
 
 	it('reacts to nested property mutations', async () => {
@@ -74,12 +74,12 @@ describe('reactivity > state proxy object', () => {
 			);
 		}
 
-		mountComponent(NestedProxy);
-		expect(container.querySelector('span').textContent).toBe('hello');
+		mount(NestedProxy, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('hello');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('world');
+		expect(document.querySelector('span')!.textContent).toBe('world');
 	});
 
 	it('reacts to array push', async () => {
@@ -92,12 +92,12 @@ describe('reactivity > state proxy object', () => {
 			);
 		}
 
-		mountComponent(ArrayPush);
-		expect(container.querySelector('span').textContent).toBe('2');
+		mount(ArrayPush, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3');
+		expect(document.querySelector('span')!.textContent).toBe('3');
 	});
 
 	it('reacts to array index mutation', async () => {
@@ -110,12 +110,12 @@ describe('reactivity > state proxy object', () => {
 			);
 		}
 
-		mountComponent(ArrayIndex);
-		expect(container.querySelector('span').textContent).toBe('a');
+		mount(ArrayIndex, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('a');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('z');
+		expect(document.querySelector('span')!.textContent).toBe('z');
 	});
 });
 
@@ -131,12 +131,12 @@ describe('reactivity > Map state', () => {
 			);
 		}
 
-		mountComponent(MapTest);
-		expect(container.querySelector('span').textContent).toBe('10');
+		mount(MapTest, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('10');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('100');
+		expect(document.querySelector('span')!.textContent).toBe('100');
 	});
 
 	it('reacts to Map.delete()', async () => {
@@ -150,12 +150,12 @@ describe('reactivity > Map state', () => {
 			);
 		}
 
-		mountComponent(MapDelete);
-		expect(container.querySelector('span').textContent).toBe('2');
+		mount(MapDelete, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 });
 
@@ -171,12 +171,12 @@ describe('reactivity > Set state', () => {
 			);
 		}
 
-		mountComponent(SetAdd);
-		expect(container.querySelector('span').textContent).toBe('2');
+		mount(SetAdd, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3');
+		expect(document.querySelector('span')!.textContent).toBe('3');
 	});
 
 	it('reacts to Set.delete()', async () => {
@@ -190,12 +190,12 @@ describe('reactivity > Set state', () => {
 			);
 		}
 
-		mountComponent(SetDelete);
-		expect(container.querySelector('span').textContent).toBe('3');
+		mount(SetDelete, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('3');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 	});
 });
 
@@ -211,11 +211,11 @@ describe('reactivity > Date state', () => {
 			);
 		}
 
-		mountComponent(DateTest);
-		expect(container.querySelector('span').textContent).toBe('2020');
+		mount(DateTest, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2020');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2025');
+		expect(document.querySelector('span')!.textContent).toBe('2025');
 	});
 });

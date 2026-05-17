@@ -13,7 +13,7 @@ export type Routes<T extends object> = {
 export interface RouterState<Routes extends string, Current extends string = string> {
 	route: string extends Current ? Routes : Current;
 	pathname: string;
-	params: string extends Current ? Record<string, string> : ExtractParams<Current>;
+	params: string extends Current ? Record<string, string | undefined> : ExtractParams<Current>;
 	search: string;
 	hash: string;
 	navigation: TypedNavigation<Routes, Current>;
@@ -41,12 +41,14 @@ export function createRouter<const T extends Routes<T>>(routes: T): CreateRouter
 	navigation.addEventListener('navigate', (e) => {
 		if (!e.canIntercept || e.hashChange || e.downloadRequest) return;
 		e.intercept({
-			handler: () => url = new URL(e.destination.url)
+			handler: () => {
+				url = new URL(e.destination.url)
+			}
 		});
 	});
 
 	derived routerState: RouterState<AllRoutes> = {
-		route: match?.route.pattern.pathname,
+		route: match?.route.pattern.pathname as AllRoutes,
 		pathname: url.pathname,
 		params: match?.params ?? {},
 		search: url.search,
@@ -72,7 +74,9 @@ export function createRouter<const T extends Routes<T>>(routes: T): CreateRouter
 
 	// ── RouterContext accessor ──────────────────────────────────────
 
-	function RouterContext<R extends AllRoutes>(expectedRoute?: R): RouterState<AllRoutes, R> {
+	function RouterContext(): RouterState<AllRoutes>;
+	function RouterContext<R extends AllRoutes>(expectedRoute: R): RouterState<AllRoutes, R>;
+	function RouterContext(expectedRoute?: string) {
 		if (expectedRoute !== undefined && routerState.route !== expectedRoute) {
 			throw new Error(
 				`RouterContext("${expectedRoute}") called but current route is "${routerState.route}".`

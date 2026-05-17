@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('component > bind-proxy-member', () => {
 	it('two-way binds a proxy member through a child component', async () => {
@@ -18,15 +18,15 @@ describe('component > bind-proxy-member', () => {
 			);
 		}
 
-		mountComponent(BindProxyMemberApp);
-		const input = container.querySelector('input');
+		mount(BindProxyMemberApp, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.value).toBe('world');
 
 		input.value = 'DarTsx';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('p').textContent).toBe('Hello DarTsx');
+		expect(document.querySelector('p')!.textContent).toBe('Hello DarTsx');
 	});
 });
 
@@ -47,14 +47,14 @@ describe('component > bind-renamed-prop', () => {
 			)
 		}
 
-		mountComponent(BindRenamedApp);
-		const input = container.querySelector('input');
+		mount(BindRenamedApp, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.value).toBe('world');
 
 		input.value = 'DarTsx';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('p').textContent).toBe('Hello DarTsx');
+		expect(document.querySelector('p')!.textContent).toBe('Hello DarTsx');
 	});
 });

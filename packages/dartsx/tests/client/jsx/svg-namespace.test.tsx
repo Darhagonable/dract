@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { mount } from 'dartsx';
 import $ from 'dartsx/internal/client';
 
 describe('jsx > svg namespace (compile-time)', () => {
@@ -22,15 +23,15 @@ describe('jsx > svg namespace (compile-time)', () => {
 			);
 		}
 
-		mountComponent(SvgBasic);
-		const svg = container.querySelector('svg');
+		mount(SvgBasic, document.body);
+		const svg = document.querySelector('svg')!;
 		expect(svg).not.toBeNull();
 		expect(svg.namespaceURI).toBe('http://www.w3.org/2000/svg');
 
-		const circle = svg.querySelector('circle');
+		const circle = svg.querySelector('circle')!;
 		expect(circle.namespaceURI).toBe('http://www.w3.org/2000/svg');
 
-		const rect = svg.querySelector('rect');
+		const rect = svg.querySelector('rect')!;
 		expect(rect.namespaceURI).toBe('http://www.w3.org/2000/svg');
 	});
 
@@ -47,8 +48,8 @@ describe('jsx > svg namespace (compile-time)', () => {
 			);
 		}
 
-		mountComponent(SvgNested);
-		const path = container.querySelector('path');
+		mount(SvgNested, document.body);
+		const path = document.querySelector('path')!;
 		expect(path.namespaceURI).toBe('http://www.w3.org/2000/svg');
 	});
 
@@ -63,11 +64,11 @@ describe('jsx > svg namespace (compile-time)', () => {
 			);
 		}
 
-		mountComponent(SvgForeignObject);
-		const foreignObj = container.querySelector('foreignObject');
+		mount(SvgForeignObject, document.body);
+		const foreignObj = document.querySelector('foreignObject')!;
 		expect(foreignObj.namespaceURI).toBe('http://www.w3.org/2000/svg');
 
-		const div = foreignObj.querySelector('div');
+		const div = foreignObj.querySelector('div')!;
 		expect(div.namespaceURI).toBe('http://www.w3.org/1999/xhtml');
 	});
 
@@ -81,11 +82,11 @@ describe('jsx > svg namespace (compile-time)', () => {
 			);
 		}
 
-		mountComponent(MixedContent);
-		const span = container.querySelector('span');
+		mount(MixedContent, document.body);
+		const span = document.querySelector('span')!;
 		expect(span.namespaceURI).toBe('http://www.w3.org/1999/xhtml');
 
-		const circle = container.querySelector('circle');
+		const circle = document.querySelector('circle')!;
 		expect(circle.namespaceURI).toBe('http://www.w3.org/2000/svg');
 	});
 });

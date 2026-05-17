@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('control-flow > if', () => {
 	it('conditionally renders content', async () => {
@@ -14,16 +14,16 @@ describe('control-flow > if', () => {
 			);
 		}
 
-		mountComponent(IfBlock);
-		expect(container.querySelector('span').textContent).toBe('truthy');
+		mount(IfBlock, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('truthy');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span')).toBeNull();
+		expect(document.querySelector('span')).toBeNull();
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('truthy');
+		expect(document.querySelector('span')!.textContent).toBe('truthy');
 	});
 });
 
@@ -42,16 +42,16 @@ describe('control-flow > if-else', () => {
 			);
 		}
 
-		mountComponent(IfElseBlock);
-		expect(container.querySelector('span').textContent).toBe('truthy');
+		mount(IfElseBlock, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('truthy');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('falsy');
+		expect(document.querySelector('span')!.textContent).toBe('falsy');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('truthy');
+		expect(document.querySelector('span')!.textContent).toBe('truthy');
 	});
 });
 
@@ -72,20 +72,20 @@ describe('control-flow > else-if', () => {
 			);
 		}
 
-		mountComponent(ElseIfBlock);
-		expect(container.querySelector('span').textContent).toBe('A');
+		mount(ElseIfBlock, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('A');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('B');
+		expect(document.querySelector('span')!.textContent).toBe('B');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('C');
+		expect(document.querySelector('span')!.textContent).toBe('C');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('A');
+		expect(document.querySelector('span')!.textContent).toBe('A');
 	});
 });
 
@@ -100,12 +100,12 @@ describe('control-flow > ternary expression', () => {
 			);
 		}
 
-		mountComponent(TernaryTest);
-		expect(container.querySelector('span').textContent).toBe('visible');
+		mount(TernaryTest, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('visible');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('hidden');
+		expect(document.querySelector('span')!.textContent).toBe('hidden');
 	});
 });
 
@@ -120,12 +120,12 @@ describe('control-flow > logical &&', () => {
 			);
 		}
 
-		mountComponent(LogicalAnd);
-		expect(container.querySelector('span').textContent).toBe('shown');
+		mount(LogicalAnd, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('shown');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span')).toBeNull();
+		expect(document.querySelector('span')).toBeNull();
 	});
 });
 
@@ -146,16 +146,16 @@ describe('control-flow > if with block render', () => {
 			);
 		}
 
-		mountComponent(IfBlockRender);
-		expect(container.querySelector('span').textContent).toBe('visible');
+		mount(IfBlockRender, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('visible');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('hidden');
+		expect(document.querySelector('span')!.textContent).toBe('hidden');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('visible');
+		expect(document.querySelector('span')!.textContent).toBe('visible');
 	});
 });
 
@@ -176,12 +176,12 @@ describe('control-flow > if bare expressions', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('div').textContent.trim()).toBe('5');
+		mount(App, document.body);
+		expect(document.querySelector('div')!.textContent.trim()).toBe('5');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('div').textContent.trim()).toBe('0');
+		expect(document.querySelector('div')!.textContent.trim()).toBe('0');
 	});
 
 	it('renders string expressions in if-block branches', async () => {
@@ -200,11 +200,11 @@ describe('control-flow > if bare expressions', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('div').textContent.trim()).toBe('no items');
+		mount(App, document.body);
+		expect(document.querySelector('div')!.textContent.trim()).toBe('no items');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('div').textContent.trim()).toBe('has items');
+		expect(document.querySelector('div')!.textContent.trim()).toBe('has items');
 	});
 });

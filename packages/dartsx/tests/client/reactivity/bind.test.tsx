@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('reactivity > bind proxy property', () => {
 	it('two-way binds an input to a proxy property', async () => {
@@ -12,15 +12,15 @@ describe('reactivity > bind proxy property', () => {
 			);
 		}
 
-		mountComponent(BindProxyForm);
-		const input = container.querySelector('input');
+		mount(BindProxyForm, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.value).toBe('world');
 
 		input.value = 'DarTsx';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('p').textContent).toBe('Hello DarTsx');
+		expect(document.querySelector('p')!.textContent).toBe('Hello DarTsx');
 		expect(input.value).toBe('DarTsx');
 	});
 });
@@ -39,15 +39,15 @@ describe('reactivity > bind function', () => {
 			);
 		}
 
-		mountComponent(BindFunctionApp);
-		const input = container.querySelector('input');
+		mount(BindFunctionApp, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.value).toBe('Hello');
 
 		input.value = 'world';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('p').textContent).toBe('WORLD');
+		expect(document.querySelector('p')!.textContent).toBe('WORLD');
 		expect(input.value).toBe('WORLD');
 	});
 });

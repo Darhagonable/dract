@@ -35,12 +35,13 @@
 	},
 	"scripts": {
 		"build": "tsdown",
+		"check": "tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},
 	"dependencies": {
 		"clsx": "^2.1.1",
-		"dartsx-package": "workspace:*",
+		"dartsx-cli": "workspace:*",
 		"entities": "^8.0.0",
 		"esrap": "^2.2.5",
 		"magic-string": "^0.30.21",

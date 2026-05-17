@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { effect, onCleanup, tick } from 'dartsx';
+import { effect, onCleanup, tick, mount } from 'dartsx';
 
 // ─── Primitive state ───────────────────────────────────────────────
 
@@ -9,8 +9,8 @@ describe('state > primitive > number', () => {
 			state n = 42;
 			render <span>{n}</span>;
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('42');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('42');
 	});
 
 	it('updates on assignment', async () => {
@@ -21,10 +21,10 @@ describe('state > primitive > number', () => {
 				<span>{n}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('10');
+		expect(document.querySelector('span')!.textContent).toBe('10');
 	});
 
 	it('updates on increment (++)', async () => {
@@ -35,11 +35,11 @@ describe('state > primitive > number', () => {
 				<span>{n}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 	});
 
 	it('updates on compound assignment (+=)', async () => {
@@ -50,10 +50,10 @@ describe('state > primitive > number', () => {
 				<span>{n}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('8');
+		expect(document.querySelector('span')!.textContent).toBe('8');
 	});
 
 	it('does not update DOM when value unchanged', async () => {
@@ -64,10 +64,10 @@ describe('state > primitive > number', () => {
 				<span>{n}</span>
 			);
 		}
-		mountComponent(App);
-		const span = container.querySelector('span');
+		mount(App, document.body);
+		const span = document.querySelector('span')!;
 		const initial = span.textContent;
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		expect(span.textContent).toBe(initial);
 	});
@@ -82,11 +82,11 @@ describe('state > primitive > string', () => {
 				<span>{msg}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('hello');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('hello');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('world');
+		expect(document.querySelector('span')!.textContent).toBe('world');
 	});
 
 	it('updates with string concatenation (+=)', async () => {
@@ -97,13 +97,13 @@ describe('state > primitive > string', () => {
 				<span>{msg}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('ab');
-		container.querySelector('button').click();
+		expect(document.querySelector('span')!.textContent).toBe('ab');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('abb');
+		expect(document.querySelector('span')!.textContent).toBe('abb');
 	});
 });
 
@@ -116,14 +116,14 @@ describe('state > primitive > boolean', () => {
 				<span>{flag ? 'on' : 'off'}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('off');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('off');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('on');
-		container.querySelector('button').click();
+		expect(document.querySelector('span')!.textContent).toBe('on');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('off');
+		expect(document.querySelector('span')!.textContent).toBe('off');
 	});
 });
 
@@ -139,13 +139,13 @@ describe('state > object > shallow property', () => {
 				<span class="age">{user.age}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('.name').textContent).toBe('Alice');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('.name')!.textContent).toBe('Alice');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.name').textContent).toBe('Bob');
+		expect(document.querySelector('.name')!.textContent).toBe('Bob');
 		// age unchanged
-		expect(container.querySelector('.age').textContent).toBe('25');
+		expect(document.querySelector('.age')!.textContent).toBe('25');
 	});
 
 	it('reacts to multiple property mutations in one handler', async () => {
@@ -163,11 +163,11 @@ describe('state > object > shallow property', () => {
 				<span class="age">{user.age}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.name').textContent).toBe('B');
-		expect(container.querySelector('.age').textContent).toBe('2');
+		expect(document.querySelector('.name')!.textContent).toBe('B');
+		expect(document.querySelector('.age')!.textContent).toBe('2');
 	});
 
 	it('reacts to adding new property', async () => {
@@ -178,11 +178,11 @@ describe('state > object > shallow property', () => {
 				<span>{obj.b ?? 'none'}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('none');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('none');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 	});
 });
 
@@ -195,11 +195,11 @@ describe('state > object > deep nesting', () => {
 				<span>{data.a.b.c}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('deep');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('deep');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('changed');
+		expect(document.querySelector('span')!.textContent).toBe('changed');
 	});
 
 	it('reacts to replacing nested object', async () => {
@@ -210,11 +210,11 @@ describe('state > object > deep nesting', () => {
 				<span>{data.child.val}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('99');
+		expect(document.querySelector('span')!.textContent).toBe('99');
 	});
 });
 
@@ -227,11 +227,11 @@ describe('state > object > root reassignment', () => {
 				<span>{user.name}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('Alice');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Alice');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Bob');
+		expect(document.querySelector('span')!.textContent).toBe('Bob');
 	});
 
 	it('reacts to root reassignment from object to different object', async () => {
@@ -243,13 +243,13 @@ describe('state > object > root reassignment', () => {
 				<span class="y">{data.y}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('.x').textContent).toBe('1');
-		expect(container.querySelector('.y').textContent).toBe('2');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('.x')!.textContent).toBe('1');
+		expect(document.querySelector('.y')!.textContent).toBe('2');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.x').textContent).toBe('10');
-		expect(container.querySelector('.y').textContent).toBe('20');
+		expect(document.querySelector('.x')!.textContent).toBe('10');
+		expect(document.querySelector('.y')!.textContent).toBe('20');
 	});
 });
 
@@ -264,11 +264,11 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('a');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('a');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a,b');
+		expect(document.querySelector('span')!.textContent).toBe('a,b');
 	});
 
 	it('reacts to pop', async () => {
@@ -279,10 +279,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a,b');
+		expect(document.querySelector('span')!.textContent).toBe('a,b');
 	});
 
 	it('reacts to splice', async () => {
@@ -293,10 +293,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a,x,c');
+		expect(document.querySelector('span')!.textContent).toBe('a,x,c');
 	});
 
 	it('reacts to unshift', async () => {
@@ -307,10 +307,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a,b,c');
+		expect(document.querySelector('span')!.textContent).toBe('a,b,c');
 	});
 
 	it('reacts to shift', async () => {
@@ -321,10 +321,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('b,c');
+		expect(document.querySelector('span')!.textContent).toBe('b,c');
 	});
 
 	it('reacts to sort', async () => {
@@ -335,10 +335,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1,2,3');
+		expect(document.querySelector('span')!.textContent).toBe('1,2,3');
 	});
 
 	it('reacts to reverse', async () => {
@@ -349,10 +349,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3,2,1');
+		expect(document.querySelector('span')!.textContent).toBe('3,2,1');
 	});
 
 	it('reacts to index assignment', async () => {
@@ -363,10 +363,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a,z,c');
+		expect(document.querySelector('span')!.textContent).toBe('a,z,c');
 	});
 
 	it('reacts to length assignment', async () => {
@@ -377,10 +377,10 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a,b');
+		expect(document.querySelector('span')!.textContent).toBe('a,b');
 	});
 
 	it('reacts to root array reassignment', async () => {
@@ -391,11 +391,11 @@ describe('state > array > mutations', () => {
 				<span>{items.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1,2');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1,2');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('10,20,30');
+		expect(document.querySelector('span')!.textContent).toBe('10,20,30');
 	});
 
 	it('reacts to array of objects mutation', async () => {
@@ -406,11 +406,11 @@ describe('state > array > mutations', () => {
 				<span>{items.map(i => i.name).join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('a,b');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('a,b');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('z,b');
+		expect(document.querySelector('span')!.textContent).toBe('z,b');
 	});
 });
 
@@ -426,11 +426,11 @@ describe('derived > from primitives', () => {
 				<span>{sq}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('9');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('9');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('25');
+		expect(document.querySelector('span')!.textContent).toBe('25');
 	});
 
 	it('computes from multiple states', async () => {
@@ -444,14 +444,14 @@ describe('derived > from primitives', () => {
 				<span>{sum}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('5');
-		container.querySelector('.a').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('5');
+		document.querySelector<HTMLElement>('.a')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('13');
-		container.querySelector('.b').click();
+		expect(document.querySelector('span')!.textContent).toBe('13');
+		document.querySelector<HTMLElement>('.b')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('30');
+		expect(document.querySelector('span')!.textContent).toBe('30');
 	});
 
 	it('chains derived → derived', async () => {
@@ -465,13 +465,13 @@ describe('derived > from primitives', () => {
 				<span class="q">{quadrupled}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('.d').textContent).toBe('4');
-		expect(container.querySelector('.q').textContent).toBe('8');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('.d')!.textContent).toBe('4');
+		expect(document.querySelector('.q')!.textContent).toBe('8');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.d').textContent).toBe('10');
-		expect(container.querySelector('.q').textContent).toBe('20');
+		expect(document.querySelector('.d')!.textContent).toBe('10');
+		expect(document.querySelector('.q')!.textContent).toBe('20');
 	});
 
 	it('three-level derived chain', async () => {
@@ -485,11 +485,11 @@ describe('derived > from primitives', () => {
 				<span>{c}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('4');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('4');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('13');
+		expect(document.querySelector('span')!.textContent).toBe('13');
 	});
 });
 
@@ -503,11 +503,11 @@ describe('derived > from proxy state', () => {
 				<span>{full}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('A B');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('A B');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('X B');
+		expect(document.querySelector('span')!.textContent).toBe('X B');
 	});
 
 	it('derives from array method', async () => {
@@ -519,11 +519,11 @@ describe('derived > from proxy state', () => {
 				<span>{sum}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('6');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('6');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('10');
+		expect(document.querySelector('span')!.textContent).toBe('10');
 	});
 
 	it('derives filtered list from array state', async () => {
@@ -535,11 +535,11 @@ describe('derived > from proxy state', () => {
 				<span>{evens.join(',')}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('2,4');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2,4');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2,4,6');
+		expect(document.querySelector('span')!.textContent).toBe('2,4,6');
 	});
 
 	it('derives count from array length', async () => {
@@ -551,14 +551,14 @@ describe('derived > from proxy state', () => {
 				<span>{count}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
-		container.querySelector('button').click();
+		expect(document.querySelector('span')!.textContent).toBe('2');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3');
+		expect(document.querySelector('span')!.textContent).toBe('3');
 	});
 });
 
@@ -574,13 +574,13 @@ describe('derived > object-valued', () => {
 				<span class="first">{first}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('.full').textContent).toBe('A B');
-		expect(container.querySelector('.first').textContent).toBe('A');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('.full')!.textContent).toBe('A B');
+		expect(document.querySelector('.first')!.textContent).toBe('A');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.full').textContent).toBe('X B');
-		expect(container.querySelector('.first').textContent).toBe('X');
+		expect(document.querySelector('.full')!.textContent).toBe('X B');
+		expect(document.querySelector('.first')!.textContent).toBe('X');
 	});
 });
 
@@ -595,12 +595,12 @@ describe('derived > skip propagation', () => {
 				<span>{clamped}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1');
 		// Set n from 1 → 2, clamped changes to 2
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 	});
 
 	it('boolean derived does not fire when staying same', async () => {
@@ -618,19 +618,19 @@ describe('derived > skip propagation', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
+		mount(App, document.body);
 		// Initial: false->false
-		expect(container.querySelector('span').textContent).toBe('false->false');
+		expect(document.querySelector('span')!.textContent).toBe('false->false');
 
 		// 0 → 1: positive changes false → true
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('false->true');
+		expect(document.querySelector('span')!.textContent).toBe('false->true');
 
 		// 1 → 2: positive stays true — effect should NOT fire
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('false->true');
+		expect(document.querySelector('span')!.textContent).toBe('false->true');
 	});
 });
 
@@ -647,11 +647,11 @@ describe('effect > primitive state', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('0:0');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0:0');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('0:1');
+		expect(document.querySelector('span')!.textContent).toBe('0:1');
 	});
 
 	it('fires on string reassignment', async () => {
@@ -664,11 +664,11 @@ describe('effect > primitive state', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('a:a');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('a:a');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a:b');
+		expect(document.querySelector('span')!.textContent).toBe('a:b');
 	});
 
 	it('fires on boolean toggle', async () => {
@@ -681,10 +681,10 @@ describe('effect > primitive state', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('false:true');
+		expect(document.querySelector('span')!.textContent).toBe('false:true');
 	});
 
 	it('does NOT fire when value unchanged', async () => {
@@ -697,13 +697,13 @@ describe('effect > primitive state', () => {
 				<span>{count}</span>
 			);
 		}
-		mountComponent(App);
+		mount(App, document.body);
 		// Initial run fires once
-		expect(container.querySelector('span').textContent).toBe('1');
-		container.querySelector('button').click();
+		expect(document.querySelector('span')!.textContent).toBe('1');
+		document.querySelector('button')!.click();
 		await tick();
 		// Should still be 1 — no change
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 });
 
@@ -720,11 +720,11 @@ describe('effect > proxy root (whole object)', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1:1');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1:1');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1:99');
+		expect(document.querySelector('span')!.textContent).toBe('1:99');
 	});
 
 	it('fires when deeply nested property mutated', async () => {
@@ -737,11 +737,11 @@ describe('effect > proxy root (whole object)', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('old:old');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('old:old');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('old:new');
+		expect(document.querySelector('span')!.textContent).toBe('old:new');
 	});
 
 	it('fires when array element pushed', async () => {
@@ -754,11 +754,11 @@ describe('effect > proxy root (whole object)', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('2:2');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2:2');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2:3');
+		expect(document.querySelector('span')!.textContent).toBe('2:3');
 	});
 
 	it('fires when array element changed by index', async () => {
@@ -771,10 +771,10 @@ describe('effect > proxy root (whole object)', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a:z');
+		expect(document.querySelector('span')!.textContent).toBe('a:z');
 	});
 });
 
@@ -792,18 +792,18 @@ describe('effect > specific property', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1:1');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1:1');
 
 		// Change y — should NOT fire
-		container.querySelector('.y').click();
+		document.querySelector<HTMLElement>('.y')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1:1');
+		expect(document.querySelector('span')!.textContent).toBe('1:1');
 
 		// Change x — should fire
-		container.querySelector('.x').click();
+		document.querySelector<HTMLElement>('.x')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1:10');
+		expect(document.querySelector('span')!.textContent).toBe('1:10');
 	});
 
 	it('fires only when watched nested property changes', async () => {
@@ -817,17 +817,17 @@ describe('effect > specific property', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1:1');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1:1');
 
-		container.querySelector('.b').click();
+		document.querySelector<HTMLElement>('.b')!.click();
 		await tick();
 		// b changed, but we watch a.val — no fire
-		expect(container.querySelector('span').textContent).toBe('1:1');
+		expect(document.querySelector('span')!.textContent).toBe('1:1');
 
-		container.querySelector('.a').click();
+		document.querySelector<HTMLElement>('.a')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1:100');
+		expect(document.querySelector('span')!.textContent).toBe('1:100');
 	});
 
 	it('fires for array length property', async () => {
@@ -840,11 +840,11 @@ describe('effect > specific property', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('2:2');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('2:2');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2:3');
+		expect(document.querySelector('span')!.textContent).toBe('2:3');
 	});
 });
 
@@ -862,11 +862,11 @@ describe('effect > watching derived', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('4:4');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('4:4');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('4:10');
+		expect(document.querySelector('span')!.textContent).toBe('4:10');
 	});
 
 	it('does not fire when derived stays same', async () => {
@@ -881,19 +881,19 @@ describe('effect > watching derived', () => {
 				<span>{fireCount}</span>
 			);
 		}
-		mountComponent(App);
+		mount(App, document.body);
 		// Initial fire
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 
 		// n=3 → 100, clamped 3 → 5 — fires
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 
 		// n=100 → 4, clamped 5 → 4 — fires
-		container.querySelector('.small').click();
+		document.querySelector<HTMLElement>('.small')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3');
+		expect(document.querySelector('span')!.textContent).toBe('3');
 	});
 
 	it('fires when derived chain updates', async () => {
@@ -908,11 +908,11 @@ describe('effect > watching derived', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('12:12');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('12:12');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('12:20');
+		expect(document.querySelector('span')!.textContent).toBe('12:20');
 	});
 });
 
@@ -931,16 +931,16 @@ describe('effect > multiple deps', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('1,2->1,2');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('1,2->1,2');
 
-		container.querySelector('.a').click();
+		document.querySelector<HTMLElement>('.a')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1,2->10,2');
+		expect(document.querySelector('span')!.textContent).toBe('1,2->10,2');
 
-		container.querySelector('.b').click();
+		document.querySelector<HTMLElement>('.b')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('10,2->10,20');
+		expect(document.querySelector('span')!.textContent).toBe('10,2->10,20');
 	});
 
 	it('mixed primitive + proxy deps', async () => {
@@ -957,16 +957,16 @@ describe('effect > multiple deps', () => {
 				<span>{log}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('0,x->0,x');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0,x->0,x');
 
-		container.querySelector('.c').click();
+		document.querySelector<HTMLElement>('.c')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('0,x->1,x');
+		expect(document.querySelector('span')!.textContent).toBe('0,x->1,x');
 
-		container.querySelector('.o').click();
+		document.querySelector<HTMLElement>('.o')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1,x->1,y');
+		expect(document.querySelector('span')!.textContent).toBe('1,x->1,y');
 	});
 });
 
@@ -985,19 +985,19 @@ describe('effect > cleanup', () => {
 				<span>{cleanups}</span>
 			);
 		}
-		mountComponent(App);
+		mount(App, document.body);
 		// No cleanup yet (first run)
-		expect(container.querySelector('span').textContent).toBe('');
+		expect(document.querySelector('span')!.textContent).toBe('');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		// Cleanup from v=0 run
-		expect(container.querySelector('span').textContent).toBe('0,');
+		expect(document.querySelector('span')!.textContent).toBe('0,');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		// Cleanup from v=0 and v=1
-		expect(container.querySelector('span').textContent).toBe('0,1,');
+		expect(document.querySelector('span')!.textContent).toBe('0,1,');
 	});
 });
 
@@ -1014,11 +1014,11 @@ describe('reactivity > expression combinations', () => {
 				<span>{a > b ? 'a wins' : 'b wins'}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('b wins');
-		container.querySelector('.a').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('b wins');
+		document.querySelector<HTMLElement>('.a')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('a wins');
+		expect(document.querySelector('span')!.textContent).toBe('a wins');
 	});
 
 	it('template string with multiple states', async () => {
@@ -1036,11 +1036,11 @@ describe('reactivity > expression combinations', () => {
 				<span>{first + ' ' + last}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('John Doe');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('John Doe');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Jane Smith');
+		expect(document.querySelector('span')!.textContent).toBe('Jane Smith');
 	});
 });
 
@@ -1063,11 +1063,11 @@ describe('reactivity > batching', () => {
 				<span>{sum}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('0');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3');
+		expect(document.querySelector('span')!.textContent).toBe('3');
 	});
 
 	it('multiple proxy mutations in one handler batch correctly', async () => {
@@ -1085,11 +1085,11 @@ describe('reactivity > batching', () => {
 				<span>{info}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('A:1');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('A:1');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('B:2');
+		expect(document.querySelector('span')!.textContent).toBe('B:2');
 	});
 });
 
@@ -1104,11 +1104,11 @@ describe('reactivity > edge cases', () => {
 				<span>{data ? data.x : 'null'}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('null');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('null');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 
 	it('state initialized to undefined', async () => {
@@ -1119,11 +1119,11 @@ describe('reactivity > edge cases', () => {
 				<span>{val ?? 'empty'}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('empty');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('empty');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('42');
+		expect(document.querySelector('span')!.textContent).toBe('42');
 	});
 
 	it('state holding 0 (falsy but valid)', async () => {
@@ -1131,8 +1131,8 @@ describe('reactivity > edge cases', () => {
 			state n = 0;
 			render <span>{n}</span>;
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('0');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0');
 	});
 
 	it('state holding empty string (falsy but valid)', async () => {
@@ -1143,11 +1143,11 @@ describe('reactivity > edge cases', () => {
 				<span>{s || 'empty'}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('empty');
-		container.querySelector('button').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('empty');
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('hello');
+		expect(document.querySelector('span')!.textContent).toBe('hello');
 	});
 
 	it('rapid successive updates converge to final value', async () => {
@@ -1165,10 +1165,10 @@ describe('reactivity > edge cases', () => {
 				<span>{n}</span>
 			);
 		}
-		mountComponent(App);
-		container.querySelector('button').click();
+		mount(App, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('3');
+		expect(document.querySelector('span')!.textContent).toBe('3');
 	});
 
 	it('derived from another derived and a state', async () => {
@@ -1183,13 +1183,13 @@ describe('reactivity > edge cases', () => {
 				<span>{d}</span>
 			);
 		}
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('12');
-		container.querySelector('.a').click();
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('12');
+		document.querySelector<HTMLElement>('.a')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('16');
-		container.querySelector('.b').click();
+		expect(document.querySelector('span')!.textContent).toBe('16');
+		document.querySelector<HTMLElement>('.b')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('106');
+		expect(document.querySelector('span')!.textContent).toBe('106');
 	});
 });

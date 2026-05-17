@@ -7,17 +7,44 @@ if (!command || command === '--help' || command === '-h') {
   dartsx — DarTsx CLI
 
   Commands:
+    check      Type-check DarTsx project and report unused CSS
     package    Package a DarTsx library for npm distribution
 
   Usage:
+    dartsx check [options]
     dartsx package [options]
     dartsx --help
 `);
 	process.exit(0);
 }
 
-if (command === 'package') {
-	const { build, watch } = await import('dartsx-package');
+if (command === 'check') {
+	const { check } = await import('dartsx-cli');
+
+	const args = process.argv.slice(3);
+
+	if (args.includes('--help') || args.includes('-h')) {
+		console.log(`
+  dartsx check — Type-check DarTsx project and report unused CSS
+
+  Usage:
+    dartsx check [options]
+
+  Options:
+    --tsconfig <path>    Path to tsconfig.json (auto-detected by default)
+    -h, --help           Show this help
+`);
+		process.exit(0);
+	}
+
+	const result = check({
+		cwd: process.cwd(),
+		tsconfig: getFlag(args, '--tsconfig'),
+	});
+
+	process.exit(result.errors > 0 ? 1 : 0);
+} else if (command === 'package') {
+	const { build, watch } = await import('dartsx-cli');
 
 	const args = process.argv.slice(3);
 	const cwd = process.cwd();

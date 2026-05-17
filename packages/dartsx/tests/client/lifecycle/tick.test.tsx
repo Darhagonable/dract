@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('lifecycle > tick', () => {
 	it('resolves after state changes flush', async () => {
@@ -12,13 +12,13 @@ describe('lifecycle > tick', () => {
 			);
 		}
 
-		mountComponent(TickTest);
-		container.querySelector('button').click();
+		mount(TickTest, document.body);
+		document.querySelector('button')!.click();
 
 		// Before tick, DOM may not be updated yet
 		await tick();
 		// After tick, DOM should be updated
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 
 	it('resolves immediately when no changes pending', async () => {

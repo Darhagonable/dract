@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('event > inline expression handler', () => {
 	it('handles inline expression (count++)', async () => {
@@ -12,12 +12,12 @@ describe('event > inline expression handler', () => {
 			);
 		}
 
-		mountComponent(InlineHandler);
-		expect(container.querySelector('span').textContent).toBe('0');
+		mount(InlineHandler, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 });
 
@@ -36,12 +36,12 @@ describe('event > arrow function handler', () => {
 			);
 		}
 
-		mountComponent(ArrowHandler);
-		expect(container.querySelector('span').textContent).toBe('');
+		mount(ArrowHandler, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('hello');
+		expect(document.querySelector('span')!.textContent).toBe('hello');
 	});
 });
 
@@ -60,10 +60,10 @@ describe('event > method reference handler', () => {
 			);
 		}
 
-		mountComponent(MethodHandler);
-		container.querySelector('button').click();
+		mount(MethodHandler, document.body);
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 	});
 });
 
@@ -81,10 +81,10 @@ describe('event > multiple events on element', () => {
 			);
 		}
 
-		mountComponent(MultiEvent);
+		mount(MultiEvent, document.body);
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('clicked');
+		expect(document.querySelector('span')!.textContent).toBe('clicked');
 	});
 });

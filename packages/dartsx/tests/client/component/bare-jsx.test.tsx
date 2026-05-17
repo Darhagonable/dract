@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { mount } from 'dartsx';
 
 describe('component > bare-jsx', () => {
 	it('renders bare JSX inside expression braces', () => {
@@ -10,8 +11,8 @@ describe('component > bare-jsx', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p').textContent).toBe('Hello');
+		mount(Test, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('Hello');
 	});
 
 	it('renders multiple bare JSX elements', () => {
@@ -24,9 +25,9 @@ describe('component > bare-jsx', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p').textContent).toBe('One');
-		expect(container.querySelector('span').textContent).toBe('Two');
+		mount(Test, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('One');
+		expect(document.querySelector('span')!.textContent).toBe('Two');
 	});
 
 	it('renders nested bare JSX', () => {
@@ -38,7 +39,7 @@ describe('component > bare-jsx', () => {
 			);
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p span').textContent).toBe('Nested');
+		mount(Test, document.body);
+		expect(document.querySelector('p span')!.textContent).toBe('Nested');
 	});
 });

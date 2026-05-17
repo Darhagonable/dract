@@ -5,7 +5,7 @@
 	"scripts": {
 		"test": "pnpm run build && vitest run && pnpm --filter dartsx-vscode run test",
 		"build": "pnpm -r run build",
-		"check": "tsc -b"
+		"check": "pnpm -r --no-bail run check"
 	},
 	"devDependencies": {
 		"@types/node": "^25.6.0",

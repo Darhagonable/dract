@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { mount } from 'dartsx';
 
 describe('component > basic', () => {
 	it('renders a basic component', () => {
@@ -8,7 +9,7 @@ describe('component > basic', () => {
 			);
 		}
 
-		mountComponent(Greeting);
-		expect(container.querySelector('h1').textContent).toBe('Hello, World!');
+		mount(Greeting, document.body);
+		expect(document.querySelector('h1')!.textContent).toBe('Hello, World!');
 	});
 });

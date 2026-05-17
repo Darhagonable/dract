@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('control-flow > switch basic', () => {
 	it('switches between branches', async () => {
@@ -21,16 +21,16 @@ describe('control-flow > switch basic', () => {
 			);
 		}
 
-		mountComponent(SwitchBasic);
-		expect(container.querySelector('span').textContent).toBe('Mode A');
+		mount(SwitchBasic, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Mode A');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Mode B');
+		expect(document.querySelector('span')!.textContent).toBe('Mode B');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Mode A');
+		expect(document.querySelector('span')!.textContent).toBe('Mode A');
 	});
 });
 
@@ -55,13 +55,13 @@ describe('control-flow > switch fall-through', () => {
 			);
 		}
 
-		mountComponent(SwitchFallThrough);
-		expect(container.querySelector('span').textContent).toBe('Loading...');
+		mount(SwitchFallThrough, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Loading...');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		// 'loading' also falls into the Loading case
-		expect(container.querySelector('span').textContent).toBe('Loading...');
+		expect(document.querySelector('span')!.textContent).toBe('Loading...');
 	});
 });
 
@@ -83,11 +83,11 @@ describe('control-flow > switch with block render', () => {
 			);
 		}
 
-		mountComponent(SwitchBlockRender);
-		expect(container.querySelector('span').textContent).toBe('Alpha');
+		mount(SwitchBlockRender, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Alpha');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Beta');
+		expect(document.querySelector('span')!.textContent).toBe('Beta');
 	});
 });

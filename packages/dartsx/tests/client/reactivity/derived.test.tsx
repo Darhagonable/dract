@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('reactivity > derived basic', () => {
 	it('derives a value from state', async () => {
@@ -13,14 +13,14 @@ describe('reactivity > derived basic', () => {
 			);
 		}
 
-		mountComponent(DerivedBasic);
-		expect(container.querySelector('button').textContent).toBe('2');
-		expect(container.querySelector('p').textContent).toBe('4');
+		mount(DerivedBasic, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('2');
+		expect(document.querySelector('p')!.textContent).toBe('4');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('3');
-		expect(container.querySelector('p').textContent).toBe('6');
+		expect(document.querySelector('button')!.textContent).toBe('3');
+		expect(document.querySelector('p')!.textContent).toBe('6');
 	});
 
 	it('chains multiple derived values', async () => {
@@ -36,14 +36,14 @@ describe('reactivity > derived basic', () => {
 			);
 		}
 
-		mountComponent(DerivedChain);
-		expect(container.querySelector('.b').textContent).toBe('6');
-		expect(container.querySelector('.c').textContent).toBe('7');
+		mount(DerivedChain, document.body);
+		expect(document.querySelector('.b')!.textContent).toBe('6');
+		expect(document.querySelector('.c')!.textContent).toBe('7');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.b').textContent).toBe('12');
-		expect(container.querySelector('.c').textContent).toBe('13');
+		expect(document.querySelector('.b')!.textContent).toBe('12');
+		expect(document.querySelector('.c')!.textContent).toBe('13');
 	});
 
 	it('derives from proxy state properties', async () => {
@@ -57,12 +57,12 @@ describe('reactivity > derived basic', () => {
 			);
 		}
 
-		mountComponent(DerivedProxy);
-		expect(container.querySelector('span').textContent).toBe('6');
+		mount(DerivedProxy, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('6');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('10');
+		expect(document.querySelector('span')!.textContent).toBe('10');
 	});
 });
 
@@ -79,14 +79,14 @@ describe('reactivity > derived skip propagation', () => {
 			);
 		}
 
-		mountComponent(SkipTest);
-		expect(container.querySelector('.large').textContent).toBe('no');
+		mount(SkipTest, document.body);
+		expect(document.querySelector('.large')!.textContent).toBe('no');
 
 		// Increment from 0 to 1 — large stays false
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.count').textContent).toBe('1');
-		expect(container.querySelector('.large').textContent).toBe('no');
+		expect(document.querySelector('.count')!.textContent).toBe('1');
+		expect(document.querySelector('.large')!.textContent).toBe('no');
 	});
 
 	it('proxies object-valued derived results', async () => {
@@ -117,14 +117,14 @@ describe('reactivity > derived object literal', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('.c').textContent).toBe('1');
-		expect(container.querySelector('.d').textContent).toBe('2');
+		mount(App, document.body);
+		expect(document.querySelector('.c')!.textContent).toBe('1');
+		expect(document.querySelector('.d')!.textContent).toBe('2');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.c').textContent).toBe('2');
-		expect(container.querySelector('.d').textContent).toBe('4');
+		expect(document.querySelector('.c')!.textContent).toBe('2');
+		expect(document.querySelector('.d')!.textContent).toBe('4');
 	});
 
 	it('derives a module-level object literal from state', async () => {
@@ -139,12 +139,12 @@ describe('reactivity > derived object literal', () => {
 			);
 		}
 
-		mountComponent(Display);
-		expect(container.querySelector('.v').textContent).toBe('10');
-		expect(container.querySelector('.l').textContent).toBe('test');
+		mount(Display, document.body);
+		expect(document.querySelector('.v')!.textContent).toBe('10');
+		expect(document.querySelector('.l')!.textContent).toBe('test');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('.v').textContent).toBe('20');
+		expect(document.querySelector('.v')!.textContent).toBe('20');
 	});
 });

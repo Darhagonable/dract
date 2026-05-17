@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 import { count, increment } from './_store.ts';
 
 describe('reactivity > cross-module', () => {
@@ -11,15 +11,15 @@ describe('reactivity > cross-module', () => {
 			);
 		}
 
-		mountComponent(CrossModuleApp);
-		expect(container.querySelector('span').textContent).toBe('0');
+		mount(CrossModuleApp, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 	});
 });

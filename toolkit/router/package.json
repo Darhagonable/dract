@@ -12,6 +12,7 @@
 	},
 	"scripts": {
 		"build": "dartsx package",
+		"check": "dartsx check",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},

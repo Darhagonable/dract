@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('binding > bind:checked', () => {
 	it('two-way binds a checkbox', async () => {
@@ -12,16 +12,16 @@ describe('binding > bind:checked', () => {
 			);
 		}
 
-		mountComponent(CheckboxTest);
-		const input = container.querySelector('input');
+		mount(CheckboxTest, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.checked).toBe(false);
-		expect(container.querySelector('span').textContent).toBe('no');
+		expect(document.querySelector('span')!.textContent).toBe('no');
 
 		input.checked = true;
 		input.dispatchEvent(new Event('change', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('span').textContent).toBe('yes');
+		expect(document.querySelector('span')!.textContent).toBe('yes');
 	});
 });
 
@@ -37,14 +37,14 @@ describe('binding > bind:value numeric', () => {
 			);
 		}
 
-		mountComponent(NumericInput);
-		const input = container.querySelector('input');
+		mount(NumericInput, document.body);
+		const input = document.querySelector('input')!;
 
 		input.value = '5';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('span').textContent).toBe('10');
+		expect(document.querySelector('span')!.textContent).toBe('10');
 	});
 });
 
@@ -63,16 +63,16 @@ describe('binding > bind:value select', () => {
 			);
 		}
 
-		mountComponent(SelectTest);
-		const select = container.querySelector('select');
+		mount(SelectTest, document.body);
+		const select = document.querySelector('select')!;
 		expect(select.value).toBe('a');
-		expect(container.querySelector('span').textContent).toBe('a');
+		expect(document.querySelector('span')!.textContent).toBe('a');
 
 		select.value = 'c';
 		select.dispatchEvent(new Event('change', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('span').textContent).toBe('c');
+		expect(document.querySelector('span')!.textContent).toBe('c');
 	});
 });
 
@@ -87,15 +87,15 @@ describe('binding > bind:value textarea', () => {
 			);
 		}
 
-		mountComponent(TextareaTest);
-		const textarea = container.querySelector('textarea');
+		mount(TextareaTest, document.body);
+		const textarea = document.querySelector('textarea')!;
 		expect(textarea.value).toBe('hello');
 
 		textarea.value = 'world';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('p').textContent).toBe('world');
+		expect(document.querySelector('p')!.textContent).toBe('world');
 	});
 });
 
@@ -119,8 +119,8 @@ describe('binding > bind function with null getter', () => {
 		}
 
 		// Just verify it compiles and mounts without error
-		mountComponent(ReadonlyBind);
-		expect(container.querySelector('.box')).not.toBeNull();
+		mount(ReadonlyBind, document.body);
+		expect(document.querySelector('.box')).not.toBeNull();
 
 		globalThis.ResizeObserver = origRO;
 	});
@@ -137,14 +137,14 @@ describe('binding > bind:{x} shorthand', () => {
 			);
 		}
 
-		mountComponent(ShorthandBind);
-		const input = container.querySelector('input');
+		mount(ShorthandBind, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.value).toBe('alice');
 
 		input.value = 'bob';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 
-		expect(container.querySelector('span').textContent).toBe('bob');
+		expect(document.querySelector('span')!.textContent).toBe('bob');
 	});
 });

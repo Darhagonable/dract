@@ -12,10 +12,15 @@
 		"./language": {
 			"types": "./dist/language.d.ts",
 			"default": "./dist/language.js"
+		},
+		"./unused-css": {
+			"types": "./dist/unused-css.d.ts",
+			"default": "./dist/unused-css.js"
 		}
 	},
 	"scripts": {
-		"build": "tsc"
+		"build": "tsc --build",
+		"check": "tsc --noEmit"
 	},
 	"devDependencies": {
 		"@types/node": "^25.6.0",
@@ -23,7 +28,9 @@
 	},
 	"dependencies": {
 		"@volar/language-core": "~2.4.28",
-		"@volar/typescript": "~2.4.28",
+		"@volar/typescript": "~2.4.28"
+	},
+	"peerDependencies": {
 		"dartsx": "workspace:*"
 	}
 }

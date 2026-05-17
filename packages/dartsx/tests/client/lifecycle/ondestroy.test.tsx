@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { onDestroy } from 'dartsx';
+import { onDestroy, mount } from 'dartsx';
 
 describe('lifecycle > onDestroy', () => {
 	it('calls onDestroy when component is unmounted', async () => {
@@ -15,9 +15,9 @@ describe('lifecycle > onDestroy', () => {
 			);
 		}
 
-		const { unmount } = mountComponent(DestroyTest);
+		const { unmount } = mount(DestroyTest, document.body);
 		expect(destroyed).toBe(false);
-		expect(container.querySelector('p').textContent).toBe('alive');
+		expect(document.querySelector('p')!.textContent).toBe('alive');
 
 		unmount();
 		expect(destroyed).toBe(true);
@@ -35,7 +35,7 @@ describe('lifecycle > onDestroy', () => {
 			);
 		}
 
-		const { unmount } = mountComponent(MultiDestroy);
+		const { unmount } = mount(MultiDestroy, document.body);
 		expect(log).toEqual([]);
 
 		unmount();

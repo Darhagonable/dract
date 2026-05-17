@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('control-flow > try catch', () => {
 	it('catches errors and renders fallback', () => {
@@ -17,8 +17,8 @@ describe('control-flow > try catch', () => {
 			);
 		}
 
-		mountComponent(TryCatchBlock);
-		expect(container.querySelector('span').textContent).toBe('caught');
+		mount(TryCatchBlock, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('caught');
 	});
 });
 
@@ -44,12 +44,12 @@ describe('control-flow > try pending catch', () => {
 			);
 		}
 
-		mountComponent(TryPendingCatchBlock);
-		expect(container.querySelector('span').textContent).toBe('loading');
+		mount(TryPendingCatchBlock, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('loading');
 
 		await new Promise((r) => setTimeout(r, 50));
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('done');
+		expect(document.querySelector('span')!.textContent).toBe('done');
 	});
 });
 
@@ -70,7 +70,7 @@ describe('control-flow > try catch with block render', () => {
 			);
 		}
 
-		mountComponent(TryCatchBlockRender);
-		expect(container.querySelector('span').textContent).toBe('something broke');
+		mount(TryCatchBlockRender, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('something broke');
 	});
 });

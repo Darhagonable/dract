@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createContext, provide, tick } from 'dartsx';
+import { createContext, provide, tick, mount } from 'dartsx';
 
 describe('context', () => {
 	it('provides and consumes a simple value', () => {
@@ -15,8 +15,8 @@ describe('context', () => {
 			render <p>{msg}</p>;
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('p').textContent).toBe('Hello!');
+		mount(Parent, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('Hello!');
 	});
 
 	it('throws when context is accessed outside provider scope', () => {
@@ -27,7 +27,7 @@ describe('context', () => {
 			render <p>{val}</p>;
 		}
 
-		expect(() => mountComponent(Orphan)).toThrow('Context was accessed outside of a provided scope');
+		expect(() => mount(Orphan, document.body)).toThrow('Context was accessed outside of a provided scope');
 	});
 
 	it('scopes context to the provider subtree', () => {
@@ -57,7 +57,7 @@ describe('context', () => {
 			);
 		}
 
-		expect(() => mountComponent(App)).toThrow('Context was accessed outside of a provided scope');
+		expect(() => mount(App, document.body)).toThrow('Context was accessed outside of a provided scope');
 	});
 
 	it('provides a factory-created value through context', () => {
@@ -77,8 +77,8 @@ describe('context', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('p').textContent).toBe('dark / en');
+		mount(Parent, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('dark / en');
 	});
 
 	it('provides context accessible by deeply nested children', () => {
@@ -98,8 +98,8 @@ describe('context', () => {
 			render <span>{theme}</span>;
 		}
 
-		mountComponent(Root);
-		expect(container.querySelector('span').textContent).toBe('dark');
+		mount(Root, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('dark');
 	});
 
 	it('passes an argument from provide to the factory', () => {
@@ -115,8 +115,8 @@ describe('context', () => {
 			render <p>{greeting}</p>;
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('p').textContent).toBe('Hello, Alice!');
+		mount(Parent, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('Hello, Alice!');
 	});
 
 	it('provides and consumes in the same component', () => {
@@ -128,8 +128,8 @@ describe('context', () => {
 			render <p>{val}</p>;
 		}
 
-		mountComponent(Test);
-		expect(container.querySelector('p').textContent).toBe('same-component');
+		mount(Test, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('same-component');
 	});
 
 	it('consumes context inside a child block of the provider', () => {
@@ -153,8 +153,8 @@ describe('context', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('p').textContent).toBe('block-child');
+		mount(App, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('block-child');
 	});
 
 	it('provides reactive context with state and derived destructuring', async () => {
@@ -176,12 +176,12 @@ describe('context', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('button').textContent).toBe('Count: 0');
+		mount(Parent, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('Count: 0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('Count: 1');
+		expect(document.querySelector('button')!.textContent).toBe('Count: 1');
 	});
 
 	it('supports deep derived destructuring for nested objects and arrays', async () => {
@@ -215,12 +215,12 @@ describe('context', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('button').textContent).toBe('count-0:0:0');
+		mount(Parent, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('count-0:0:0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('count-1:1:1');
+		expect(document.querySelector('button')!.textContent).toBe('count-1:1:1');
 	});
 
 	it('supports derived defaults and object rest destructuring', async () => {
@@ -258,12 +258,12 @@ describe('context', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('button').textContent).toBe('anon:reader:v1');
+		mount(Parent, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('anon:reader:v1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('Alice:admin:v1');
+		expect(document.querySelector('button')!.textContent).toBe('Alice:admin:v1');
 	});
 
 	it('supports derived defaults and array rest destructuring', async () => {
@@ -297,11 +297,11 @@ describe('context', () => {
 			);
 		}
 
-		mountComponent(Parent);
-		expect(container.querySelector('button').textContent).toBe('fallback:beta:gamma');
+		mount(Parent, document.body);
+		expect(document.querySelector('button')!.textContent).toBe('fallback:beta:gamma');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('button').textContent).toBe('alpha:delta:epsilon');
+		expect(document.querySelector('button')!.textContent).toBe('alpha:delta:epsilon');
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { effect, onCleanup, tick } from 'dartsx';
+import { effect, onCleanup, tick, mount } from 'dartsx';
 
 describe('reactivity > effect watch', () => {
 	it('runs effect when dependency changes', async () => {
@@ -17,16 +17,16 @@ describe('reactivity > effect watch', () => {
 			);
 		}
 
-		mountComponent(EffectWatch);
-		expect(container.querySelector('p').textContent).toBe('0 -> 0');
+		mount(EffectWatch, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('0 -> 0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('p').textContent).toBe('0 -> 1');
+		expect(document.querySelector('p')!.textContent).toBe('0 -> 1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('p').textContent).toBe('1 -> 2');
+		expect(document.querySelector('p')!.textContent).toBe('1 -> 2');
 	});
 
 	it('watches proxy state changes', async () => {
@@ -44,12 +44,12 @@ describe('reactivity > effect watch', () => {
 			);
 		}
 
-		mountComponent(ProxyEffect);
-		expect(container.querySelector('p').textContent).toBe('0 -> 0');
+		mount(ProxyEffect, document.body);
+		expect(document.querySelector('p')!.textContent).toBe('0 -> 0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('p').textContent).toBe('0 -> 5');
+		expect(document.querySelector('p')!.textContent).toBe('0 -> 5');
 	});
 
 	it('onCleanup runs before effect re-runs', async () => {
@@ -69,18 +69,18 @@ describe('reactivity > effect watch', () => {
 			);
 		}
 
-		mountComponent(CleanupEffect);
+		mount(CleanupEffect, document.body);
 		// Initially no cleanup has run
-		expect(container.querySelector('span').textContent).toBe('');
+		expect(document.querySelector('span')!.textContent).toBe('');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 		// Cleanup from first run (val=0) should have fired
-		expect(container.querySelector('span').textContent).toBe('cleaned:0');
+		expect(document.querySelector('span')!.textContent).toBe('cleaned:0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('cleaned:1');
+		expect(document.querySelector('span')!.textContent).toBe('cleaned:1');
 	});
 });
 
@@ -102,13 +102,13 @@ describe('reactivity > effect with multiple deps', () => {
 			);
 		}
 
-		mountComponent(MultiEffect);
+		mount(MultiEffect, document.body);
 		// Initial run: old === new
-		expect(container.querySelector('span').textContent).toBe('foo,bar->foo,bar');
+		expect(document.querySelector('span')!.textContent).toBe('foo,bar->foo,bar');
 
-		container.querySelector('.a').click();
+		document.querySelector<HTMLElement>('.a')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('foo,bar->fooo,bar');
+		expect(document.querySelector('span')!.textContent).toBe('foo,bar->fooo,bar');
 	});
 });
 
@@ -129,17 +129,17 @@ describe('reactivity > effect on nested property', () => {
 			);
 		}
 
-		mountComponent(NestedEffect);
-		expect(container.querySelector('span').textContent).toBe('Alice->Alice');
+		mount(NestedEffect, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('Alice->Alice');
 
-		container.querySelector('.name').click();
+		document.querySelector<HTMLElement>('.name')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('Alice->Bob');
+		expect(document.querySelector('span')!.textContent).toBe('Alice->Bob');
 
 		// Changing age should NOT fire the name effect
-		const prevLog = container.querySelector('span').textContent;
-		container.querySelector('.age').click();
+		const prevLog = document.querySelector('span')!.textContent;
+		document.querySelector<HTMLElement>('.age')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe(prevLog);
+		expect(document.querySelector('span')!.textContent).toBe(prevLog);
 	});
 });

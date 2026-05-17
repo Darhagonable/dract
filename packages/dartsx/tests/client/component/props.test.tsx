@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('component > props', () => {
 	it('passes props to child components', () => {
@@ -15,8 +15,8 @@ describe('component > props', () => {
 			);
 		}
 
-		mountComponent(PropsApp);
-		expect(container.querySelector('h1').textContent).toBe('Hello, Alice!');
+		mount(PropsApp, document.body);
+		expect(document.querySelector('h1')!.textContent).toBe('Hello, Alice!');
 	});
 
 	it('supports renamed props with defaults', () => {
@@ -39,12 +39,12 @@ describe('component > props', () => {
 			)
 		}
 
-		mountComponent(RenamedPropsApp);
-		const sections = container.querySelectorAll('section');
-		expect(sections[0].querySelector('h1').textContent).toBe('Alice');
-		expect(sections[0].querySelector('p').textContent).toBe('Age: 18');
-		expect(sections[1].querySelector('h1').textContent).toBe('Bob');
-		expect(sections[1].querySelector('p').textContent).toBe('Age: 42');
+		mount(RenamedPropsApp, document.body);
+		const sections = document.querySelectorAll('section');
+		expect(sections[0].querySelector('h1')!.textContent).toBe('Alice');
+		expect(sections[0].querySelector('p')!.textContent).toBe('Age: 18');
+		expect(sections[1].querySelector('h1')!.textContent).toBe('Bob');
+		expect(sections[1].querySelector('p')!.textContent).toBe('Age: 42');
 	});
 });
 
@@ -63,8 +63,8 @@ describe('component > default props', () => {
 			);
 		}
 
-		mountComponent(App);
-		const buttons = container.querySelectorAll('button');
+		mount(App, document.body);
+		const buttons = document.querySelectorAll('button');
 		expect(buttons[0].textContent).toBe('Submit');
 		expect(buttons[0].className).toBe('primary');
 		expect(buttons[1].textContent).toBe('Cancel');
@@ -86,8 +86,8 @@ describe('component > rest props', () => {
 			);
 		}
 
-		mountComponent(App);
-		const input = container.querySelector('input');
+		mount(App, document.body);
+		const input = document.querySelector('input')!;
 		expect(input.type).toBe('text');
 		expect(input.placeholder).toBe('Enter name');
 		expect(input.className).toBe('form-input');
@@ -111,9 +111,9 @@ describe('component > spread props', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('.name').textContent).toBe('Alice');
-		expect(container.querySelector('.age').textContent).toBe('30');
+		mount(App, document.body);
+		expect(document.querySelector('.name')!.textContent).toBe('Alice');
+		expect(document.querySelector('.age')!.textContent).toBe('30');
 	});
 });
 
@@ -129,8 +129,8 @@ describe('component > object and array props', () => {
 			render <Card style={{ color: 'red', bold: true }} />;
 		}
 
-		mountComponent(App);
-		const card = container.querySelector('.card');
+		mount(App, document.body);
+		const card = document.querySelector('.card')!;
 		expect(card.getAttribute('data-color')).toBe('red');
 		expect(card.textContent).toBe('BOLD');
 	});
@@ -150,8 +150,8 @@ describe('component > object and array props', () => {
 			render <List items={['apple', 'banana', 'cherry']} />;
 		}
 
-		mountComponent(App);
-		const lis = container.querySelectorAll('li');
+		mount(App, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('apple');
 		expect(lis[1].textContent).toBe('banana');
@@ -171,12 +171,12 @@ describe('component > object and array props', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('hello');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('hello');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('world');
+		expect(document.querySelector('span')!.textContent).toBe('world');
 	});
 
 	it('reactively updates an array prop', async () => {
@@ -198,13 +198,13 @@ describe('component > object and array props', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelectorAll('li').length).toBe(2);
+		mount(App, document.body);
+		expect(document.querySelectorAll('li').length).toBe(2);
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelectorAll('li').length).toBe(3);
-		expect(container.querySelectorAll('li')[2].textContent).toBe('c');
+		expect(document.querySelectorAll('li').length).toBe(3);
+		expect(document.querySelectorAll('li')[2].textContent).toBe('c');
 	});
 });
 
@@ -222,12 +222,12 @@ describe('component > callback props', () => {
 			);
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('clicked');
+		expect(document.querySelector('span')!.textContent).toBe('clicked');
 	});
 
 	it('child calls a parent callback that updates state', async () => {
@@ -248,16 +248,16 @@ describe('component > callback props', () => {
 			render <Counter count={count} onIncrement={handleIncrement} />;
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('0');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('0');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('1');
+		expect(document.querySelector('span')!.textContent).toBe('1');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('2');
+		expect(document.querySelector('span')!.textContent).toBe('2');
 	});
 
 	it('child calls a parent callback with a return value', () => {
@@ -269,8 +269,8 @@ describe('component > callback props', () => {
 			render <Validator validate={(v) => v.length > 3} />;
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('valid');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('valid');
 	});
 
 	it('parent passes multiple callbacks', async () => {
@@ -289,14 +289,14 @@ describe('component > callback props', () => {
 			);
 		}
 
-		mountComponent(App);
-		container.querySelector('.save').click();
+		mount(App, document.body);
+		document.querySelector<HTMLElement>('.save')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('saved');
+		expect(document.querySelector('span')!.textContent).toBe('saved');
 
-		container.querySelector('.cancel').click();
+		document.querySelector<HTMLElement>('.cancel')!.click();
 		await tick();
-		expect(container.querySelector('span').textContent).toBe('cancelled');
+		expect(document.querySelector('span')!.textContent).toBe('cancelled');
 	});
 
 	it('passes a callback prop that returns JSX', async () => {
@@ -316,7 +316,7 @@ describe('component > callback props', () => {
 			render <Wrapper fallback={() => <Fallback />} />
 		}
 
-		mountComponent(App);
-		expect(container.querySelector('span').textContent).toBe('fallback content');
+		mount(App, document.body);
+		expect(document.querySelector('span')!.textContent).toBe('fallback content');
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tick } from 'dartsx';
+import { tick, mount } from 'dartsx';
 
 describe('control-flow > for with nested if', () => {
 	it('renders conditional content inside a for loop', async () => {
@@ -26,8 +26,8 @@ describe('control-flow > for with nested if', () => {
 			);
 		}
 
-		mountComponent(ForWithIf);
-		const lis = container.querySelectorAll('li');
+		mount(ForWithIf, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
 		expect(lis[0].textContent).toBe('apple ★');
 		expect(lis[1].textContent).toContain('banana');
@@ -63,12 +63,12 @@ describe('control-flow > for with nested if-else', () => {
 			);
 		}
 
-		mountComponent(ForWithIfElse);
-		const lis = container.querySelectorAll('li');
+		mount(ForWithIfElse, document.body);
+		const lis = document.querySelectorAll('li');
 		expect(lis.length).toBe(3);
-		expect(lis[0].querySelector('.badge').textContent).toBe('Admin');
-		expect(lis[1].querySelector('.badge').textContent).toBe('User');
-		expect(lis[2].querySelector('.badge').textContent).toBe('Admin');
+		expect(lis[0].querySelector('.badge')!.textContent).toBe('Admin');
+		expect(lis[1].querySelector('.badge')!.textContent).toBe('User');
+		expect(lis[2].querySelector('.badge')!.textContent).toBe('Admin');
 	});
 });
 
@@ -98,17 +98,17 @@ describe('control-flow > nested for loops', () => {
 			);
 		}
 
-		mountComponent(NestedFor);
-		const sections = container.querySelectorAll('section');
+		mount(NestedFor, document.body);
+		const sections = document.querySelectorAll('section');
 		expect(sections.length).toBe(2);
 
-		expect(sections[0].querySelector('h2').textContent).toBe('Fruits');
+		expect(sections[0].querySelector('h2')!.textContent).toBe('Fruits');
 		const fruitsLis = sections[0].querySelectorAll('li');
 		expect(fruitsLis.length).toBe(2);
 		expect(fruitsLis[0].textContent).toBe('Apple');
 		expect(fruitsLis[1].textContent).toBe('Banana');
 
-		expect(sections[1].querySelector('h2').textContent).toBe('Vegs');
+		expect(sections[1].querySelector('h2')!.textContent).toBe('Vegs');
 		const vegsLis = sections[1].querySelectorAll('li');
 		expect(vegsLis.length).toBe(2);
 		expect(vegsLis[0].textContent).toBe('Carrot');
@@ -143,13 +143,13 @@ describe('control-flow > nested for with conditional children', () => {
 			);
 		}
 
-		mountComponent(NestedForIf);
-		const topLis = container.querySelectorAll(':scope > ol > li');
+		mount(NestedForIf, document.body);
+		const topLis = document.body.querySelectorAll(':scope > ol > li');
 		expect(topLis.length).toBe(3);
 
 		// Fruits — has nested <ol>
 		expect(topLis[0].textContent).toContain('Fruits');
-		const fruitOl = topLis[0].querySelector('ol');
+		const fruitOl = topLis[0].querySelector('ol')!;
 		expect(fruitOl).not.toBeNull();
 		expect(fruitOl.querySelectorAll('li').length).toBe(2);
 
@@ -159,7 +159,7 @@ describe('control-flow > nested for with conditional children', () => {
 
 		// Vegs — has nested <ol>
 		expect(topLis[2].textContent).toContain('Vegs');
-		const vegOl = topLis[2].querySelector('ol');
+		const vegOl = topLis[2].querySelector('ol')!;
 		expect(vegOl).not.toBeNull();
 		expect(vegOl.querySelectorAll('li').length).toBe(1);
 	});
@@ -194,9 +194,9 @@ describe('control-flow > for with switch inside', () => {
 			);
 		}
 
-		mountComponent(ForWithSwitch);
-		const h2s = container.querySelectorAll('h2');
-		const ps = container.querySelectorAll('p');
+		mount(ForWithSwitch, document.body);
+		const h2s = document.querySelectorAll('h2');
+		const ps = document.querySelectorAll('p');
 		expect(h2s.length).toBe(2);
 		expect(ps.length).toBe(1);
 		expect(h2s[0].textContent).toBe('Title');
@@ -240,17 +240,17 @@ describe('control-flow > reactive nested for + if', () => {
 			);
 		}
 
-		mountComponent(ReactiveNestedForIf);
+		mount(ReactiveNestedForIf, document.body);
 
-		let sections = container.querySelectorAll('section');
+		let sections = document.querySelectorAll('section');
 		expect(sections.length).toBe(2);
 		expect(sections[0].querySelectorAll('li').length).toBe(2);
-		expect(sections[1].querySelector('p').textContent).toBe('empty');
+		expect(sections[1].querySelector('p')!.textContent).toBe('empty');
 
-		container.querySelector('button').click();
+		document.querySelector('button')!.click();
 		await tick();
 
-		sections = container.querySelectorAll('section');
+		sections = document.querySelectorAll('section');
 		expect(sections.length).toBe(3);
 		expect(sections[1].querySelectorAll('li').length).toBe(1);
 		expect(sections[1].querySelector('p')).toBeNull();
@@ -285,21 +285,21 @@ describe('control-flow > nested if with derived data disposal', () => {
 			);
 		}
 
-		mountComponent(SelectionDetail);
-		expect(container.querySelector('h4').textContent).toBe('Post 1');
-		expect(container.querySelector('p').textContent).toBe('Body of post 1');
+		mount(SelectionDetail, document.body);
+		expect(document.querySelector('h4')!.textContent).toBe('Post 1');
+		expect(document.querySelector('p')!.textContent).toBe('Body of post 1');
 
 		// Change selection — inner effects should update
-		container.querySelector('.select').click();
+		document.querySelector<HTMLElement>('.select')!.click();
 		await tick();
-		expect(container.querySelector('h4').textContent).toBe('Post 2');
-		expect(container.querySelector('p').textContent).toBe('Body of post 2');
+		expect(document.querySelector('h4')!.textContent).toBe('Post 2');
+		expect(document.querySelector('p')!.textContent).toBe('Body of post 2');
 
 		// Clear selection — should not crash accessing item.title when item is null
-		container.querySelector('.clear').click();
+		document.querySelector<HTMLElement>('.clear')!.click();
 		await tick();
-		expect(container.querySelector('.detail')).toBeNull();
-		expect(container.querySelector('h4')).toBeNull();
+		expect(document.querySelector('.detail')).toBeNull();
+		expect(document.querySelector('h4')).toBeNull();
 	});
 
 	it('disposes deeply nested if effects on outer branch swap', async () => {
@@ -325,14 +325,14 @@ describe('control-flow > nested if with derived data disposal', () => {
 			);
 		}
 
-		mountComponent(DeepNested);
-		expect(container.querySelector('.name').textContent).toBe('Alice');
-		expect(container.querySelector('.age').textContent).toBe('30');
+		mount(DeepNested, document.body);
+		expect(document.querySelector('.name')!.textContent).toBe('Alice');
+		expect(document.querySelector('.age')!.textContent).toBe('30');
 
 		// Simultaneously null data and hide — must not crash reading data.name
-		container.querySelector('.nullify').click();
+		document.querySelector<HTMLElement>('.nullify')!.click();
 		await tick();
-		expect(container.querySelector('.outer')).toBeNull();
-		expect(container.querySelector('.inner')).toBeNull();
+		expect(document.querySelector('.outer')).toBeNull();
+		expect(document.querySelector('.inner')).toBeNull();
 	});
 });

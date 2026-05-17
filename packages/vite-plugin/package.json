@@ -10,7 +10,8 @@
 		}
 	},
 	"scripts": {
-		"build": "tsdown"
+		"build": "tsdown",
+		"check": "tsc --noEmit"
 	},
 	"dependencies": {
 		"dartsx": "workspace:*"
