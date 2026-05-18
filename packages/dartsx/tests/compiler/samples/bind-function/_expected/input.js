@@ -4,6 +4,12 @@ function Form() {
 	let value = $.state("hello");
 
 	return $.jsx("input", {
-		"bind:value": [() => $.get(value), (v) => $.set(value, v.toLowerCase())]
+		get value() {
+			return $.get(value);
+		},
+
+		set value(v) {
+			$.set(value, v.toLowerCase());
+		}
 	});
 }

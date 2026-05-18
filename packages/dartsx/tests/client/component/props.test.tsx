@@ -115,6 +115,64 @@ describe('component > spread props', () => {
 		expect(document.querySelector('.name')!.textContent).toBe('Alice');
 		expect(document.querySelector('.age')!.textContent).toBe('30');
 	});
+
+	it('preserves reactivity through rest/spread', async () => {
+		component Input(label: string, ...rest) {
+			render (
+				<label>
+					{label}
+					<input {...rest} />
+				</label>
+			);
+		}
+
+		component App() {
+			state name = "alice";
+
+			render (
+				<div>
+					<Input label="Name:" value={name} class="field" />
+					<button onclick={name = "bob"}>change</button>
+				</div>
+			);
+		}
+
+		mount(App, document.body);
+		const input = document.querySelector('input')!;
+		expect(input.value).toBe('alice');
+		expect(input.className).toBe('field');
+
+		document.querySelector('button')!.click();
+		await tick();
+		expect(input.value).toBe('bob');
+	});
+
+	it('preserves bind:value through rest/spread', async () => {
+		component Input(...rest) {
+			render <input {...rest} />;
+		}
+
+		component App() {
+			state name = "alice";
+
+			render (
+				<div>
+					<Input bind:value={name} />
+					<span class="display">{name}</span>
+				</div>
+			);
+		}
+
+		mount(App, document.body);
+		const input = document.querySelector('input')!;
+		expect(input.value).toBe('alice');
+
+		// Simulate user typing
+		input.value = 'bob';
+		input.dispatchEvent(new Event('input'));
+		await tick();
+		expect(document.querySelector('.display')!.textContent).toBe('bob');
+	});
 });
 
 describe('component > object and array props', () => {

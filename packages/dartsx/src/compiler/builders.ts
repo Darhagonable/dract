@@ -115,6 +115,23 @@ export function getter(key: string, body: AstNode[]) {
 	});
 }
 
+/** A setter property: set key(param) { body } */
+export function setter(key: string, param: AstNode, body: AstNode[]) {
+	return node('Property', {
+		key: /^[$A-Z_a-z][$\w]*$/.test(key) ? id(key) : literal(key),
+		value: node('FunctionExpression', {
+			id: null,
+			params: [param],
+			body: node('BlockStatement', { body }),
+			async: false,
+		}),
+		kind: 'set',
+		computed: false,
+		shorthand: false,
+		method: false,
+	});
+}
+
 export function spread(expr: AstNode, loc?: SourceLocation | null) {
 	return node('SpreadElement', { argument: expr }, loc);
 }

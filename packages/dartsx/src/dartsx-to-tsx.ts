@@ -53,8 +53,10 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformComponentDeclarations(ms, source, commentRanges);
 	transformStateDeclarations(ms, source, commentRanges);
 	transformDerivedDeclarations(ms, source, commentRanges);
+	transformDefiniteAssignments(ms, source, commentRanges);
 	transformRenderBlocks(ms, source);
 	transformJsxControlFlow(ms, source);
+	transformEventHandlers(ms, source);
 	transformHtmlDirective(ms, source);
 	transformBindShorthand(ms, source);
 	transformBindAttributes(ms, source);
@@ -65,12 +67,12 @@ export function dartsxToTsx(source: string): TransformResult {
 	return { code, map };
 }
 
-// ── Comment detection ──────────────────────────────────────────────
+// ── Comment & string literal detection ─────────────────────────────
 
-type CommentRange = { start: number; end: number };
+type SkipRange = { start: number; end: number };
 
-function buildCommentRanges(source: string): CommentRange[] {
-	const ranges: CommentRange[] = [];
+function buildCommentRanges(source: string): SkipRange[] {
+	const ranges: SkipRange[] = [];
 	let i = 0;
 	while (i < source.length) {
 		const ch = source[i];
@@ -85,7 +87,9 @@ function buildCommentRanges(source: string): CommentRange[] {
 			i = i === -1 ? source.length : i + 2;
 			ranges.push({ start, end: i });
 		} else if (ch === '\'' || ch === '"' || ch === '`') {
+			const start = i;
 			i = skipString(source, i);
+			ranges.push({ start, end: i });
 		} else {
 			i++;
 		}
@@ -93,7 +97,7 @@ function buildCommentRanges(source: string): CommentRange[] {
 	return ranges;
 }
 
-function isInComment(ranges: CommentRange[], pos: number): boolean {
+function isInComment(ranges: SkipRange[], pos: number): boolean {
 	for (const r of ranges) {
 		if (pos >= r.start && pos < r.end) return true;
 		if (r.start > pos) break;
@@ -125,7 +129,7 @@ function skipString(source: string, start: number): number {
 
 // ── component → function (with props destructuring) ───────────────
 
-function transformComponentDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
+function transformComponentDeclarations(ms: MagicString, source: string, commentRanges: SkipRange[]): void {
 	const re = /\b((?:export\s+)?(?:default\s+)?(?:async\s+)?)component(\s+\w+)/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
@@ -393,7 +397,7 @@ function findDefaultEquals(source: string, start = 0, end = source.length): numb
 
 // ── state x = → let x = ───────────────────────────────────────────
 
-function transformStateDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
+function transformStateDeclarations(ms: MagicString, source: string, commentRanges: SkipRange[]): void {
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+(\w+))/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
@@ -421,7 +425,7 @@ function transformStateDeclarations(ms: MagicString, source: string, commentRang
 
 // ── derived x = → const x = ───────────────────────────────────────
 
-function transformDerivedDeclarations(ms: MagicString, source: string, commentRanges: CommentRange[]): void {
+function transformDerivedDeclarations(ms: MagicString, source: string, commentRanges: SkipRange[]): void {
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[\w{[])/g;
 	let match;
 	while ((match = re.exec(source)) !== null) {
@@ -432,6 +436,26 @@ function transformDerivedDeclarations(ms: MagicString, source: string, commentRa
 }
 
 // ── render (...) → return (<>...</>) ───────────────────────────────
+
+// ── let x: T; → let x!: T; (definite assignment for element refs) ──
+
+function transformDefiniteAssignments(ms: MagicString, source: string, commentRanges: SkipRange[]): void {
+	// Match `let identifier: Type;` with no `=` (uninitialized typed let)
+	const re = /\blet\s+(\w+)\s*:/g;
+	let match;
+	while ((match = re.exec(source)) !== null) {
+		if (isInComment(commentRanges, match.index)) continue;
+		// Check there's no `=` before the next `;` (i.e. no initializer)
+		const afterColon = match.index + match[0].length;
+		const semi = source.indexOf(';', afterColon);
+		if (semi === -1) continue;
+		const segment = source.slice(afterColon, semi);
+		if (segment.includes('=')) continue;
+		// Insert `!` after identifier: `let x: T;` → `let x!: T;`
+		const nameEnd = match.index + match[0].length - 1; // position of `:`
+		ms.appendLeft(nameEnd, '!');
+	}
+}
 
 function transformRenderBlocks(ms: MagicString, source: string): void {
 	// render (...) → return (<>...</>)
@@ -715,6 +739,76 @@ function findMatchingBrace(code: string, openPos: number): number {
 		i++;
 	}
 	return -1;
+}
+
+// ── Assignment/update wrapping ─────────────────────────────────────
+
+/**
+ * Wrap assignment/update expressions in JSX attributes with arrow functions.
+ * `onclick={count += 1}` → `onclick={() => count += 1}`
+ * `onclick={count++}` → `onclick={() => count++}`
+ *
+ * Only wraps expressions that are clearly statement-like (assignments, ++, --).
+ * Applies to all props, not just event handlers.
+ */
+function transformEventHandlers(ms: MagicString, source: string): void {
+	const re = /\b[a-zA-Z][\w-]*\s*=\s*\{/g;
+	let match;
+	while ((match = re.exec(source)) !== null) {
+		// Only apply inside JSX opening tags (not variable declarations/object literals)
+		if (!isJsxAttributeContext(source, match.index)) continue;
+
+		const braceStart = source.indexOf('{', match.index + 2);
+		if (braceStart === -1) continue;
+		const braceEnd = findMatchingBrace(source, braceStart);
+		if (braceEnd === -1) continue;
+
+		const inner = source.slice(braceStart + 1, braceEnd).trim();
+		if (!needsWrapping(inner)) continue;
+
+		// Wrap: {expr} → {() => expr}
+		ms.appendLeft(braceStart + 1, '() => ');
+	}
+}
+
+/** Check if pos is inside a JSX opening tag's attribute list (between `<Tag` and `>`) */
+function isJsxAttributeContext(source: string, pos: number): boolean {
+	for (let i = pos - 1; i >= 0; i--) {
+		const ch = source[i];
+		if (ch === '<') return true;
+		if (ch === '>' || ch === ';' || ch === '{') return false;
+		// Skip over brace-delimited prop values (scan matching { backwards)
+		if (ch === '}') {
+			let depth = 1;
+			i--;
+			while (i >= 0 && depth > 0) {
+				if (source[i] === '}') depth++;
+				else if (source[i] === '{') depth--;
+				i--;
+			}
+			continue;
+		}
+		// Skip over string prop values
+		if (ch === '"' || ch === "'") {
+			const quote = ch;
+			i--;
+			while (i >= 0 && source[i] !== quote) {
+				if (i > 0 && source[i - 1] === '\\') i--;
+				i--;
+			}
+			continue;
+		}
+	}
+	return false;
+}
+
+/** Bare assignment/update that isn't already a function needs an arrow wrapper */
+function needsWrapping(expr: string): boolean {
+	if (/^(\(.*\)\s*=>|[a-zA-Z_$]\w*\s*=>|function[\s(])/.test(expr)) return false;
+	// Strip string literals so operators inside strings (e.g. CSS `--var`) don't trigger false positives
+	const stripped = expr.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+	if (/\+\+|--/.test(stripped)) return true;
+	return /(?<![<>!=])=(?![=>])/.test(stripped);
 }
 
 // ── bind:{x} → __bind_value={x} ───────────────────────────────────

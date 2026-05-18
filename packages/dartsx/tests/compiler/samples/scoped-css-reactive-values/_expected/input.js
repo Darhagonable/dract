@@ -8,11 +8,13 @@ function Button($$props) {
 
 	return $.jsx("button", {
 		"data-scope": "1ei60oi",
-		style: () => ({
-			"--color": $.get(color),
-			"--size": $.get(size) + "px",
-			"--size-n83f": $.get(size) / 2 + "px"
-		}),
+		get style() {
+			return {
+				"--color": $.get(color),
+				"--size": $.get(size) + "px",
+				"--size-n83f": $.get(size) / 2 + "px"
+			};
+		},
 		children: ["Click me"]
 	});
 }

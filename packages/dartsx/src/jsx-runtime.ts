@@ -1,9 +1,10 @@
 import { Fragment, jsx as createJsx } from './runtime/internal/client';
 import type { SvelteHTMLElements } from './elements';
+import type { DarTsxNode } from './runtime/external/types';
 
 type Key = string | number | bigint;
 
-type DarTsxComponentLike = (...args: any[]) => Node;
+type DarTsxComponentLike = (...args: any[]) => DarTsxNode;
 
 type DarTsxElementType = Extract<keyof SvelteHTMLElements, string> | DarTsxComponentLike;
 

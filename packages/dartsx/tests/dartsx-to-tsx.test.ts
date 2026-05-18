@@ -297,6 +297,33 @@ describe('dartsxToTsx', () => {
 	});
 });
 
+describe('event handler wrapping', () => {
+	it('wraps bare assignment in attribute', () => {
+		const { code } = dartsxToTsx('<div onclick={x = 5} />');
+		expect(code).toContain('onclick={() => x = 5}');
+	});
+
+	it('wraps bare update expression in attribute', () => {
+		const { code } = dartsxToTsx('<input oninput={count++} />');
+		expect(code).toContain('oninput={() => count++}');
+	});
+
+	it('does not wrap arrow function with assignment in body', () => {
+		const { code } = dartsxToTsx('<input oninput={(e) => username = e.target?.value} />');
+		expect(code).toContain('oninput={(e) => username = e.target?.value}');
+	});
+
+	it('does not wrap arrow function with no parens', () => {
+		const { code } = dartsxToTsx('<input oninput={e => username = e.target?.value} />');
+		expect(code).toContain('oninput={e => username = e.target?.value}');
+	});
+
+	it('does not wrap function expression', () => {
+		const { code } = dartsxToTsx('<div onclick={function() { x = 5 }} />');
+		expect(code).toContain('onclick={function() { x = 5 }}');
+	});
+});
+
 describe('dartsxToTsx produces valid TypeScript', () => {
 	// Inline snippets — every DarTsx pattern must produce parseable TSX
 	const snippets: [string, string][] = [

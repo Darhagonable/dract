@@ -8,7 +8,16 @@ function HelloWorld() {
 	return $.jsx($.Fragment, {
 		children: [
 			$.jsx("h1", { children: ["Hello ", () => $.get(name)] }),
-			$.jsx("input", { "bind:value": [() => $.get(name), (v) => $.set(name, v)] }),
+			$.jsx("input", {
+				get value() {
+					return $.get(name);
+				},
+
+				set value(v) {
+					$.set(name, v);
+				}
+			}),
+
 			$.jsx("button", {
 				onclick: () => $.set(count, $.get(count) + 1),
 				children: ["clicks: ", () => $.get(count)]

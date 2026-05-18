@@ -14,6 +14,14 @@ import { getDarTsxLanguagePlugin } from 'dartsx-typescript-plugin/language';
 import { analyzeUnusedCss } from 'dartsx-typescript-plugin/unused-css';
 import { findSuppressZones, isDarTsxFile } from 'dartsx/dartsx-to-tsx';
 
+// Errors always suppressed in DarTsx files — false positives from custom syntax transforms
+// (mirrors ALWAYS_SUPPRESS in the TypeScript plugin)
+const ALWAYS_SUPPRESS = new Set([
+	1003, 1005, 1109, 1128, 1136, 1381, 1434,
+	2304, 2362, 2552, 2632, 2657, 2693, 2695, 2724, 2809,
+	6385, 7026,
+]);
+
 export interface CheckOptions {
 	cwd?: string;
 	tsconfig?: string;
@@ -76,6 +84,8 @@ export function check(options: CheckOptions = {}): CheckResult {
 		if (!d.file || d.start === undefined) return true;
 		const source = d.file.text;
 		if (!isDarTsxFile(source)) return true;
+		// Always suppress known false positives from DarTsx syntax transforms
+		if (ALWAYS_SUPPRESS.has(d.code)) return false;
 		const zones = findSuppressZones(source);
 		return !zones.some((z: { start: number; end: number }) => d.start! >= z.start && d.start! < z.end);
 	});

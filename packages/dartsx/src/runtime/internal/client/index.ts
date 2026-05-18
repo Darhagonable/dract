@@ -6,12 +6,11 @@ export { prop } from './reactivity/prop';
 export { derived, getDerived, isDerived, type Derived } from './reactivity/derived';
 export { effect, teardown } from './reactivity/effect';
 export { proxy, RAW, STATE_SYMBOL, getProxyState, isProxy, signalProxy, getSignalTarget } from './reactivity/proxy';
-export type { BindTuple } from './bindings/types';
 export { type ComponentContext, getCurrentComponent, setCurrentComponent } from './context';
 
 // ── Re-exports from jsx ────────────────────────────────────────────
 
-export { jsx, svg, math, Fragment, appendChild } from './jsx';
+export { jsx, svg, math, Fragment, appendChild, mergeProps } from './jsx';
 export { style } from './jsx/style-inject';
 export { if_block } from './blocks/if';
 export { for_block } from './blocks/for';
@@ -32,7 +31,7 @@ import { for_block } from './blocks/for';
 import { switch_block } from './blocks/switch';
 import { try_block } from './blocks/try';
 import { html_block } from './blocks/html';
-import { jsx, svg, math, Fragment } from './jsx';
+import { jsx, svg, math, Fragment, mergeProps } from './jsx';
 import { style } from './jsx/style-inject';
 
 // ── Default export ─────────────────────────────────────────────────
@@ -48,6 +47,7 @@ export default {
 	jsx,
 	svg,
 	math,
+	mergeProps,
 	Fragment,
 	style,
 	if: if_block,

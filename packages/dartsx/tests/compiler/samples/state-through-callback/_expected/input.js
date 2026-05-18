@@ -21,8 +21,18 @@ function Form() {
 
 	return $.jsx("div", {
 		children: [
-			$.jsx("input", { value: () => $.get(name) }),
-			$.jsx("input", { value: () => $.get(age), type: "number" })
+			$.jsx("input", {
+				get value() {
+					return $.get(name);
+				}
+			}),
+
+			$.jsx("input", {
+				get value() {
+					return $.get(age);
+				},
+				type: "number"
+			})
 		]
 	});
 }

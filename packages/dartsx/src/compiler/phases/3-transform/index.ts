@@ -662,8 +662,14 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 			props.push(b.spread(walkNode(attr.argument, state)));
 			continue;
 		}
-		const attrResult = transformJSXAttribute(attr, state, isComponent);
-		if (attrResult) props.push(attrResult);
+		const attrResult = transformJSXAttribute(attr, state);
+		if (attrResult) {
+			if (Array.isArray(attrResult)) {
+				props.push(...attrResult);
+			} else {
+				props.push(attrResult);
+			}
+		}
 	}
 
 	// Add scope attrs for scoped CSS
@@ -704,7 +710,7 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 			const expr = parseCSSVarExpr(cv.expr);
 			return expr ? expressionIsReactive(expr, state) : false;
 		});
-		props.push(b.prop('style', isReactive ? b.arrow([], styleObj) : styleObj));
+		props.push(isReactive ? b.getter('style', [b.returnStmt(styleObj)]) : b.prop('style', styleObj));
 	}
 
 	// Process children
@@ -719,10 +725,45 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 	const tag = isComponent ? b.id(tagName) : b.literal(tagName);
 	const factory = selfNs === 'svg' ? '$.svg' : selfNs === 'math' ? '$.math' : '$.jsx';
 	if (props.length === 0) return b.call(factory, [tag]);
+
+	// If there are spread elements, use $.mergeProps() to preserve getters
+	const hasSpread = props.some(p => p.type === 'SpreadElement');
+	if (hasSpread) {
+		const sources = buildMergeSources(props);
+		return b.call(factory, [tag, b.call('$.mergeProps', sources)]);
+	}
 	return b.call(factory, [tag, b.object(props)]);
 }
 
-function transformJSXAttribute(attr: JSXAttribute, state: TransformState, isComponent: boolean) {
+/**
+ * Split a props array (which may contain SpreadElements) into merge sources.
+ * Consecutive non-spread props become a single object literal.
+ * Spread elements become their argument directly.
+ *
+ * [prop1, spread(x), prop2, prop3] → [{ prop1 }, x, { prop2, prop3 }]
+ */
+function buildMergeSources(props: AstNode[]): AstNode[] {
+	const sources: AstNode[] = [];
+	let current: AstNode[] = [];
+
+	for (const prop of props) {
+		if (prop.type === 'SpreadElement') {
+			if (current.length > 0) {
+				sources.push(b.object(current));
+				current = [];
+			}
+			sources.push(prop.argument);
+		} else {
+			current.push(prop);
+		}
+	}
+	if (current.length > 0) {
+		sources.push(b.object(current));
+	}
+	return sources;
+}
+
+function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 	const attrName = getAttrName(attr.name);
 
 	// Namespace: bind:value
@@ -736,26 +777,33 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState, isComp
 				const el0 = expr.elements[0];
 				const el1 = expr.elements[1];
 				if (el0 && el1) {
-					const getter = walkNode(el0, state);
-					const setter = walkNode(el1, state);
-					return b.prop(`bind:${local}`, b.array([getter, setter]));
+					const result = [
+						buildBindGetter(local, walkNode(el0, state)),
+						buildBindSetter(local, walkNode(el1, state)),
+					].filter(Boolean) as AstNode[];
+					return result;
 				}
 			}
 			if (expr && expr.type !== 'JSXEmptyExpression') {
-				const getter = b.arrow([], walkNode(expr, state));
-				let setter: AstNode;
+				let getExpr: AstNode;
+				let setBody: AstNode;
 				if (expr.type === 'Identifier') {
 					const binding = state.scope.get(expr.name);
 					if (binding?.writable) {
-						setter = b.arrow([b.id('v')], b.call('$.set', [b.id(expr.name), b.id('v')]));
+						getExpr = b.call('$.get', [b.id(expr.name)]);
+						setBody = b.exprStmt(b.call('$.set', [b.id(expr.name), b.id('v')]));
 					} else {
-						setter = b.arrow([b.id('v')], b.assignment('=', b.id(expr.name), b.id('v')));
+						getExpr = walkNode(expr, state);
+						setBody = b.exprStmt(b.assignment('=', b.id(expr.name), b.id('v')));
 					}
 				} else {
-					// MemberExpression or other: use direct assignment
-					setter = b.arrow([b.id('v')], b.assignment('=', walkNode(expr, state), b.id('v')));
+					getExpr = walkNode(expr, state);
+					setBody = b.exprStmt(b.assignment('=', walkNode(expr, state), b.id('v')));
 				}
-				return b.prop(`bind:${local}`, b.array([getter, setter]));
+				return [
+					b.getter(local, [b.returnStmt(getExpr)]),
+					b.setter(local, b.id('v'), [setBody])
+				];
 			}
 			return null;
 		}
@@ -764,17 +812,6 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState, isComp
 	// Boolean: disabled
 	if (attr.value === null && attr.name.type === 'JSXIdentifier') {
 		return b.prop(attrName, b.literal(true));
-	}
-
-	// Event handler: onclick={...}
-	if (attrName.startsWith('on') && attrName.length > 2) {
-		if (attr.value?.type === 'JSXExpressionContainer') {
-			const expr = attr.value.expression;
-			if (expr.type === 'JSXEmptyExpression') return b.prop(attrName, b.literal(null));
-			const handler = transformEventHandler(expr, state);
-			return b.prop(attrName, handler);
-		}
-		return b.prop(attrName, b.literal(null));
 	}
 
 	// Static string
@@ -786,17 +823,21 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState, isComp
 	if (attr.value?.type === 'JSXExpressionContainer') {
 		const expr = attr.value.expression;
 		if (expr.type === 'JSXEmptyExpression') return null;
+
+		// Assignment/Update expressions: wrap in arrow function
+		// e.g. onclick={count++} → onclick: () => $.set(count, ...)
+		if (expr.type === 'AssignmentExpression' || expr.type === 'UpdateExpression') {
+			return b.prop(attrName, b.arrow([], walkNode(expr, state)));
+		}
+
 		const isReactive = expressionIsReactive(expr, state);
 
-		if (isReactive && isComponent) {
-			const transformed = walkNode(expr, state);
-			return b.getter(attrName, [b.returnStmt(transformed)]);
-		}
 		if (isReactive) {
+			// Use a getter so reactive props are lazily evaluated.
 			// Walk with insideDerived so shorthand properties use eager $.get()
-			// instead of getters (the wrapping thunk already provides reactivity)
+			// instead of nested getters.
 			const transformed = walkNode(expr, { ...state, insideDerived: true });
-			return b.prop(attrName, b.arrow([], transformed));
+			return b.getter(attrName, [b.returnStmt(transformed)]);
 		}
 		const transformed = walkNode(expr, state);
 		return b.prop(attrName, transformed);
@@ -805,15 +846,6 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState, isComp
 	return b.prop(attrName, b.literal(null));
 }
 
-function transformEventHandler(expr: Expression, state: TransformState) {
-	if (expr.type === 'ArrowFunctionExpression' || expr.type === 'FunctionExpression') {
-		return walkNode(expr, state);
-	}
-	if (expr.type === 'Identifier' || expr.type === 'MemberExpression') {
-		return walkNode(expr, state);
-	}
-	return b.arrow([], walkNode(expr, state));
-}
 
 function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: TransformState, visit: WalkContext['visit'], trackElementPath = false): AstNode[] {
 	const result: AstNode[] = [];
@@ -1261,6 +1293,31 @@ function isInReactiveCallArg(
 		}
 	}
 	return false;
+}
+
+/** Build a getter property from a walked node, returning null if the node is a null literal */
+function buildBindGetter(key: string, node: AstNode): AstNode | null {
+	if (node.type === 'Literal' && node.value === null) return null;
+	if (node.type === 'ArrowFunctionExpression') {
+		const body = node.body.type === 'BlockStatement'
+			? node.body.body
+			: [b.returnStmt(node.body)];
+		return b.getter(key, body);
+	}
+	return b.getter(key, [b.returnStmt(b.call(node, []))]);
+}
+
+/** Build a setter property from a walked node, returning null if the node is a null literal */
+function buildBindSetter(key: string, node: AstNode): AstNode | null {
+	if (node.type === 'Literal' && node.value === null) return null;
+	if (node.type === 'ArrowFunctionExpression') {
+		const param = node.params[0] || b.id('v');
+		const body = node.body.type === 'BlockStatement'
+			? node.body.body
+			: [b.exprStmt(node.body)];
+		return b.setter(key, param, body);
+	}
+	return b.setter(key, b.id('v'), [b.exprStmt(b.call(node, [b.id('v')]))]);
 }
 
 function normalizeJSXText(text: string, isFirst: boolean, isLast: boolean): string {

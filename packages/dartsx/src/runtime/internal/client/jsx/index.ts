@@ -75,11 +75,48 @@ export function math(tag: string, props?: Record<string, any> | null): Element {
 	return applyProps(document.createElementNS(MATH_NS, tag), props);
 }
 
-function applyProps<T extends Element>(el: T, props?: Record<string, any> | null): T {
+/**
+ * Merge multiple prop sources preserving getters (reactivity).
+ * Used when JSX has spread attributes: <input {...props} class="x" />
+ */
+export function mergeProps(...sources: Record<string, any>[]): Record<string, any> {
+	const target = {};
+	for (const source of sources) {
+		Object.defineProperties(target, Object.getOwnPropertyDescriptors(source));
+	}
+	return target;
+}
+
+function applyProps<T extends Element & { style: CSSStyleDeclaration }>(el: T, props?: Record<string, any> | null): T {
 	if (props) {
-		for (const key of Object.keys(props)) {
+		const descriptors = Object.getOwnPropertyDescriptors(props);
+		for (const key in descriptors) {
 			if (key === 'children') continue;
-			applyProp(el, key, props[key]);
+			const desc = descriptors[key];
+			if (desc.get && desc.set) {
+				// Two-way binding (getter + setter)
+				applyBinding(el, key, desc.get, desc.set);
+			} else if (desc.set && !desc.get) {
+				// Write-only binding (e.g. bind:clientWidth with null getter)
+				applyBinding(el, key, null, desc.set);
+			} else if (desc.get) {
+				// Reactive prop (getter only) — set up an effect
+				const getter = desc.get;
+				if (key === 'style') {
+					let prevStyles: Record<string, any> | null = null;
+					effect(() => {
+						const nextStyles = getter();
+						if (typeof nextStyles === 'object' && nextStyles !== null && !Array.isArray(nextStyles)) {
+							setValueForStyles(el as any, nextStyles, prevStyles);
+							prevStyles = nextStyles;
+						}
+					});
+				} else {
+					effect(() => applyProp(el, key, getter()));
+				}
+			} else {
+				applyProp(el, key, desc.value);
+			}
 		}
 		if (props.children != null) {
 			appendChildren(el, props.children);
@@ -90,84 +127,18 @@ function applyProps<T extends Element>(el: T, props?: Record<string, any> | null
 
 // ── Prop application ───────────────────────────────────────────────
 
-const DELEGATED_EVENTS = new Set([
-	'beforeinput', 'click', 'change', 'dblclick', 'contextmenu',
-	'focusin', 'focusout', 'input', 'keydown', 'keyup',
-	'mousedown', 'mousemove', 'mouseout', 'mouseover', 'mouseup',
-	'pointerdown', 'pointermove', 'pointerout', 'pointerover', 'pointerup',
-	'touchend', 'touchmove', 'touchstart',
-]);
-
-const registeredDelegations = new Set<string>();
-
-function ensureDelegation(eventType: string): void {
-	if (registeredDelegations.has(eventType)) return;
-	registeredDelegations.add(eventType);
-
-	const passive = eventType === 'touchstart' || eventType === 'touchmove';
-
-	document.addEventListener(
-		eventType,
-		(event: Event) => {
-			let node = event.target as Node | null;
-			while (node) {
-				const handler = (node as any)[`__${eventType}`];
-				if (handler) {
-					handler.call(node, event);
-					if (event.cancelBubble) return;
-				}
-				node = node.parentNode;
-			}
-		},
-		passive ? { passive: true } : undefined,
-	);
-}
-
-function applyProp(el: Element, key: string, value: any): void {
-	// Event handler: onclick, onkeydown, etc.
-	if (key.startsWith('on') && key.length > 2) {
-		const eventName = key.slice(2).toLowerCase();
-		if (DELEGATED_EVENTS.has(eventName)) {
-			ensureDelegation(eventName);
-			(el as any)[`__${eventName}`] = value;
-		} else {
-			el.addEventListener(eventName, value);
-		}
-		return;
-	}
-
-	// Two-way binding: bind:value, bind:checked, etc.
-	if (key.startsWith('bind:')) {
-		applyBinding(el, key.slice(5), value);
-		return;
-	}
-
-	// Dynamic attribute (function → reactive)
-	if (typeof value === 'function') {
-		// Style objects need prevStyles tracking for proper diffing
-		if (key === 'style') {
-			let prevStyles: Record<string, any> | null = null;
-			effect(() => {
-				const nextStyles = value();
-				if (typeof nextStyles === 'object' && nextStyles !== null && !Array.isArray(nextStyles)) {
-					setValueForStyles(el as HTMLElement, nextStyles, prevStyles);
-					prevStyles = nextStyles;
-				}
-			});
-			return;
-		}
-		effect(() => {
-			setAttribute(el, key, value());
-		});
-		return;
-	}
-
-	// Static attribute
+function applyProp(el: Element & { style: CSSStyleDeclaration }, key: string, value: any): void {
 	setAttribute(el, key, value);
 }
 
-function setAttribute(el: Element, name: string, value: any): void {
-	// innerHTML / textContent / innerText are DOM properties, not attributes
+function setAttribute(el: Element & { style: CSSStyleDeclaration }, name: string, value: any): void {
+	// Function values → property assignment (handles onclick, onmouseover, etc. naturally)
+	if (typeof value === 'function') {
+		(el as Record<string, any>)[name] = value;
+		return;
+	}
+
+	// innerHTML / textContent / innerText are DOM properties
 	if (name === 'innerHTML' || name === 'textContent' || name === 'innerText') {
 		(el as HTMLElement)[name] = value ?? '';
 		return;
@@ -176,7 +147,6 @@ function setAttribute(el: Element, name: string, value: any): void {
 	// Store raw (possibly non-string) value on options/selects as __value
 	if (name === 'value' && (el.tagName === 'OPTION' || el.tagName === 'SELECT')) {
 		(el as any).__value = value;
-		// For <option>, also set the DOM value attribute as string
 		if (value == null) {
 			el.removeAttribute(name);
 		} else {

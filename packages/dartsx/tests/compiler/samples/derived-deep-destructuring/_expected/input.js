@@ -8,7 +8,10 @@ function Child() {
 	const arrayCount = $.derived(() => __derived_0.data.values[1].count);
 
 	return $.jsx("button", {
-		onclick: $.get(increment),
+		get onclick() {
+			return $.get(increment);
+		},
+
 		children: [
 			() => $.get(label),
 			":",

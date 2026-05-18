@@ -6,7 +6,9 @@ function Child() {
 	const increment = $.derived(() => __derived_0.increment);
 
 	return $.jsx("button", {
-		onclick: $.get(increment),
+		get onclick() {
+			return $.get(increment);
+		},
 		children: ["Count: ", () => $.get(count)]
 	});
 }

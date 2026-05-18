@@ -1272,6 +1272,7 @@ export interface HTMLSourceAttributes extends HTMLAttributes<HTMLSourceElement> 
 }
 
 export interface HTMLStyleAttributes extends HTMLAttributes<HTMLStyleElement> {
+	global?: boolean | undefined | null;
 	media?: string | undefined | null;
 	nonce?: string | undefined | null;
 	scoped?: boolean | undefined | null;

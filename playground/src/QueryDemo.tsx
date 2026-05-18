@@ -41,7 +41,7 @@ export component QueryDemo() {
   state selectedId: number | null = null;
 
   derived posts = useQuery(postsQuery());
-  derived post = useQuery(selectedId && postQuery(selectedId));
+  derived post = useQuery(selectedId !== null && postQuery(selectedId));
 
   render (
     <div>

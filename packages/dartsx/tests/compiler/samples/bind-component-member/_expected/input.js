@@ -3,5 +3,13 @@ import $ from "dartsx/internal/client";
 function Parent() {
 	let form = $.state({ name: "" });
 
-	return $.jsx(Child, { "bind:name": [() => form.name, (v) => form.name = v] });
+	return $.jsx(Child, {
+		get name() {
+			return form.name;
+		},
+
+		set name(v) {
+			form.name = v;
+		}
+	});
 }

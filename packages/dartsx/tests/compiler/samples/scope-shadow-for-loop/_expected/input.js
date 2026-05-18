@@ -18,7 +18,11 @@ function Search() {
 
 	return $.jsx("div", {
 		children: [
-			$.jsx("input", { value: () => $.get(query) }),
+			$.jsx("input", {
+				get value() {
+					return $.get(query);
+				}
+			}),
 			$.jsx("button", { onclick: doSearch, children: ["search"] }),
 			$.jsx("p", {
 				children: [

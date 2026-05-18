@@ -11,21 +11,22 @@ import { bindVideoWidth, bindVideoHeight } from './video';
 import { bindNaturalWidth, bindNaturalHeight, bindComplete } from './img';
 import { bindElementSize, bindResizeObserver } from './dimensions';
 import { bindInnerHTML, bindInnerText, bindTextContent } from './props';
-import type { BindTuple } from './types';
 
-export function applyBinding(el: Element, prop: string, value: BindTuple): void {
-	const [get, set] = value;
+export function applyBinding(el: Element, prop: string, get: (() => any) | null, set: ((value: any) => void) | null): void {
 
-	// bind:this — works on any Element
-	if (prop === 'this') return bindThis(el, set);
+	// bind:this — works on any Element (set-only)
+	if (prop === 'this') {
+		if (!set) return;
+		return bindThis(el, set);
+	}
 
 	// Select bindings
 	if (el instanceof HTMLSelectElement) {
-		if (prop === 'value') return bindSelectValue(el, get, set);
+		if (prop === 'value' && get && set) return bindSelectValue(el, get, set);
 	}
 
 	// Input bindings
-	if (el instanceof HTMLInputElement) {
+	if (el instanceof HTMLInputElement && get && set) {
 		switch (prop) {
 			case 'value': return bindValue(el, get, set);
 			case 'checked': return bindChecked(el, get, set);
@@ -37,31 +38,37 @@ export function applyBinding(el: Element, prop: string, value: BindTuple): void 
 
 	// Textarea bindings
 	if (el instanceof HTMLTextAreaElement) {
-		if (prop === 'value') return bindValue(el, get, set);
+		if (prop === 'value' && get && set) return bindValue(el, get, set);
 	}
 
 	// Details
 	if (el instanceof HTMLDetailsElement) {
-		if (prop === 'open') return bindOpen(el, get, set);
+		if (prop === 'open' && get && set) return bindOpen(el, get, set);
 	}
 
 	// Media bindings (audio/video)
 	if (el instanceof HTMLMediaElement) {
-		switch (prop) {
-			case 'currentTime': return bindCurrentTime(el, get, set);
-			case 'paused': return bindPaused(el, get, set);
-			case 'volume': return bindVolume(el, get, set);
-			case 'muted': return bindMuted(el, get, set);
-			case 'playbackRate': return bindPlaybackRate(el, get, set);
-			case 'duration': return bindDuration(el, set);
-			case 'buffered': return bindBuffered(el, set);
-			case 'seekable': return bindSeekable(el, set);
-			case 'seeking': return bindSeeking(el, set);
-			case 'ended': return bindEnded(el, set);
-			case 'readyState': return bindReadyState(el, set);
-			case 'played': return bindPlayed(el, set);
+		if (get && set) {
+			switch (prop) {
+				case 'currentTime': return bindCurrentTime(el, get, set);
+				case 'paused': return bindPaused(el, get, set);
+				case 'volume': return bindVolume(el, get, set);
+				case 'muted': return bindMuted(el, get, set);
+				case 'playbackRate': return bindPlaybackRate(el, get, set);
+			}
 		}
-		if (el instanceof HTMLVideoElement) {
+		if (set) {
+			switch (prop) {
+				case 'duration': return bindDuration(el, set);
+				case 'buffered': return bindBuffered(el, set);
+				case 'seekable': return bindSeekable(el, set);
+				case 'seeking': return bindSeeking(el, set);
+				case 'ended': return bindEnded(el, set);
+				case 'readyState': return bindReadyState(el, set);
+				case 'played': return bindPlayed(el, set);
+			}
+		}
+		if (el instanceof HTMLVideoElement && set) {
 			switch (prop) {
 				case 'videoWidth': return bindVideoWidth(el, set);
 				case 'videoHeight': return bindVideoHeight(el, set);
@@ -70,7 +77,7 @@ export function applyBinding(el: Element, prop: string, value: BindTuple): void 
 	}
 
 	// Image bindings
-	if (el instanceof HTMLImageElement) {
+	if (el instanceof HTMLImageElement && set) {
 		switch (prop) {
 			case 'naturalWidth': return bindNaturalWidth(el, set);
 			case 'naturalHeight': return bindNaturalHeight(el, set);
@@ -79,7 +86,7 @@ export function applyBinding(el: Element, prop: string, value: BindTuple): void 
 	}
 
 	// Contenteditable bindings
-	if (el instanceof HTMLElement && el.isContentEditable) {
+	if (el instanceof HTMLElement && el.isContentEditable && get && set) {
 		switch (prop) {
 			case 'innerHTML': return bindInnerHTML(el, get, set);
 			case 'innerText': return bindInnerText(el, get, set);
@@ -88,7 +95,7 @@ export function applyBinding(el: Element, prop: string, value: BindTuple): void 
 	}
 
 	// Dimension bindings (any visible element)
-	if (el instanceof HTMLElement) {
+	if (el instanceof HTMLElement && set) {
 		switch (prop) {
 			case 'clientWidth': case 'clientHeight':
 			case 'scrollWidth': case 'scrollHeight':
@@ -97,9 +104,11 @@ export function applyBinding(el: Element, prop: string, value: BindTuple): void 
 		}
 	}
 
-	switch (prop) {
-		case 'contentRect': case 'contentBoxSize':
-		case 'borderBoxSize': case 'devicePixelContentBoxSize':
-			return bindResizeObserver(el, prop, set);
+	if (set) {
+		switch (prop) {
+			case 'contentRect': case 'contentBoxSize':
+			case 'borderBoxSize': case 'devicePixelContentBoxSize':
+				return bindResizeObserver(el, prop, set);
+		}
 	}
 }
