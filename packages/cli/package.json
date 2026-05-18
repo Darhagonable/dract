@@ -20,16 +20,16 @@
 	"dependencies": {
 		"@volar/language-core": "~2.4.28",
 		"@volar/typescript": "~2.4.28",
+		"chokidar": "^5.0.0",
 		"dartsx": "workspace:*",
 		"dartsx-typescript-plugin": "workspace:*",
-		"kleur": "^4.1.5",
-		"chokidar": "^5.0.0"
+		"kleur": "^4.1.5"
 	},
 	"peerDependencies": {
 		"typescript": ">=5.0.0"
 	},
 	"devDependencies": {
-		"@types/node": "^25.6.0",
+		"@types/node": "^25.9.0",
 		"typescript": "^6.0.3"
 	}
 }

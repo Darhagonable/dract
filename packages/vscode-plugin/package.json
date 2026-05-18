@@ -73,13 +73,13 @@
 	"dependencies": {
 		"@volar/language-server": "~2.4.28",
 		"dartsx-typescript-plugin": "workspace:*",
-		"volar-service-css": "0.0.70",
-		"volar-service-html": "0.0.70",
+		"volar-service-css": "0.0.71",
+		"volar-service-html": "0.0.71",
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
-		"@types/vscode": "^1.116.0",
+		"@types/vscode": "^1.120.0",
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
 		"typescript": "^6.0.3"

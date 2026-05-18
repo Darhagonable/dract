@@ -43,16 +43,16 @@
 		"clsx": "^2.1.1",
 		"dartsx-cli": "workspace:*",
 		"entities": "^8.0.0",
-		"esrap": "^2.2.5",
+		"esrap": "^2.2.9",
 		"magic-string": "^0.30.21",
-		"oxc-parser": "^0.128.0",
-		"oxc-transform": "^0.128.0",
-		"postcss": "^8.5.12",
+		"oxc-parser": "^0.132.0",
+		"oxc-transform": "^0.132.0",
+		"postcss": "^8.5.14",
 		"postcss-selector-parser": "^7.1.1",
 		"zimmerframe": "^1.1.4"
 	},
 	"devDependencies": {
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.5"
+		"vitest": "^4.1.6"
 	}
 }

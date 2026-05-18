@@ -8,12 +8,12 @@
 		"check": "pnpm -r --no-bail run check"
 	},
 	"devDependencies": {
-		"@types/node": "^25.6.0",
+		"@types/node": "^25.9.0",
 		"dartsx-vite-plugin": "workspace:*",
-		"jsdom": "^29.1.0",
-		"tsdown": "^0.21.10",
+		"jsdom": "^29.1.1",
+		"tsdown": "^0.22.0",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.5"
+		"vitest": "^4.1.6"
 	},
 	"packageManager": "pnpm@10.7.0",
 	"engines": {
