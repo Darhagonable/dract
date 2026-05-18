@@ -19,11 +19,11 @@ export component StorageSyncDemo() {
       <h3>Storage Sync Demo (cross-file signal forwarding bug)</h3>
       <label>
         Username:
-        <input value={username} oninput={(e) => username = e.target?.value} />
+        <input value={username} oninput={(e) => username = e.currentTarget.value} />
       </label>
       <label>
         Theme:
-        <select value={theme} onchange={(e) => theme = e.target?.value}>
+        <select value={theme} onchange={(e) => theme = e.currentTarget.value}>
           <option value="dark">Dark</option>
           <option value="light">Light</option>
         </select>
