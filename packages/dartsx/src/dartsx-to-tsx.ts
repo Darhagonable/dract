@@ -55,11 +55,8 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformDerivedDeclarations(ms, source, commentRanges);
 	transformDefiniteAssignments(ms, source, commentRanges);
 	transformRenderBlocks(ms, source);
-	transformJsxControlFlow(ms, source);
-	transformEventHandlers(ms, source);
+	transformJsxAttributes(ms, source);
 	transformHtmlDirective(ms, source);
-	transformBindShorthand(ms, source);
-	transformBindAttributes(ms, source);
 	blankStyleBlocks(ms, source);
 
 	const code = ms.toString();
@@ -458,8 +455,8 @@ function transformDefiniteAssignments(ms: MagicString, source: string, commentRa
 }
 
 function transformRenderBlocks(ms: MagicString, source: string): void {
-	// render (...) → return (<>...</>)
 	const re = /\brender\s*\(/g;
+	const processed: { start: number; end: number }[] = [];
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		const renderStart = match.index;
@@ -467,39 +464,22 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 		const closeParen = findMatchingParen(source, openParen);
 		if (closeParen === -1) continue;
 
-		// render( → return(<>
+		// render( → return(<>...</>)
 		ms.overwrite(renderStart, openParen, 'return ');
 		ms.appendLeft(openParen + 1, '<>');
-
-		// ) → </>)
 		ms.appendLeft(closeParen, '</>');
+
+		// Wrap control flow blocks in IIFEs (skip nested render blocks)
+		if (!processed.some(r => match!.index > r.start && match!.index < r.end)) {
+			processed.push({ start: openParen, end: closeParen });
+			wrapControlFlowBlocks(ms, source, openParen + 1, closeParen);
+		}
 	}
 
 	// render <expr> or render <JSX> → return ...
 	const reOther = /\brender(\s+)(?!\()/g;
 	while ((match = reOther.exec(source)) !== null) {
 		ms.overwrite(match.index, match.index + 'render'.length, 'return');
-	}
-}
-
-// ── JSX control flow → IIFE ────────────────────────────────────────
-
-/**
- * Wraps control flow blocks inside JSX in IIFEs so TypeScript can
- * type-check them. `{if (x) { return <div/> }}` → `{(() => { if (x) { return <div/> } })()}`
- */
-function transformJsxControlFlow(ms: MagicString, source: string): void {
-	const re = /\brender\s*\(/g;
-	const processed: { start: number; end: number }[] = [];
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		const openParen = match.index + match[0].length - 1;
-		// Skip inner render blocks nested inside an already-processed outer render
-		if (processed.some(r => match!.index > r.start && match!.index < r.end)) continue;
-		const closeParen = findMatchingParen(source, openParen);
-		if (closeParen === -1) continue;
-		processed.push({ start: openParen, end: closeParen });
-		wrapControlFlowBlocks(ms, source, openParen + 1, closeParen);
 	}
 }
 
@@ -741,96 +721,86 @@ function findMatchingBrace(code: string, openPos: number): number {
 	return -1;
 }
 
-// ── Assignment/update wrapping ─────────────────────────────────────
+// ── JSX attribute transforms (tag-scoped) ─────────────────────────
 
 /**
- * Wrap assignment/update expressions in JSX attributes with arrow functions.
- * `onclick={count += 1}` → `onclick={() => count += 1}`
- * `onclick={count++}` → `onclick={() => count++}`
+ * Single-pass transform for all JSX attribute operations:
+ * - `bind:{x}` → `__bind_value={x}`
+ * - `bind:prop={x}` → `__bind_prop={x}`
+ * - `attr={count += 1}` → `attr={() => count += 1}` (assignment/update wrapping)
  *
- * Only wraps expressions that are clearly statement-like (assignments, ++, --).
- * Applies to all props, not just event handlers.
+ * Finds JSX opening tags, then processes attributes within each.
  */
-function transformEventHandlers(ms: MagicString, source: string): void {
-	const re = /\b[a-zA-Z][\w-]*\s*=\s*\{/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		// Only apply inside JSX opening tags (not variable declarations/object literals)
-		if (!isJsxAttributeContext(source, match.index)) continue;
+function transformJsxAttributes(ms: MagicString, source: string): void {
+	const tagRe = /<([A-Za-z_][\w.]*)(?=[\s/>])/g;
+	let tagMatch;
+	while ((tagMatch = tagRe.exec(source)) !== null) {
+		const attrStart = tagMatch.index + tagMatch[0].length;
+		const tagClose = findJsxTagClose(source, attrStart);
+		if (tagClose === -1) continue;
 
-		const braceStart = source.indexOf('{', match.index + 2);
-		if (braceStart === -1) continue;
-		const braceEnd = findMatchingBrace(source, braceStart);
-		if (braceEnd === -1) continue;
+		// bind:{x} → __bind_value={x}
+		const bindShortRe = /bind:\{(\w+)\}/g;
+		bindShortRe.lastIndex = attrStart;
+		let m;
+		while ((m = bindShortRe.exec(source)) !== null && m.index < tagClose) {
+			ms.overwrite(m.index, m.index + m[0].length, `__bind_value={${m[1]}}`);
+		}
 
-		const inner = source.slice(braceStart + 1, braceEnd).trim();
-		if (!needsWrapping(inner)) continue;
+		// bind:prop= → __bind_prop=
+		const bindAttrRe = /bind:([a-zA-Z][\w-]*)(\s*=)/g;
+		bindAttrRe.lastIndex = attrStart;
+		while ((m = bindAttrRe.exec(source)) !== null && m.index < tagClose) {
+			const bindEnd = m.index + 'bind:'.length + m[1].length;
+			ms.overwrite(m.index, bindEnd, `__bind_${m[1]}`);
+		}
 
-		// Wrap: {expr} → {() => expr}
-		ms.appendLeft(braceStart + 1, '() => ');
+		// Wrap assignment/update expressions: attr={x += 1} → attr={() => x += 1}
+		const attrRe = /\b[a-zA-Z][\w-]*\s*=\s*\{/g;
+		attrRe.lastIndex = attrStart;
+		let attrMatch;
+		while ((attrMatch = attrRe.exec(source)) !== null && attrMatch.index < tagClose) {
+			const braceStart = source.indexOf('{', attrMatch.index + 2);
+			if (braceStart === -1 || braceStart >= tagClose) continue;
+			const braceEnd = findMatchingBrace(source, braceStart);
+			if (braceEnd === -1) continue;
+
+			const inner = source.slice(braceStart + 1, braceEnd).trim();
+			if (!needsWrapping(inner)) continue;
+
+			ms.appendLeft(braceStart + 1, '() => ');
+		}
 	}
 }
 
-/** Check if pos is inside a JSX opening tag's attribute list (between `<Tag` and `>`) */
-function isJsxAttributeContext(source: string, pos: number): boolean {
-	for (let i = pos - 1; i >= 0; i--) {
+/** Find the closing `>` or `/>` of a JSX opening tag, skipping over attribute values. */
+function findJsxTagClose(source: string, start: number): number {
+	let i = start;
+	while (i < source.length) {
 		const ch = source[i];
-		if (ch === '<') return true;
-		if (ch === '>' || ch === ';' || ch === '{') return false;
-		// Skip over brace-delimited prop values (scan matching { backwards)
-		if (ch === '}') {
-			let depth = 1;
-			i--;
-			while (i >= 0 && depth > 0) {
-				if (source[i] === '}') depth++;
-				else if (source[i] === '{') depth--;
-				i--;
-			}
+		if (ch === '>' || (ch === '/' && source[i + 1] === '>')) return i;
+		if (ch === '{') {
+			const close = findMatchingBrace(source, i);
+			if (close === -1) return -1;
+			i = close + 1;
 			continue;
 		}
-		// Skip over string prop values
 		if (ch === '"' || ch === "'") {
-			const quote = ch;
-			i--;
-			while (i >= 0 && source[i] !== quote) {
-				if (i > 0 && source[i - 1] === '\\') i--;
-				i--;
-			}
+			i = skipString(source, i);
 			continue;
 		}
+		if (ch === '<') return -1;
+		i++;
 	}
-	return false;
+	return -1;
 }
 
 /** Bare assignment/update that isn't already a function needs an arrow wrapper */
 function needsWrapping(expr: string): boolean {
 	if (/^(\(.*\)\s*=>|[a-zA-Z_$]\w*\s*=>|function[\s(])/.test(expr)) return false;
-	// Strip string literals so operators inside strings (e.g. CSS `--var`) don't trigger false positives
 	const stripped = expr.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
 	if (/\+\+|--/.test(stripped)) return true;
 	return /(?<![<>!=])=(?![=>])/.test(stripped);
-}
-
-// ── bind:{x} → __bind_value={x} ───────────────────────────────────
-
-function transformBindShorthand(ms: MagicString, source: string): void {
-	const re = /bind:\{(\w+)\}/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		ms.overwrite(match.index, match.index + match[0].length, `__bind_value={${match[1]}}`);
-	}
-}
-
-// ── bind:prop={x} → __bind_prop={x} ───────────────────────────────
-
-function transformBindAttributes(ms: MagicString, source: string): void {
-	const re = /bind:([a-zA-Z][\w-]*)(\s*=)/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		const bindStart = match.index;
-		const bindEnd = bindStart + 'bind:'.length + match[1].length;
-		ms.overwrite(bindStart, bindEnd, `__bind_${match[1]}`);
-	}
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
