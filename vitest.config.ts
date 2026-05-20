@@ -1,53 +1,13 @@
-import { configDefaults, defineConfig } from 'vitest/config';
-import dartsx from 'dartsx-vite-plugin';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-	plugins: [dartsx()],
 	test: {
-		...configDefaults,
 		projects: [
-			{
-				test: {
-					name: 'compiler',
-					include: ['packages/dartsx/tests/compiler/**/*.test.ts'],
-				},
-			},
-			{
-				test: {
-					name: 'dartsx-to-tsx',
-					include: ['packages/dartsx/tests/dartsx-to-tsx.test.ts'],
-				},
-			},
-			{
-				plugins: [dartsx()],
-				test: {
-					name: 'client',
-					include: ['packages/dartsx/tests/client/**/*.test.tsx'],
-					environment: 'jsdom',
-					setupFiles: ['packages/dartsx/tests/setup-client.js'],
-				},
-			},
-			{
-				test: {
-					name: 'typescript-plugin',
-					include: ['packages/typescript-plugin/tests/*.test.ts'],
-				},
-			},
-			{
-				test: {
-					name: 'vite-plugin',
-					include: ['packages/vite-plugin/tests/*.test.ts'],
-				},
-			},
-			{
-				plugins: [dartsx()],
-				test: {
-					name: 'query',
-					include: ['toolkit/query/tests/*.test.tsx'],
-					environment: 'jsdom',
-					setupFiles: ['packages/dartsx/tests/setup-client.js'],
-				},
-			},
+			'packages/dartsx/vitest.*.config.ts',
+			'packages/typescript-plugin',
+			'packages/vite-plugin',
+			'packages/vscode-plugin',
+			'toolkit/query',
 		],
 	},
 });

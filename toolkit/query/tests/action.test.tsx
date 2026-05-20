@@ -1,4 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+
+afterEach(() => {
+	document.body.innerHTML = '';
+});
 import { tick, mount } from 'dartsx';
 import { defineAction, useAction } from '../src/index';
 

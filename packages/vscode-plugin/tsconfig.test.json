@@ -2,15 +2,15 @@
 	"compilerOptions": {
 		"strict": true,
 		"target": "ESNext",
-		"module": "CommonJS",
-		"moduleResolution": "bundler",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"sourceMap": true,
 		"outDir": "dist/test",
-		"rootDir": "test",
-		"types": ["mocha", "node"]
+		"rootDir": "tests",
+		"types": ["node"]
 	},
-	"include": ["test"],
-	"exclude": ["test/fixture"]
+	"include": ["tests"],
+	"exclude": ["tests/fixture"]
 }

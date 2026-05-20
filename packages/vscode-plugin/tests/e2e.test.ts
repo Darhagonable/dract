@@ -1,6 +1,8 @@
-import vscode from 'vscode';
-import assert from 'assert';
+import { describe, it, expect, beforeAll } from 'vitest';
+import * as vscode from 'vscode';
 import path from 'path';
+
+const fixtureDir = path.resolve(import.meta.dirname!, 'fixture');
 
 async function waitFor<T>(
 	fn: () => Thenable<T>,
@@ -17,8 +19,7 @@ async function waitFor<T>(
 }
 
 function fixtureUri(file: string): vscode.Uri {
-	const ws = vscode.workspace.workspaceFolders![0].uri.fsPath;
-	return vscode.Uri.file(path.join(ws, 'src', file));
+	return vscode.Uri.file(path.join(fixtureDir, 'src', file));
 }
 
 function hoverText(hovers: vscode.Hover[]): string {
@@ -27,11 +28,15 @@ function hoverText(hovers: vscode.Hover[]): string {
 	).join('\n');
 }
 
-suite('DarTsx E2E', function () {
-	this.timeout(60000);
+describe('DarTsx E2E', () => {
+	it('extension activates', async () => {
+		const ext = vscode.extensions.getExtension('dartsx.dartsx-vscode');
+		expect(ext).toBeDefined();
+		await ext!.activate();
+		expect(ext!.isActive).toBe(true);
+	});
 
-	suiteSetup(async function () {
-		this.timeout(60000);
+	beforeAll(async () => {
 		const doc = await vscode.workspace.openTextDocument(fixtureUri('HoverDemo.tsx'));
 		await vscode.window.showTextDocument(doc);
 
@@ -63,98 +68,98 @@ suite('DarTsx E2E', function () {
 		};
 	}
 
-	test('hover: "component" not "function"', async () => {
+	it('hover: "component" not "function"', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 0, 25)('component');
-		assert.strictEqual(text, 'component HoverDemo(label: string, value: number, "data-id": string, "aria-label": string): any');
+		expect(text).toBe('component HoverDemo(label: string, value: number, "data-id": string, "aria-label": string): any');
 	});
 
-	test('hover: "state" not "let"', async () => {
+	it('hover: "state" not "let"', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 6, 8)('state');
-		assert.strictEqual(text, 'state count: number');
+		expect(text).toBe('state count: number');
 	});
 
-	test('hover: "derived" not "const"', async () => {
+	it('hover: "derived" not "const"', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 7, 12)('derived');
-		assert.strictEqual(text, 'derived doubled: number');
+		expect(text).toBe('derived doubled: number');
 	});
 
-	test('hover: "(prop)" not "(parameter)"', async () => {
+	it('hover: "(prop)" not "(parameter)"', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 1, 2)('prop');
-		assert.strictEqual(text, '(prop) label: string');
+		expect(text).toBe('(prop) label: string');
 	});
 
-	test('hover: "(binded prop)" for bind param', async () => {
+	it('hover: "(binded prop)" for bind param', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 2, 7)('binded prop');
-		assert.strictEqual(text, '(binded prop) value: number');
+		expect(text).toBe('(binded prop) value: number');
 	});
 
-	test('hover: "(prop)" for renamed param', async () => {
+	it('hover: "(prop)" for renamed param', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 3, 15)('prop');
-		assert.strictEqual(text, '(prop) dataId: string');
+		expect(text).toBe('(prop) dataId: string');
 	});
 
-	test('hover: "(binded prop)" for bind renamed param', async () => {
+	it('hover: "(binded prop)" for bind renamed param', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 4, 24)('binded prop');
-		assert.strictEqual(text, '(binded prop) ariaLabel: string');
+		expect(text).toBe('(binded prop) ariaLabel: string');
 	});
 
 	// ── Hover keyword overrides at use sites ─────────────────────
 
-	test('hover use: "(prop)" for prop reference', async () => {
+	it('hover use: "(prop)" for prop reference', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 11, 10)('prop');
-		assert.strictEqual(text, '(prop) label: string');
+		expect(text).toBe('(prop) label: string');
 	});
 
-	test('hover use: "state" for state reference', async () => {
+	it('hover use: "state" for state reference', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 11, 19)('state');
-		assert.strictEqual(text, 'state count: number');
+		expect(text).toBe('state count: number');
 	});
 
-	test('hover use: "derived" for derived reference', async () => {
+	it('hover use: "derived" for derived reference', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 12, 19)('derived');
-		assert.strictEqual(text, 'derived doubled: number');
+		expect(text).toBe('derived doubled: number');
 	});
 
-	test('hover use: "(binded prop)" for bind param reference', async () => {
+	it('hover use: "(binded prop)" for bind param reference', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 13, 17)('binded prop');
-		assert.strictEqual(text, '(binded prop) value: number');
+		expect(text).toBe('(binded prop) value: number');
 	});
 
-	test('hover use: "(prop)" for renamed param reference', async () => {
+	it('hover use: "(prop)" for renamed param reference', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 14, 14)('prop');
-		assert.strictEqual(text, '(prop) dataId: string');
+		expect(text).toBe('(prop) dataId: string');
 	});
 
-	test('hover use: "(binded prop)" for bind renamed param reference', async () => {
+	it('hover use: "(binded prop)" for bind renamed param reference', async () => {
 		const text = await hoverAt('HoverDemo.tsx', 15, 16)('binded prop');
-		assert.strictEqual(text, '(binded prop) ariaLabel: string');
+		expect(text).toBe('(binded prop) ariaLabel: string');
 	});
 
 	// ── Hover keyword overrides for imports ──────────────────────
 
-	test('hover import: "state" for imported state at declaration', async () => {
+	it('hover import: "state" for imported state at declaration', async () => {
 		const text = await hoverAt('ImportDemo.tsx', 0, 9)('state');
-		assert.strictEqual(text, '(alias) state count: number');
+		expect(text).toBe('(alias) state count: number');
 	});
 
-	test('hover import: "derived" for imported derived at declaration', async () => {
+	it('hover import: "derived" for imported derived at declaration', async () => {
 		const text = await hoverAt('ImportDemo.tsx', 0, 16)('derived');
-		assert.strictEqual(text, '(alias) derived doubled: number');
+		expect(text).toBe('(alias) derived doubled: number');
 	});
 
-	test('hover import: "state" for imported state at use site', async () => {
+	it('hover import: "state" for imported state at use site', async () => {
 		const text = await hoverAt('ImportDemo.tsx', 5, 10)('state');
-		assert.strictEqual(text, '(alias) state count: number');
+		expect(text).toBe('(alias) state count: number');
 	});
 
-	test('hover import: "derived" for imported derived at use site', async () => {
+	it('hover import: "derived" for imported derived at use site', async () => {
 		const text = await hoverAt('ImportDemo.tsx', 6, 10)('derived');
-		assert.strictEqual(text, '(alias) derived doubled: number');
+		expect(text).toBe('(alias) derived doubled: number');
 	});
 
 	// ── Diagnostics ──────────────────────────────────────────────
 
-	test('unused CSS selector diagnostic', async () => {
+	it('unused CSS selector diagnostic', async () => {
 		const uri = fixtureUri('UnusedCss.tsx');
 		const doc = await vscode.workspace.openTextDocument(uri);
 		await vscode.window.showTextDocument(doc);
@@ -165,11 +170,11 @@ suite('DarTsx E2E', function () {
 		);
 
 		const unused = diags.filter(d => d.source === 'dartsx' && d.message.toLowerCase().includes('unused'));
-		assert.ok(unused.length > 0, `Expected unused CSS diagnostic`);
-		assert.ok(unused.some(d => d.message.includes('unused-selector')), `Should mention .unused-selector`);
+		expect(unused.length).toBeGreaterThan(0);
+		expect(unused.some(d => d.message.includes('unused-selector'))).toBe(true);
 	});
 
-	test('TypeScript type errors pass through', async () => {
+	it('TypeScript type errors pass through', async () => {
 		const uri = fixtureUri('TypeError.tsx');
 		const doc = await vscode.workspace.openTextDocument(uri);
 		await vscode.window.showTextDocument(doc);
@@ -180,6 +185,6 @@ suite('DarTsx E2E', function () {
 		);
 
 		const errors = diags.filter(d => d.severity === vscode.DiagnosticSeverity.Error && d.source === 'ts');
-		assert.ok(errors.length > 0, `Expected TS type error in TypeError.tsx`);
+		expect(errors.length).toBeGreaterThan(0);
 	});
 });

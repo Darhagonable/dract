@@ -67,7 +67,7 @@
 	"scripts": {
 		"build": "tsc --build",
 		"check": "tsc --noEmit",
-		"test": "tsc -p tsconfig.test.json && vscode-test",
+		"test": "vitest run",
 		"package": "vsce package --no-dependencies"
 	},
 	"dependencies": {
@@ -78,10 +78,9 @@
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
-		"@types/mocha": "^10.0.10",
 		"@types/vscode": "^1.120.0",
-		"@vscode/test-cli": "^0.0.12",
-		"@vscode/test-electron": "^2.5.2",
-		"typescript": "^6.0.3"
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.6",
+		"vitest-environment-vscode": "^0.1.2"
 	}
 }
