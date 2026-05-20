@@ -3,3 +3,7 @@ packages:
   - toolkit/*
   - playground
   - website
+
+allowBuilds:
+  core-js: false
+  esbuild: true
