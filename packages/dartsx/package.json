@@ -4,9 +4,6 @@
 	"private": true,
 	"type": "module",
 	"types": "./dist/runtime/external/index.d.ts",
-	"bin": {
-		"dartsx": "./bin/dartsx.js"
-	},
 	"exports": {
 		".": {
 			"types": "./dist/runtime/external/index.d.ts",
@@ -41,7 +38,6 @@
 	},
 	"dependencies": {
 		"clsx": "^2.1.1",
-		"dartsx-cli": "workspace:*",
 		"entities": "^8.0.0",
 		"esrap": "^2.2.9",
 		"magic-string": "^0.30.21",

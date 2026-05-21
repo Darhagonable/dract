@@ -15,6 +15,7 @@
 	"devDependencies": {
 		"@tailwindcss/typography": "^0.5.19",
 		"@tailwindcss/vite": "^4.3.0",
+		"dartsx-cli": "workspace:*",
 		"dartsx-typescript-plugin": "workspace:*",
 		"dartsx-vite-plugin": "workspace:*",
 		"marked": "^18.0.3",
