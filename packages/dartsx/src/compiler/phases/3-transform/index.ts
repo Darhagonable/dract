@@ -1339,8 +1339,9 @@ interface ProcessedStyle {
 
 function processStyles(blocks: StyleBlockIR[], componentName: string, filename: string): ProcessedStyle[] {
 	const results: ProcessedStyle[] = [];
+	const basename = filename.replace(/^.*[/\\]/, '');
 	for (const block of blocks) {
-		const hashInput = `${filename}::${componentName}::${block.index}`;
+		const hashInput = `${basename}::${componentName}::${block.index}`;
 		const hash = scopeHash(hashInput);
 		let css = dedentCSS(block.css);
 		const extracted = extractCSSVars(css, hash);

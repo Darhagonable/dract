@@ -1,17 +1,17 @@
 import $ from "dartsx/internal/client";
 
 function StyledComponent() {
-	$.style("e1ci41", "p[data-scope~=\"e1ci41\"] { color: green; }\n");
-	$.style("e1ci42", "p[data-scope~=\"e1ci42\"] { color: red; }\n");
+	$.style("1nyezsy", "p[data-scope~=\"1nyezsy\"] { color: green; }\n");
+	$.style("1nyezsz", "p[data-scope~=\"1nyezsz\"] { color: red; }\n");
 
 	return $.jsx("div", {
-		"data-scope": "e1ci42",
+		"data-scope": "1nyezsz",
 		children: [
-			$.jsx("p", { "data-scope": "e1ci42", children: ["Outside"] }),
+			$.jsx("p", { "data-scope": "1nyezsz", children: ["Outside"] }),
 			$.jsx("div", {
-				"data-scope": "e1ci42 e1ci41",
+				"data-scope": "1nyezsz 1nyezsy",
 				children: [
-					$.jsx("p", { "data-scope": "e1ci42 e1ci41", children: ["Inside"] })
+					$.jsx("p", { "data-scope": "1nyezsz 1nyezsy", children: ["Inside"] })
 				]
 			})
 		]

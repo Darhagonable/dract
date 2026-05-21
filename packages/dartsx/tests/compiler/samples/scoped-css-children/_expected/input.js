@@ -1,14 +1,14 @@
 import $ from "dartsx/internal/client";
 
 function Parent($$props) {
-	$.style("1x7gduh", "p[data-scope~=\"1x7gduh\"] { color: red; }\n");
+	$.style("i1ufxg", "p[data-scope~=\"i1ufxg\"] { color: red; }\n");
 
 	const children = $.prop($$props, "children");
 
 	return $.jsx("div", {
-		"data-scope": "1x7gduh",
+		"data-scope": "i1ufxg",
 		children: [
-			$.jsx("p", { "data-scope": "1x7gduh", children: ["Parent text"] }),
+			$.jsx("p", { "data-scope": "i1ufxg", children: ["Parent text"] }),
 			" ",
 			() => $.get(children)
 		]

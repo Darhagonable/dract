@@ -1,13 +1,11 @@
 import $ from "dartsx/internal/client";
 
 function Mixed() {
-	$.style("1pkp990", "div[data-scope~=\"1pkp990\"] { padding: 16px; }\n");
-	$.style("1pkp991", "body { margin: 0; }");
+	$.style("2b58up", "div[data-scope~=\"2b58up\"] { padding: 16px; }\n");
+	$.style("2b58uq", "body { margin: 0; }");
 
 	return $.jsx("div", {
-		"data-scope": "1pkp990",
-		children: [
-			$.jsx("p", { "data-scope": "1pkp990", children: ["Styled"] })
-		]
+		"data-scope": "2b58up",
+		children: [$.jsx("p", { "data-scope": "2b58up", children: ["Styled"] })]
 	});
 }
