@@ -7,6 +7,7 @@ export default defineProject({
 		pool: vsCodeWorker({
 			version: 'stable',
 			reuseWorker: true,
+			launchArgs: ['--log', 'error', '--disable-gpu'],
 		}),
 		server: {
 			deps: {
