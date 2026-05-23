@@ -37,6 +37,7 @@
 		"test:watch": "vitest"
 	},
 	"dependencies": {
+		"@jridgewell/remapping": "^2.3.5",
 		"clsx": "^2.1.1",
 		"entities": "^8.0.0",
 		"esrap": "^2.2.9",
