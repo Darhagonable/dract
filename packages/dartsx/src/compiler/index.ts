@@ -85,7 +85,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 
 	return {
 		code: result.code,
-		map: remapping([result.map, stripped.map, preprocessed.map], () => null),
+		map: remapping([result.map, stripped.map], () => null),
 		css: result.css,
 		reactiveExports: analysis.reactiveExports,
 		reactiveCalls: analysis.reactiveCalls,

@@ -412,27 +412,63 @@ function upgradeBindingKinds(
 	function upgradeMarkedDeclarations(varDecl: VariableDeclaration, scope: Scope, exported = false): void {
 		let prevName: string | null = null;
 		for (const decl of varDecl.declarations) {
-			if (decl.id.type !== 'Identifier') continue;
-			const name = decl.id.name;
+			if (decl.id.type === 'Identifier') {
+				const name = decl.id.name;
 
-			// Skip marker declarators themselves, but remember their name
-			if (name.startsWith(STATE_MARKER) || name.startsWith(DERIVED_MARKER)) {
-				prevName = name;
-				continue;
-			}
+				// Skip marker declarators themselves, but remember their name
+				if (name.startsWith(STATE_MARKER) || name.startsWith(DERIVED_MARKER)) {
+					prevName = name;
+					continue;
+				}
 
-			const binding = scope.get(name);
-			if (!binding) continue;
+				const binding = scope.get(name);
+				if (!binding) continue;
 
-			if (prevName?.startsWith(STATE_MARKER)) {
-				binding.kind = 'state';
-				binding.exported = exported;
-				if (decl.init && isProxyInit(decl.init, scope)) binding.proxy = true;
+				if (prevName?.startsWith(STATE_MARKER)) {
+					binding.kind = 'state';
+					binding.exported = exported;
+					if (decl.init && isProxyInit(decl.init, scope)) binding.proxy = true;
+				}
+				if (prevName?.startsWith(DERIVED_MARKER)) {
+					binding.kind = 'derived';
+					binding.exported = exported;
+				}
+			} else if ((decl.id.type === 'ObjectPattern' || decl.id.type === 'ArrayPattern') && prevName?.startsWith(DERIVED_MARKER)) {
+				// Derived destructuring: mark all identifiers in the pattern as derived
+				upgradePatternBindings(decl.id, scope, 'derived', exported);
 			}
-			if (prevName?.startsWith(DERIVED_MARKER)) {
-				binding.kind = 'derived';
-				binding.exported = exported;
+			// Reset prevName after processing a non-marker declarator
+			if (decl.id.type !== 'Identifier' || !(decl.id.name.startsWith(STATE_MARKER) || decl.id.name.startsWith(DERIVED_MARKER))) {
+				prevName = null;
 			}
+		}
+	}
+
+	function upgradePatternBindings(node: any, scope: Scope, kind: 'state' | 'derived', exported: boolean): void {
+		if (!node) return;
+		if (node.type === 'Identifier') {
+			const binding = scope.get(node.name);
+			if (binding) { binding.kind = kind; binding.exported = exported; }
+			return;
+		}
+		if (node.type === 'ObjectPattern') {
+			for (const prop of node.properties || []) {
+				if (prop?.type === 'RestElement') upgradePatternBindings(prop.argument, scope, kind, exported);
+				else if (prop) upgradePatternBindings(prop.value, scope, kind, exported);
+			}
+			return;
+		}
+		if (node.type === 'ArrayPattern') {
+			for (const elem of node.elements || []) {
+				if (!elem) continue;
+				if (elem.type === 'RestElement') upgradePatternBindings(elem.argument, scope, kind, exported);
+				else upgradePatternBindings(elem, scope, kind, exported);
+			}
+			return;
+		}
+		if (node.type === 'AssignmentPattern') {
+			upgradePatternBindings(node.left, scope, kind, exported);
+			return;
 		}
 	}
 

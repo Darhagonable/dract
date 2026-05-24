@@ -7,9 +7,6 @@
  */
 import {
 	parseSync as oxcParseSync,
-	type BindingPattern,
-	type BindingProperty,
-	type BindingRestElement,
 	type SwitchStatement,
 } from 'oxc-parser';
 
@@ -110,7 +107,7 @@ function skipTypeAnnotation(code: string, start: number): number {
  * Transform `state varName: Type` → `let $$s = 0, varName`
  * Properly handles balanced braces inside type annotations.
  */
-function transformStateDeclarations(code: string, stateVars: string[], marker: string): string {
+function transformStateDeclarations(code: string, stateVars: string[], marker: string, insideComment: (offset: number) => boolean): string {
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate\s+(\w+)/g;
 	let result = '';
 	let lastIndex = 0;
@@ -118,6 +115,7 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
 	let counter = 0;
 
 	while ((match = re.exec(code)) !== null) {
+		if (insideComment(match.index)) continue;
 		const exportKw = match[1] || '';
 		const name = match[2];
 		const matchEnd = match.index + match[0].length;
@@ -132,8 +130,9 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
 
 		stateVars.push(name);
 		result += code.slice(lastIndex, match.index);
-		// Emit `let $$s0 = 0, name = expr` — the $$s* sibling declarator marks this as state
-		result += `${exportKw}let ${marker}${counter++} = 0, ${name} `;
+		// Emit `let $$s0 = 0, name: Type = expr` — the $$s* sibling declarator marks this as state
+		const typeText = code.slice(matchEnd, afterType);
+		result += `${exportKw}let ${marker}${counter++} = 0, ${name}${typeText}`;
 		lastIndex = afterType;
 	}
 
@@ -145,31 +144,59 @@ function transformStateDeclarations(code: string, stateVars: string[], marker: s
  * Transform `derived varName: Type = expr` → `const $$d = 0, varName = expr`
  * Properly handles balanced braces inside type annotations.
  */
-function transformDerivedDeclarations(code: string, derivedVars: string[], marker: string): string {
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived\s+(\w+)/g;
+function transformDerivedDeclarations(code: string, derivedVars: string[], marker: string, insideComment: (offset: number) => boolean): string {
+	// Single pass: matches both `derived name` and `derived {pattern}`/`derived [pattern]`
+	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[\w{[])/g;
 	let result = '';
 	let lastIndex = 0;
 	let match;
 	let counter = 0;
 
 	while ((match = re.exec(code)) !== null) {
+		if (insideComment(match.index)) continue;
+		const start = match.index;
 		const exportKw = match[1] || '';
-		const name = match[2];
-		const matchEnd = match.index + match[0].length;
+		const afterKeyword = start + exportKw.length + 'derived'.length;
+		let cursor = skipWhitespace(code, afterKeyword);
 
-		// Validate: after `derived name`, the next non-whitespace char must indicate a
-		// declaration context (=, :, ;, newline, comma, close-paren, or EOF).
-		// This prevents matching prose like "state and derived" inside strings.
-		const afterType = skipTypeAnnotation(code, matchEnd);
-		let peek = afterType;
-		while (peek < code.length && (code[peek] === ' ' || code[peek] === '\t')) peek++;
-		if (peek < code.length && !/[=;,)\n]/.test(code[peek])) continue;
+		const nextChar = code[cursor];
 
-		derivedVars.push(name);
-		result += code.slice(lastIndex, match.index);
-		// Emit `const $$d0 = 0, name = expr` — the $$d* sibling declarator marks this as derived
-		result += `${exportKw}const ${marker}${counter++} = 0, ${name} `;
-		lastIndex = afterType;
+		if (nextChar === '{' || nextChar === '[') {
+			// Destructuring form: `derived { a, b } = expr` or `derived [a, b] = expr`
+			const patternStart = cursor;
+			const patternEnd = nextChar === '{'
+				? findMatchingBrace(code, patternStart)
+				: findMatchingBracket(code, patternStart);
+			if (patternEnd === -1) continue;
+
+			cursor = skipWhitespace(code, patternEnd + 1);
+			if (code[cursor] !== '=') continue;
+
+			const pattern = code.slice(patternStart, patternEnd + 1);
+			collectPatternIdentifiers(pattern, derivedVars);
+
+			result += code.slice(lastIndex, start);
+			result += `${exportKw}const ${marker}${counter++} = 0,`;
+			lastIndex = afterKeyword;
+			re.lastIndex = lastIndex;
+		} else {
+			// Simple form: `derived name = expr` or `derived name: Type = expr`
+			const nameMatch = code.slice(cursor).match(/^(\w+)/);
+			if (!nameMatch) continue;
+			const name = nameMatch[1];
+			const matchEnd = cursor + name.length;
+
+			const afterType = skipTypeAnnotation(code, matchEnd);
+			let peek = afterType;
+			while (peek < code.length && (code[peek] === ' ' || code[peek] === '\t')) peek++;
+			if (peek < code.length && !/[=;,)\n]/.test(code[peek])) continue;
+
+			derivedVars.push(name);
+			result += code.slice(lastIndex, start);
+			const typeText = code.slice(matchEnd, afterType);
+			result += `${exportKw}const ${marker}${counter++} = 0, ${name}${typeText}`;
+			lastIndex = afterType;
+		}
 	}
 
 	result += code.slice(lastIndex);
@@ -184,21 +211,32 @@ export function preprocess(source: string): PreprocessResult {
 	const stateVars: string[] = [];
 	const derivedVars: string[] = [];
 
-	// 0. Neutralize comments so keyword regexes don't match inside them.
-	//    Replace comment content with spaces (preserving newlines for line counts).
-	//    This prevents e.g. `state variable` inside a JSDoc comment from being
-	//    transformed into `let variable /*@s*/`.
-	//    The regex skips string literals to avoid false matches on `//` or `/*` in strings.
-	code = code.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g, (match, str, comment) => {
-		if (str) return str; // preserve strings
-		return comment.replace(/[^\n]/g, ' '); // blank out comment content
-	});
+	// 0. Collect comment ranges so keyword regexes can skip matches inside them.
+	// 0. Collect comment ranges so keyword regexes can skip matches inside them.
+	//    This prevents e.g. `state variable` inside a JSDoc comment from being transformed.
+	function buildCommentRanges(src: string): [number, number][] {
+		const ranges: [number, number][] = [];
+		src.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g, (match, str, _comment, offset) => {
+			if (!str) ranges.push([offset, offset + match.length]);
+			return match;
+		});
+		return ranges;
+	}
+	let commentRanges = buildCommentRanges(code);
+	function insideComment(offset: number): boolean {
+		for (const [start, end] of commentRanges) {
+			if (offset >= start && offset < end) return true;
+			if (start > offset) break;
+		}
+		return false;
+	}
 
 	// 1. Transform component declarations
 	//    Handles: [export] [default] [async] component Name(...)
 	code = code.replace(
 		/\b(export\s+)?(default\s+)?(async\s+)?component\s+(\w+)/g,
-		(_match, exportKw, defaultKw, asyncKw, name) => {
+		(_match, exportKw, defaultKw, asyncKw, name, offset) => {
+			if (insideComment(offset)) return _match;
 			components.push({
 				name,
 				isExport: !!exportKw,
@@ -240,18 +278,21 @@ export function preprocess(source: string): PreprocessResult {
 	//     so OXC can parse it as a valid identifier, and the analyzer can detect it.
 	code = code.replace(/\bbind\s+(\w+)/g, '__bind__$1');
 
+	// Recompute comment ranges after transforms may have shifted offsets.
+	// Each transform that changes code length invalidates ranges, so we rebuild before each keyword pass.
+	function rebuildCommentCheck() {
+		commentRanges = buildCommentRanges(code);
+	}
+
 	// 2. Transform `state varName = expr` or `state varName: Type = expr` → `let $$s = 0, varName = expr`
 	//    The $$s sibling declarator lets the analyzer identify this as a state declaration
 	//    regardless of scope. Survives oxcTransformSync (unlike comment markers).
-	code = transformStateDeclarations(code, stateVars, STATE_MARKER);
+	rebuildCommentCheck();
+	code = transformStateDeclarations(code, stateVars, STATE_MARKER, insideComment);
 
-	// 3a. Transform destructured derived declarations into a temp plus
-	//     one derived binding per leaf identifier. This supports nested
-	//     object/array patterns, aliases, defaults, and rest bindings.
-	code = transformDerivedDestructuring(code, derivedVars);
-
-	// 3b. Transform `derived varName = expr` or `derived varName: Type = expr` → `const $$d = 0, varName = expr`
-	code = transformDerivedDeclarations(code, derivedVars, DERIVED_MARKER);
+	// 3. Transform all `derived` forms (simple and destructuring) in source order
+	rebuildCommentCheck();
+	code = transformDerivedDeclarations(code, derivedVars, DERIVED_MARKER, insideComment);
 
 	// 4. Transform all `render` forms into `return` statements:
 	//    - `render (jsx)` → `return (<>jsx</>)`
@@ -422,18 +463,23 @@ function transformRenders(code: string): string {
 			while (j < code.length && /[ \t]/.test(code[j])) j++;
 
 			if (code[j] === '(') {
-				// render (...) → return (<>...</>)
+				// render (...) → return (...) preserving parens
 				const closePos = findMatchingParen(code, j);
 				const content = code.slice(j + 1, closePos);
-				result += `return (<>${transformRenders(content)}</>)`;
+				const inner = transformRenders(content);
+				if (isSingleJSXRoot(inner)) {
+					result += `return (${inner})`;
+				} else {
+					result += `return (<>${inner}</>)`;
+				}
 				i = closePos + 1;
 				continue;
 			} else if (code[j] === '<') {
-				// render <jsx> → return (<>jsx</>)
+				// render <jsx> → return jsx (no parens)
 				const jsxEnd = findJSXElementEnd(code, j);
 				if (jsxEnd > j) {
 					const jsx = code.slice(j, jsxEnd);
-					result += `return (<>${transformRenders(jsx)}</>)`;
+					result += `return ${transformRenders(jsx)}`;
 					i = jsxEnd;
 					continue;
 				}
@@ -473,6 +519,19 @@ function findExpressionEnd(code: string, start: number): number {
 		i++;
 	}
 	return i;
+}
+
+/**
+ * Check if JSX content has a single root element (no fragment needed).
+ * Returns true if there's exactly one top-level JSX element after trimming whitespace.
+ */
+function isSingleJSXRoot(code: string): boolean {
+	const trimmed = code.trim();
+	if (!trimmed.startsWith('<')) return false;
+	const end = findJSXElementEnd(trimmed, 0);
+	if (end <= 0) return false;
+	// Check if everything after the element is just whitespace
+	return trimmed.slice(end).trim() === '';
 }
 
 /**
@@ -633,14 +692,15 @@ export function parse(filename: string, code: string, lang: 'tsx' | 'jsx' = 'tsx
 	return oxcParseSync(filename, code, { sourceType: 'module', lang });
 }
 
-function transformDerivedDestructuring(code: string, derivedVars: string[]): string {
+function transformDerivedDestructuring(code: string, derivedVars: string[], insideComment: (offset: number) => boolean, startCounter = 0): { code: string; counter: number } {
 	const derivedRegex = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[{[])/g;
 	let match: RegExpExecArray | null;
 	let result = '';
 	let lastIndex = 0;
-	let counter = 0;
+	let counter = startCounter;
 
 	while ((match = derivedRegex.exec(code)) !== null) {
+		if (insideComment(match.index)) continue;
 		const start = match.index;
 		const exportKw = match[1] || '';
 		let cursor = skipWhitespace(code, start + exportKw.length + 'derived'.length);
@@ -657,205 +717,36 @@ function transformDerivedDestructuring(code: string, derivedVars: string[]): str
 		cursor = skipWhitespace(code, patternEnd + 1);
 		if (code[cursor] !== '=') continue;
 
-		const exprStart = skipWhitespace(code, cursor + 1);
-		const exprEnd = findStatementEnd(code, exprStart);
+		// Collect variable names from the pattern for the derivedVars list
 		const pattern = code.slice(patternStart, patternEnd + 1);
-		const expr = code.slice(exprStart, exprEnd).trim();
+		collectPatternIdentifiers(pattern, derivedVars);
 
+		// Simple replacement: `derived { a, b } = expr` → `const $$d0 = 0, { a, b } = expr`
 		result += code.slice(lastIndex, start);
-		result += lowerDerivedPattern(pattern, expr, exportKw, derivedVars, counter++);
-
-		let nextIndex = exprEnd;
-		if (code[nextIndex] === ';') nextIndex++;
-		lastIndex = nextIndex;
-		derivedRegex.lastIndex = nextIndex;
+		result += `${exportKw}const ${DERIVED_MARKER}${counter++} = 0,`;
+		lastIndex = start + exportKw.length + 'derived'.length;
+		derivedRegex.lastIndex = lastIndex;
 	}
 
 	result += code.slice(lastIndex);
-	return result;
+	return { code: result, counter };
 }
 
-function lowerDerivedPattern(
-	pattern: string,
-	expr: string,
-	exportKw: string,
-	derivedVars: string[],
-	counter: number,
-): string {
-	const tempName = `__derived_${counter}`;
-	const bindings = collectDerivedBindings(pattern, tempName);
-	const lines = [`const ${tempName} = ${expr}`];
-
-	let i = 0;
-	for (const binding of bindings) {
-		derivedVars.push(binding.name);
-		lines.push(`${exportKw}const ${DERIVED_MARKER}${counter}_${i++} = 0, ${binding.name} = ${binding.expr}`);
+function collectPatternIdentifiers(pattern: string, names: string[]): void {
+	// Extract all identifiers from a destructuring pattern using simple regex
+	// Handles { a, b: c, ...rest } and [x, , y, ...rest]
+	const re = /(?:\.\.\.)?(\w+)\s*(?:[:,=}\])]|$)/g;
+	let m;
+	while ((m = re.exec(pattern)) !== null) {
+		const name = m[1];
+		if (name && name !== 'undefined') names.push(name);
 	}
-
-	return lines.join(';\n\t');
-}
-
-function collectDerivedBindings(pattern: string, baseExpr: string): Array<{ name: string; expr: string }> {
-	const source = `const ${pattern} = __source__`;
-	const parsed = oxcParseSync('derived-pattern.ts', source, { sourceType: 'module', lang: 'tsx' });
-	const stmt = parsed.program.body[0];
-	if (!stmt || stmt.type !== 'VariableDeclaration') return [];
-	const decl = stmt.declarations[0];
-	const bindings: Array<{ name: string; expr: string }> = [];
-	if (decl) collectDerivedBindingsFromNode(decl.id, baseExpr, source, bindings);
-	return bindings;
-}
-
-function collectDerivedBindingsFromNode(
-	node: BindingPattern | BindingRestElement | null | undefined,
-	baseExpr: string,
-	source: string,
-	bindings: Array<{ name: string; expr: string }>,
-): void {
-	if (!node) return;
-
-	if (node.type === 'Identifier') {
-		bindings.push({ name: node.name, expr: baseExpr });
-		return;
-	}
-
-	if (node.type === 'AssignmentPattern') {
-		const defaultExpr = source.slice(node.right.start, node.right.end);
-		const withDefault = `(() => { const __value = ${baseExpr}; return __value === undefined ? ${defaultExpr} : __value; })()`;
-		collectDerivedBindingsFromNode(node.left, withDefault, source, bindings);
-		return;
-	}
-
-	if (node.type === 'RestElement') {
-		collectRestBindings(node.argument, node, baseExpr, source, bindings);
-		return;
-	}
-
-	if (node.type === 'ObjectPattern') {
-		const excludedKeys = collectObjectRestKeys(node.properties || [], source);
-		for (const prop of node.properties || []) {
-			if (prop?.type === 'RestElement') {
-				collectRestBindings(prop.argument, prop, baseExpr, source, bindings, excludedKeys);
-				continue;
-			}
-			const nextBase = `${baseExpr}${buildObjectPropertyAccess(prop, source)}`;
-			collectDerivedBindingsFromNode(prop?.value, nextBase, source, bindings);
-		}
-		return;
-	}
-
-	if (node.type === 'ArrayPattern') {
-		for (let index = 0; index < (node.elements || []).length; index++) {
-			const element = node.elements[index];
-			if (!element) continue;
-			if (element.type === 'RestElement' && element.argument?.type === 'Identifier') {
-				bindings.push({ name: element.argument.name, expr: `${baseExpr}.slice(${index})` });
-				continue;
-			}
-			const nextBase = `${baseExpr}[${index}]`;
-			collectDerivedBindingsFromNode(element, nextBase, source, bindings);
-		}
-	}
-}
-
-function collectRestBindings(
-	argument: BindingPattern,
-	node: BindingRestElement,
-	baseExpr: string,
-	source: string,
-	bindings: Array<{ name: string; expr: string }>,
-	excludedKeys: string[] = [],
-): void {
-	if (argument?.type === 'Identifier') {
-		if (node?.type === 'RestElement' && excludedKeys.length > 0) {
-			const deletes = excludedKeys.map((key) => `delete __rest[${key}];`).join(' ');
-			bindings.push({
-				name: argument.name,
-				expr: `(() => { const __rest = { ...(${baseExpr} ?? {}) }; ${deletes} return __rest; })()`,
-			});
-			return;
-		}
-		bindings.push({ name: argument.name, expr: baseExpr });
-		return;
-	}
-
-	collectDerivedBindingsFromNode(argument, baseExpr, source, bindings);
-}
-
-function buildObjectPropertyAccess(prop: BindingProperty, source: string): string {
-	if (prop.computed) {
-		return `[${source.slice(prop.key.start, prop.key.end)}]`;
-	}
-
-	if (prop.key?.type === 'Identifier') {
-		return `.${prop.key.name}`;
-	}
-
-	return `[${source.slice(prop.key.start, prop.key.end)}]`;
-}
-
-function collectObjectRestKeys(properties: (BindingProperty | BindingRestElement)[], source: string): string[] {
-	const keys: string[] = [];
-	for (const prop of properties) {
-		if (!prop || prop.type === 'RestElement') continue;
-		if (prop.computed) {
-			keys.push(source.slice(prop.key.start, prop.key.end));
-			continue;
-		}
-		if (prop.key?.type === 'Identifier') {
-			keys.push(JSON.stringify(prop.key.name));
-			continue;
-		}
-		keys.push(source.slice(prop.key.start, prop.key.end));
-	}
-	return keys;
 }
 
 
 function skipWhitespace(code: string, index: number): number {
 	let i = index;
 	while (i < code.length && /\s/.test(code[i])) i++;
-	return i;
-}
-
-function findStatementEnd(code: string, start: number): number {
-	let parenDepth = 0;
-	let bracketDepth = 0;
-	let braceDepth = 0;
-	let i = start;
-
-	while (i < code.length) {
-		const ch = code[i];
-		if (ch === '\'' || ch === '"') {
-			i = skipString(code, i);
-			continue;
-		}
-		if (ch === '`') {
-			i = skipTemplateLiteral(code, i);
-			continue;
-		}
-		if (ch === '/' && code[i + 1] === '/') {
-			i = skipLineComment(code, i);
-			continue;
-		}
-		if (ch === '/' && code[i + 1] === '*') {
-			i = skipBlockComment(code, i);
-			continue;
-		}
-		if (ch === '(') parenDepth++;
-		else if (ch === ')') parenDepth--;
-		else if (ch === '[') bracketDepth++;
-		else if (ch === ']') bracketDepth--;
-		else if (ch === '{') braceDepth++;
-		else if (ch === '}') {
-			if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
-			braceDepth--;
-		}
-		else if (ch === ';' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
-		else if (ch === '\n' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) return i;
-		i++;
-	}
-
 	return i;
 }
 
@@ -888,15 +779,24 @@ function buildCFCallback(body: string, params?: string): string {
 		return `${arrow} ${body}`;
 	}
 
-	// Nested CF statement → transform and fragment-wrap
+	// Nested CF statement → transform to expression
 	if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(trimmed)) {
 		const transformed = transformControlFlowBlocks(`{${body}}`);
-		return `${arrow} (<>${transformed}</>)`;
+		// transformed is `{__if(...)}` — extract the inner expression
+		return `${arrow} ${transformed.slice(1, -1).trim()}`;
 	}
 
-	// Bare JSX → fragment-wrap
+	// Bare JSX → fragment-wrap only if multiple roots
 	if (trimmed.startsWith('<')) {
+		if (isSingleJSXRoot(body)) {
+			return `${arrow} ${body.trim()}`;
+		}
 		return `${arrow} (<>${body}</>)`;
+	}
+
+	// Paren-wrapped expression (from paren bodies) → pass through
+	if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+		return `${arrow} ${trimmed}`;
 	}
 
 	// Expression
@@ -1140,7 +1040,7 @@ function tryParseBlock(content: string, outerClose: number): ControlFlowResult |
  * Extract a branch body starting at position `pos` in `text`.
  * Returns the raw body text ready to be passed to `buildCFCallback`.
  */
-function extractBody(text: string, pos: number): { body: string; end: number } | null {
+function extractBody(text: string, pos: number): { body: string; end: number; closeIndent?: string } | null {
 	if (pos >= text.length) return null;
 	const ch = text[pos];
 
@@ -1151,9 +1051,21 @@ function extractBody(text: string, pos: number): { body: string; end: number } |
 
 	if (ch === '(') {
 		const close = findMatchingParen(text, pos);
-		let inner = text.slice(pos + 1, close).trim();
-		if (inner.startsWith('<')) inner = `<>${inner}</>`;
-		return { body: `(${inner})`, end: close + 1 };
+		const raw = text.slice(pos + 1, close);
+		const trimmed = raw.trim();
+		// Detect if closing ) was on its own line (trailing whitespace contains newline)
+		const lastNL = raw.lastIndexOf('\n');
+		let closeIndent: string | undefined;
+		if (lastNL >= 0) {
+			const trailing = raw.slice(lastNL + 1);
+			if (/^\s*$/.test(trailing)) {
+				closeIndent = trailing;
+			}
+		}
+		if (trimmed.startsWith('<') && !isSingleJSXRoot(trimmed)) {
+			return { body: `(<>${raw}</>)`, end: close + 1, closeIndent };
+		}
+		return { body: `(${raw})`, end: close + 1, closeIndent };
 	}
 
 	if (ch === '<') {
@@ -1216,7 +1128,7 @@ function parseIfChain(text: string): string | null {
 		if (text.slice(pos, pos + 2) === 'if') {
 			const nestedCall = parseIfChain(text.slice(pos));
 			if (!nestedCall) return null;
-			return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, () => (<>{${nestedCall}}</>))`;
+			return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, () => ${nestedCall})`;
 		}
 
 		// else body
@@ -1225,6 +1137,7 @@ function parseIfChain(text: string): string | null {
 		return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, ${buildCFCallback(falseBranch.body)})`;
 	}
 
+	// No else — closing stays inline
 	return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)})`;
 }
 
@@ -1244,8 +1157,18 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
 	const bodyText = content.slice(parenEnd + 1).trim();
 	let transformedBody: string;
 	if (bodyText.startsWith('{') && bodyText.endsWith('}')) {
-		const inner = bodyText.slice(1, -1).trim();
-		transformedBody = `{${transformControlFlowBlocks(inner)}}`;
+		const inner = bodyText.slice(1, -1); // preserve whitespace
+		const trimmedInner = inner.trim();
+		// Check if body is only a CF statement (if/for/switch/try)
+		if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(trimmedInner)) {
+			// Transform the CF statement, preserving surrounding whitespace
+			const transformed = transformControlFlowBlocks(`{${trimmedInner}}`);
+			const cfExpr = transformed.slice(1, -1); // remove outer { }
+			const startIdx = inner.indexOf(trimmedInner);
+			transformedBody = `{${inner.slice(0, startIdx)}${cfExpr}${inner.slice(startIdx + trimmedInner.length)}}`;
+		} else {
+			transformedBody = `{${transformControlFlowBlocks(inner)}}`;
+		}
 	} else {
 		transformedBody = transformControlFlowBlocks(bodyText);
 	}
@@ -1331,10 +1254,15 @@ function tryParseForBlock(code: string, outerBrace: number): ControlFlowResult |
 
 	const params = indexName ? `${paramPattern}, ${indexName}` : paramPattern;
 	let text: string;
+	const callback = buildCFCallback(transformedBody, params);
 	if (keyExpr) {
-		text = `{__for(() => (${collection}), ${buildCFCallback(transformedBody, params)}, (${paramPattern}) => (${keyExpr}))}`;
+		// Detect indentation from outer brace position for multiline formatting
+		const lineStart = code.lastIndexOf('\n', outerBrace);
+		const outerIndent = lineStart >= 0 ? (code.slice(lineStart + 1, outerBrace).match(/^(\s*)/) || ['', ''])[1] : '';
+		const bodyIndent = outerIndent + '  ';
+		text = `{__for(() => (${collection}), ${callback},\n${bodyIndent}(${paramPattern}) => (${keyExpr})\n${outerIndent})}`;
 	} else {
-		text = `{__for(() => (${collection}), ${buildCFCallback(transformedBody, params)})}`;
+		text = `{__for(() => (${collection}), ${callback})}`;
 	}
 
 	return { text, end: outerClose + 1 };
@@ -1345,6 +1273,10 @@ function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResul
 	const content = code.slice(outerBrace + 1, outerClose).trim();
 
 	if (!content.startsWith('switch')) return null;
+
+	// Detect close indent from the outer brace position
+	const outerLineStart = code.lastIndexOf('\n', outerBrace);
+	const closeIndent = outerLineStart >= 0 ? (code.slice(outerLineStart + 1, outerBrace).match(/^(\s*)/) || ['', ''])[1] : '';
 
 	// Recursively transform nested control flow blocks first
 	const transformed = transformControlFlowBlocks(content);
@@ -1366,21 +1298,21 @@ function tryParseSwitchBlock(code: string, outerBrace: number): ControlFlowResul
 		const firstStmt = fnDecl.body.body[0];
 		if (!firstStmt || firstStmt.type !== 'SwitchStatement') return null;
 		const discriminant = source.slice(firstStmt.discriminant.start, firstStmt.discriminant.end);
-		return buildSwitchOutput(source, firstStmt, discriminant, outerClose);
+		return buildSwitchOutput(source, firstStmt, discriminant, outerClose, closeIndent);
 	}
 
 	const firstStmt = result.program.body[0];
 	if (!firstStmt || firstStmt.type !== 'SwitchStatement') return null;
 
 	const discriminant = source.slice(firstStmt.discriminant.start, firstStmt.discriminant.end);
-	return buildSwitchOutput(source, firstStmt, discriminant, outerClose);
+	return buildSwitchOutput(source, firstStmt, discriminant, outerClose, closeIndent);
 }
 
-function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discriminant: string, outerClose: number): ControlFlowResult {
+function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discriminant: string, outerClose: number, closeIndent: string): ControlFlowResult {
 	const switchCases = switchStmt.cases || [];
 
 	// Group cases with fall-through support
-	const groups: { values: string[]; isDefault: boolean; body: string }[] = [];
+	const groups: { values: string[]; isDefault: boolean; body: string; bodyPrefix: string }[] = [];
 	let pendingValues: string[] = [];
 	let pendingDefault = false;
 
@@ -1402,6 +1334,7 @@ function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discrimi
 		// A case terminates its group if it has body content, a break/return, or is the last case
 		if (bodyStmts.length > 0 || hasBreak || hasReturn || isLast) {
 			let body = '';
+			let bodyPrefix = '';
 			// For block-render: include the return statement in the body
 			const allBodyStmts = hasReturn
 				? consequent.filter((s) => s.type !== 'BreakStatement')
@@ -1410,32 +1343,60 @@ function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discrimi
 				const start = allBodyStmts[0].start;
 				const end = allBodyStmts[allBodyStmts.length - 1].end;
 				body = source.slice(start, end);
+				// Capture leading whitespace (newline + indent) before body
+				const caseEnd = sc.test ? sc.test.end : sc.start + 7; // after 'default'
+				const between = source.slice(caseEnd, start);
+				const nlIdx = between.indexOf('\n');
+				if (nlIdx >= 0) {
+					bodyPrefix = between.slice(nlIdx);
+				}
 			}
 
 			groups.push({
 				values: [...pendingValues],
 				isDefault: pendingDefault,
 				body: body.trim(),
+				bodyPrefix,
 			});
 			pendingValues = [];
 			pendingDefault = false;
 		}
 	}
 
-	// Build __switch call: discriminant fn, then pairs of (values, body fn)
-	const args: string[] = [`() => (${discriminant})`];
-	for (const g of groups) {
-		if (g.isDefault) {
-			args.push('null');
-		} else {
-			args.push(`[${g.values.join(', ')}]`);
+	// Detect indentation from first case in source
+	let caseIndent = '  ';
+	if (switchCases.length > 0) {
+		const firstStart = switchCases[0].start;
+		const lineStart = source.lastIndexOf('\n', firstStart);
+		if (lineStart >= 0) {
+			const linePrefix = source.slice(lineStart + 1, firstStart);
+			const m = linePrefix.match(/^(\s*)/);
+			if (m) caseIndent = m[1];
 		}
+	}
+	const bodyIndent = caseIndent + '  ';
+
+	// Build __switch call: discriminant fn, then pairs of (values, body fn)
+	const discArg = `() => (${discriminant})`;
+	const cases: string[] = [];
+	for (const g of groups) {
+		const valuesStr = g.isDefault ? 'null' : `[${g.values.join(', ')}]`;
 		// Case bodies with statements (from `render` → `return`) need braces
-		const body = /\breturn\b/.test(g.body) ? `{${g.body}}` : g.body;
-		args.push(buildCFCallback(body));
+		let body = g.body;
+		if (/\breturn\b/.test(body)) {
+			// Normalize indentation: dedent to base, reindent with detected indent
+			const lines = body.split('\n').map(l => l.trimStart());
+			body = `{\n${bodyIndent}${lines.join('\n' + bodyIndent)}\n${caseIndent}}`;
+			cases.push(`${valuesStr}, ${buildCFCallback(body)}`);
+		} else if (g.bodyPrefix && body.startsWith('<')) {
+			// Bare JSX on its own line — preserve the line break + indent from source
+			cases.push(`${valuesStr}, () =>${g.bodyPrefix}${body}`);
+		} else {
+			cases.push(`${valuesStr}, ${buildCFCallback(body)}`);
+		}
 	}
 
-	const output = `__switch(${args.join(', ')})`;
+	const output = `__switch(${discArg},\n${caseIndent}${cases.join(',\n' + caseIndent)}\n${closeIndent})`;
 	return { text: `{${output}}`, end: outerClose + 1 };
 }
 
