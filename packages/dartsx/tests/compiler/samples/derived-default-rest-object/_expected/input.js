@@ -1,21 +1,9 @@
 import $ from "dartsx/internal/client";
 
 function Child() {
-	const __derived_0 = getContext();
-
-	const name = $.derived(() => {
-		const __value = __derived_0.user.name;
-
-		return __value === undefined ? "anon" : __value;
-	});
-
-	const rest = $.derived(() => {
-		const __rest = { ...__derived_0 ?? {} };
-
-		delete __rest["user"];
-
-		return __rest;
-	});
+	const __destructured_0 = getContext(),
+		name = $.derived(() => __destructured_0.user.name !== undefined ? __destructured_0.user.name : "anon"),
+		rest = $.derived(() => (({ user, ...rest }) => rest)(__destructured_0));
 
 	return $.jsx("p", {
 		children: [

@@ -112,6 +112,8 @@ export function transform(
 		insideDerived: false,
 	};
 
+	derivedDestructureCounter = 0;
+
 	const transformed = walk<AstNode, TransformState>(analysis.ast, initialState, {
 		_(node, { next, state }) {
 			const scope = state.analysis.scopes.get(node);
@@ -307,6 +309,11 @@ function transformComponent(
 			}
 			continue;
 		}
+		if (stmt.type === 'VariableDeclaration') {
+			const transformed = transformVariableDeclaration(stmt, compState, () => walkNode(stmt, compState));
+			if (transformed) stmts.push(transformed);
+			continue;
+		}
 		stmts.push(walkNode(stmt, compState));
 	}
 
@@ -420,10 +427,21 @@ function walkNode(node: AstNode, state: TransformState): AstNode {
 function transformVariableDeclaration(node: VariableDeclaration, state: TransformState, next: WalkContext['next']) {
 	const newDeclarators: typeof node.declarations = [];
 	let changed = false;
+	let prevMarker: string | null = null;
 
 	for (const decl of node.declarations) {
 		if (decl.id.type !== 'Identifier') {
-			newDeclarators.push(decl);
+			// Derived destructuring: pattern follows a $$d marker
+			if (prevMarker?.startsWith(DERIVED_MARKER) && (decl.id.type === 'ObjectPattern' || decl.id.type === 'ArrayPattern')) {
+				changed = true;
+				const derivedState = { ...state, insideDerived: true };
+				const initExpr = decl.init ? walkNode(decl.init, derivedState) : b.id('undefined');
+				// Lower destructuring: create temp + individual $.derived() per binding
+				lowerDerivedDestructuring(decl.id, initExpr, newDeclarators, state);
+			} else {
+				newDeclarators.push(decl);
+			}
+			prevMarker = null;
 			continue;
 		}
 		const name = decl.id.name;
@@ -431,8 +449,10 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 		// Skip $$s*/$$d* marker declarators (emitted by preprocess)
 		if (name.startsWith(STATE_MARKER) || name.startsWith(DERIVED_MARKER)) {
 			changed = true;
+			prevMarker = name;
 			continue;
 		}
+		prevMarker = null;
 
 		const binding = state.scope.get(name);
 		if (!binding) {
@@ -480,6 +500,103 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 		return { ...node, declarations: newDeclarators };
 	}
 	return next();
+}
+
+let derivedDestructureCounter = 0;
+
+function lowerDerivedDestructuring(pattern: AstNode, initExpr: AstNode, out: AstNode[], state: TransformState): void {
+	// Create a temp variable for the source expression
+	const tempName = `__destructured_${derivedDestructureCounter++}`;
+	out.push(b.declarator(b.id(tempName), initExpr));
+
+	// Walk the pattern and create individual $.derived() bindings
+	emitDerivedBindings(pattern, b.id(tempName), out);
+}
+
+function memberComputed(obj: AstNode, index: number): AstNode {
+	return { type: 'MemberExpression', object: obj, property: b.literal(index), computed: true, start: 0, end: 0, loc: null } as any;
+}
+
+function memberDot(obj: AstNode, prop: string): AstNode {
+	return { type: 'MemberExpression', object: obj, property: b.id(prop), computed: false, start: 0, end: 0, loc: null } as any;
+}
+
+function sliceCall(obj: AstNode, from: number): AstNode {
+	return b.call(memberDot(obj, 'slice'), [b.literal(from)]);
+}
+
+function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]): void {
+	if (pattern.type === 'ObjectPattern') {
+		for (const prop of (pattern as any).properties || []) {
+			if (!prop) continue;
+			if (prop.type === 'RestElement') {
+				if (prop.argument?.type === 'Identifier') {
+					// ...rest — use object spread minus other keys
+					const otherKeys = ((pattern as any).properties || [])
+						.filter((p: any) => p && p.type !== 'RestElement')
+						.map((p: any) => {
+							if (p.key?.type === 'Identifier') return p.key.name;
+							if (p.key?.type === 'StringLiteral') return p.key.value;
+							return null;
+						})
+						.filter(Boolean) as string[];
+					// Build: (() => { const { knownKeys, ...rest } = baseExpr; return rest; })()
+					const restExpr = buildObjectRest(baseExpr, otherKeys, prop.argument.name);
+					out.push(b.declarator(b.id(prop.argument.name), b.call('$.derived', [b.arrow([], restExpr)])));
+				}
+				continue;
+			}
+			const key = prop.key?.type === 'Identifier' ? prop.key.name : (prop.key?.type === 'StringLiteral' ? prop.key.value : null);
+			if (!key) continue;
+			const accessExpr = memberDot(baseExpr, key);
+			const value = prop.value || prop.key;
+			if (value.type === 'Identifier') {
+				out.push(b.declarator(b.id(value.name), b.call('$.derived', [b.arrow([], accessExpr)])));
+			} else if (value.type === 'AssignmentPattern' && value.left?.type === 'Identifier') {
+				// { a = defaultVal }
+				const name = value.left.name;
+				const cond = b.binary('!==', accessExpr, b.id('undefined'));
+				const ternary = { type: 'ConditionalExpression', test: cond, consequent: accessExpr, alternate: value.right, start: 0, end: 0, loc: null } as any;
+				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
+			} else if (value.type === 'ObjectPattern' || value.type === 'ArrayPattern') {
+				emitDerivedBindings(value, accessExpr, out);
+			}
+		}
+	} else if (pattern.type === 'ArrayPattern') {
+		const elements = (pattern as any).elements || [];
+		for (let i = 0; i < elements.length; i++) {
+			const elem = elements[i];
+			if (!elem) continue;
+			if (elem.type === 'RestElement' && elem.argument?.type === 'Identifier') {
+				out.push(b.declarator(b.id(elem.argument.name), b.call('$.derived', [b.arrow([], sliceCall(baseExpr, i))])));
+				continue;
+			}
+			const accessExpr = memberComputed(baseExpr, i);
+			if (elem.type === 'Identifier') {
+				out.push(b.declarator(b.id(elem.name), b.call('$.derived', [b.arrow([], accessExpr)])));
+			} else if (elem.type === 'AssignmentPattern' && elem.left?.type === 'Identifier') {
+				const name = elem.left.name;
+				const cond = b.binary('!==', accessExpr, b.id('undefined'));
+				const ternary = { type: 'ConditionalExpression', test: cond, consequent: accessExpr, alternate: elem.right, start: 0, end: 0, loc: null } as any;
+				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
+			} else if (elem.type === 'ObjectPattern' || elem.type === 'ArrayPattern') {
+				emitDerivedBindings(elem, accessExpr, out);
+			}
+		}
+	}
+}
+
+function buildObjectRest(baseExpr: AstNode, excludeKeys: string[], restName: string): AstNode {
+	// Build: (({ key1, key2, ...rest }) => rest)(baseExpr)
+	const restId = b.id(restName);
+	const props: AstNode[] = excludeKeys.map(k => ({
+		type: 'Property', key: b.id(k), value: b.id(k), kind: 'init', shorthand: true, computed: false, method: false, start: 0, end: 0, loc: null
+	} as any));
+	props.push({ type: 'RestElement', argument: restId, start: 0, end: 0, loc: null } as any);
+	const param = { type: 'ObjectPattern', properties: props, start: 0, end: 0, loc: null } as any;
+	const arrow = b.arrow([param], restId);
+	const paren = { type: 'ParenthesizedExpression', expression: arrow, start: 0, end: 0, loc: null } as any;
+	return b.call(paren, [baseExpr]);
 }
 
 function transformShorthandProperty(node: Extract<AstNode, { type: 'Property' }>, state: TransformState, next: WalkContext['next']) {

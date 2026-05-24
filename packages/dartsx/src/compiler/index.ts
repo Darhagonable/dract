@@ -7,10 +7,13 @@ import { preprocess, parse } from './phases/1-parse';
 import { analyze } from './phases/2-analyze';
 import { transform } from './phases/3-transform';
 import { transformSync as oxcTransformSync } from 'oxc-transform';
+import remapping, { type SourceMap } from '@jridgewell/remapping';
 
 export interface CompileResult {
 	/** The generated JavaScript code */
 	code: string;
+	/** Source map from output positions to original source positions */
+	map: SourceMap;
 	/** Extracted CSS from scoped style blocks (for external CSS mode) */
 	css: string;
 	/** Names of exported state/derived variables (for cross-file reactivity) */
@@ -59,7 +62,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 	// This removes interfaces, type aliases, type annotations, etc. from the source
 	// so the analyzer and transform don't need to handle TS-specific AST nodes.
 	// JSX is preserved; the $$s/$$d/$$style markers survive as identifiers/elements.
-	const stripped = oxcTransformSync(filename, preprocessed.code, { sourcemap: false, jsx: 'preserve' });
+	const stripped = oxcTransformSync(filename, preprocessed.code, { sourcemap: true, jsx: 'preserve' });
 
 	// Parse as JSX (TS types already stripped by oxcTransformSync above)
 	const parseResult = parse(filename, stripped.code, 'jsx');
@@ -82,6 +85,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 
 	return {
 		code: result.code,
+		map: remapping([result.map, stripped.map, preprocessed.map], () => null),
 		css: result.css,
 		reactiveExports: analysis.reactiveExports,
 		reactiveCalls: analysis.reactiveCalls,

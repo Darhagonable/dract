@@ -57,6 +57,9 @@ importers:
 
   packages/dartsx:
     dependencies:
+      '@jridgewell/remapping':
+        specifier: ^2.3.5
+        version: 2.3.5
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

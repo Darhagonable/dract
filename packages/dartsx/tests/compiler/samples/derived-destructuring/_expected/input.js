@@ -1,9 +1,9 @@
 import $ from "dartsx/internal/client";
 
 function Child() {
-	const __derived_0 = getContext();
-	const count = $.derived(() => __derived_0.count);
-	const increment = $.derived(() => __derived_0.increment);
+	const __destructured_0 = getContext(),
+		count = $.derived(() => __destructured_0.count),
+		increment = $.derived(() => __destructured_0.increment);
 
 	return $.jsx("button", {
 		get onclick() {
