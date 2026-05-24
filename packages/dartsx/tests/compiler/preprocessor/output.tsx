@@ -104,3 +104,10 @@ export default async function AsyncPage(dataId, __bind__count) {
 
   <$$style0 />
 }
+
+// Bind with renamed prop
+function BindRenamed(__bind__displayName: string, statusText: string = "offline") {
+  return (
+    <p>{displayName} - {statusText}</p>
+  )
+}

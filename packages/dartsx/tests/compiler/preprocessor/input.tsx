@@ -105,3 +105,10 @@ export default async component AsyncPage('data-id' as dataId, bind count) {
     div { color: red; }
   </style>
 }
+
+// Bind with renamed prop
+component BindRenamed(bind 'display-name' as displayName: string, 'status-text' as statusText: string = "offline") {
+  render (
+    <p>{displayName} - {statusText}</p>
+  )
+}
