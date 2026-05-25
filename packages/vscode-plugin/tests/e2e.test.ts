@@ -157,6 +157,18 @@ describe('DarTsx E2E', () => {
 		expect(text).toBe('(alias) derived doubled: number');
 	});
 
+	// ── Hover for-loop clauses (source map preservation) ─────────
+
+	it('hover: "index" variable in for-loop clause', async () => {
+		const text = await hoverAt('ForLoopDemo.tsx', 5, 52)('number');
+		expect(text).toBe('let i: number');
+	});
+
+	it('hover: "key" expression item in for-loop clause', async () => {
+		const text = await hoverAt('ForLoopDemo.tsx', 5, 37)('item');
+		expect(text).toBe('const item: {');
+	});
+
 	// ── Diagnostics ──────────────────────────────────────────────
 
 	it('unused CSS selector diagnostic', async () => {

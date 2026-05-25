@@ -165,6 +165,7 @@ function buildMappings(
 	// Merge consecutive segments into contiguous regions where the
 	// source-to-generated offset difference is constant
 	let regionStart = 0;
+	let maxSrcEnd = 0; // Track claimed source ranges to detect move() overlaps
 	for (let i = 1; i <= segments.length; i++) {
 		const continuable =
 			i < segments.length &&
@@ -190,10 +191,13 @@ function buildMappings(
 			// the gap to the next segment is meaningless. Use only the confirmed
 			// range (first..last segment) + 1 char for the last token.
 			// When positive, use the tighter of source/generated gaps.
+			// Also, when source offset overlaps with already-claimed ranges
+			// (from move() reordering), cap to confirmed length to avoid
+			// bleeding hover into adjacent characters.
 			const confirmedLength = last.genOffset - first.genOffset + 1;
-			const length = rawSrcLength > 0
-				? Math.min(rawGenLength, rawSrcLength)
-				: confirmedLength;
+			const length = rawSrcLength <= 0 || first.srcOffset < maxSrcEnd
+				? confirmedLength
+				: Math.min(rawGenLength, rawSrcLength);
 
 			mappings.push({
 				sourceOffsets: [first.srcOffset],
@@ -210,6 +214,7 @@ function buildMappings(
 				},
 			});
 
+			maxSrcEnd = Math.max(maxSrcEnd, first.srcOffset + length);
 			regionStart = i;
 		}
 	}

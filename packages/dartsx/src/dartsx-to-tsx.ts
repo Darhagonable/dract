@@ -13,8 +13,7 @@
  *   - `render <expr>` → `return <expr>`
  *   - `render expr;` → `return expr;`
  *   - `{if/for/switch/try}` in JSX → IIFE wrappers
- *   - `bind:value={x}` → `__bind_value={x}`
- *   - `bind:{x}` → `__bind_value={x}`
+ *   - `bind:{x}` → `bind:x={x}` (shorthand expansion)
  *   - `{@html expr}` → `{expr}`
  *   - `<style>` blocks → blanked (preserving interpolations)
  */
@@ -502,14 +501,14 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 
 			if (/^if\s*\(/.test(kw) || /^for\s*[\s(]/.test(kw) || /^switch\s*\(/.test(kw) || /^try[\s({<]/.test(kw)) {
 				ms.appendLeft(i + 1, '(() => { ');
-				ms.appendLeft(closeBrace, ' })()');
+				ms.appendLeft(closeBrace, '})()');
 				// For for-loops, strip `; index <var>` and `; key <expr>` clauses
-				let keyExprRange: KeyExprRange | null = null;
+				let forClauses: ForClauseInfo | null = null;
 				if (/^for\s*[\s(]/.test(kw)) {
-					keyExprRange = stripForClauses(ms, source, j, closeBrace);
+					forClauses = stripForClauses(ms, source, j, closeBrace);
 				}
 				// Rewrite paren-body control flow to block-body with return
-				rewriteParenBodies(ms, source, j, closeBrace, keyExprRange);
+				rewriteParenBodies(ms, source, j, closeBrace, forClauses);
 			}
 			// Always recurse into brace blocks to find nested control flow
 			wrapControlFlowBlocks(ms, source, i + 1, closeBrace);
@@ -522,17 +521,22 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 }
 
 /**
- * Strip `; index <var>` and `; key <expr>` clauses from for-loop headers.
- * `for (const x of items; index i; key x.id)` → `let i = 0; for (const x of items) { x.id; ...}`
- * Uses ms.move() to preserve source mapping for the index variable.
- * Moves the key expression into the for-body as a statement for type-checking.
+ * Info about for-loop clauses stripped from the header.
+ * Positions reference the original source for use with ms.move().
  */
-interface KeyExprRange {
-	start: number;
-	end: number;
+interface ForClauseInfo {
+	/** Position range of the index variable name (e.g. `i`) */
+	indexVar?: { start: number; end: number };
+	/** Position range of the key expression (e.g. `item.id`) */
+	keyExpr?: { start: number; end: number };
 }
 
-function stripForClauses(ms: MagicString, source: string, forStart: number, end: number): KeyExprRange | null {
+/**
+ * Strip `; index <var>` and `; key <expr>` clauses from for-loop headers.
+ * `for (const x of items; index i; key x.id)` → `for (const x of items)`
+ * Returns positions of index var and key expr for source-map-preserving move().
+ */
+function stripForClauses(ms: MagicString, source: string, forStart: number, end: number): ForClauseInfo | null {
 	// Find the opening paren of the for-loop
 	let pos = forStart + 3; // skip 'for'
 	while (pos < end && /\s/.test(source[pos])) pos++;
@@ -545,10 +549,8 @@ function stripForClauses(ms: MagicString, source: string, forStart: number, end:
 	const header = source.slice(openParen + 1, closeParen);
 	const clauseRe = /;\s*(index|key)\s+/g;
 	let firstClauseIdx = -1;
-	let indexVarStart = -1;
-	let indexVarEnd = -1;
-	let keyExprStart = -1;
-	let keyExprEnd = -1;
+	let indexVarRange: { start: number; end: number } | undefined;
+	let keyExprRange: { start: number; end: number } | undefined;
 	let clauseMatch;
 
 	while ((clauseMatch = clauseRe.exec(header)) !== null) {
@@ -557,69 +559,72 @@ function stripForClauses(ms: MagicString, source: string, forStart: number, end:
 		if (clauseMatch[1] === 'index') {
 			const varMatch = header.slice(afterKw).match(/^([A-Za-z_$][\w$]*)/);
 			if (varMatch) {
-				indexVarStart = openParen + 1 + afterKw;
-				indexVarEnd = indexVarStart + varMatch[1].length;
+				const start = openParen + 1 + afterKw;
+				indexVarRange = { start, end: start + varMatch[1].length };
 			}
 		} else if (clauseMatch[1] === 'key') {
-			// Key expression runs from after "key " to the next ";" or end of header
-			keyExprStart = openParen + 1 + afterKw;
+			const start = openParen + 1 + afterKw;
 			const nextSemi = header.indexOf(';', afterKw);
-			keyExprEnd = nextSemi !== -1 ? openParen + 1 + nextSemi : closeParen;
+			let exprEnd = nextSemi !== -1 ? openParen + 1 + nextSemi : closeParen;
 			// Trim trailing whitespace
-			while (keyExprEnd > keyExprStart && /\s/.test(source[keyExprEnd - 1])) keyExprEnd--;
+			while (exprEnd > start && /\s/.test(source[exprEnd - 1])) exprEnd--;
+			keyExprRange = { start, end: exprEnd };
 		}
 	}
 
 	if (firstClauseIdx === -1) return null;
 
+	// Remove clause syntax but keep the meaningful ranges for move()
 	const removeStart = openParen + 1 + firstClauseIdx;
-	const hasKey = keyExprStart !== -1 && keyExprEnd > keyExprStart;
 
-	if (indexVarStart !== -1) {
-		// Move the index variable to before `for`, preserving its source mapping.
-		ms.move(indexVarStart, indexVarEnd, forStart);
-		ms.appendLeft(forStart, 'let ');
-		ms.appendLeft(indexVarEnd, ' = 0; ');
-
-		if (hasKey) {
-			// Remove clause text but keep key expression range intact for later move()
-			if (indexVarStart < keyExprStart) {
-				// Order: ; index i; key item.id
-				ms.remove(removeStart, indexVarStart);
-				ms.remove(indexVarEnd, keyExprStart);
-				ms.remove(keyExprEnd, closeParen);
-			} else {
-				// Order: ; key item.id; index i
-				ms.remove(removeStart, keyExprStart);
-				ms.remove(keyExprEnd, indexVarStart);
-				ms.remove(indexVarEnd, closeParen);
-			}
-		} else {
-			ms.remove(removeStart, indexVarStart);
-			ms.remove(indexVarEnd, closeParen);
-		}
-		ms.overwrite(closeParen, closeParen + 1, ')');
-	} else if (hasKey) {
-		// No index variable, just key — remove surrounding text, keep key range
-		ms.remove(removeStart, keyExprStart);
-		ms.remove(keyExprEnd, closeParen);
-		ms.overwrite(closeParen, closeParen + 1, ')');
-	} else {
-		// No index, no key — just strip clauses
-		ms.overwrite(removeStart, closeParen, ')');
-		ms.remove(closeParen, closeParen + 1);
+	if (indexVarRange && keyExprRange) {
+		// Both present — remove everything except the var and expr ranges
+		const first = indexVarRange.start < keyExprRange.start ? indexVarRange : keyExprRange;
+		const second = indexVarRange.start < keyExprRange.start ? keyExprRange : indexVarRange;
+		ms.remove(removeStart, first.start);
+		ms.remove(first.end, second.start);
+		ms.remove(second.end, closeParen + 1);
+	} else if (indexVarRange) {
+		ms.remove(removeStart, indexVarRange.start);
+		ms.remove(indexVarRange.end, closeParen + 1);
+	} else if (keyExprRange) {
+		ms.remove(removeStart, keyExprRange.start);
+		ms.remove(keyExprRange.end, closeParen + 1);
 	}
+	// Re-add ')' without source mapping so hovering ')' doesn't leak type info
+	ms.appendLeft(closeParen + 1, ')');
 
-	return hasKey ? { start: keyExprStart, end: keyExprEnd } : null;
+	return { indexVar: indexVarRange, keyExpr: keyExprRange };
+}
+
+/**
+ * Move for-clause ranges (index var, key expr) into the for-body at `target`.
+ * Uses ms.move() to preserve source mappings for hover/go-to-definition.
+ * If `trailingReturn` is true, appends 'return ' after the last clause (for paren-body).
+ * If `leadingSpace` is true, prepends a space before injected content (for block body after `{`).
+ */
+function injectForClausesAtBody(ms: MagicString, clauses: ForClauseInfo, target: number, trailingReturn = false, leadingSpace = false): void {
+	const returnStr = trailingReturn ? 'return ' : '';
+	if (leadingSpace) ms.appendLeft(target, ' ');
+
+	if (clauses.indexVar) {
+		ms.move(clauses.indexVar.start, clauses.indexVar.end, target);
+		ms.appendLeft(target, 'let ');
+		const indexSuffix = clauses.keyExpr ? ' = 0; ' : ` = 0; ${returnStr}`;
+		ms.appendLeft(clauses.indexVar.end, indexSuffix);
+	}
+	if (clauses.keyExpr) {
+		ms.move(clauses.keyExpr.start, clauses.keyExpr.end, target);
+		ms.appendLeft(clauses.keyExpr.end, `; ${returnStr}`);
+	}
 }
 
 /**
  * Rewrite paren-body control flow to block-body with return so TS can type-check.
  * Handles: if/for/while/else/try/catch/pending with paren bodies.
  */
-function rewriteParenBodies(ms: MagicString, source: string, start: number, end: number, keyExprRange?: KeyExprRange | null): void {
+function rewriteParenBodies(ms: MagicString, source: string, start: number, end: number, forClauses?: ForClauseInfo | null): void {
 	let pos = start;
-	let isFirst = true;
 
 	/** Wrap a paren body `( ... )` → `{ return ( ... ) }` at current pos */
 	function wrapParenBody(prefix = '{ return '): boolean {
@@ -627,7 +632,7 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 		const closeBody = findMatchingParen(source, pos);
 		if (closeBody === -1 || closeBody > end) return false;
 		ms.appendLeft(pos, prefix);
-		ms.prependLeft(closeBody + 1, ' }');
+		ms.prependLeft(closeBody + 1, '}');
 		pos = closeBody + 1;
 		return true;
 	}
@@ -671,17 +676,28 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 			if (kwEnd === -1 || kwEnd >= end) break;
 			pos = kwEnd;
 			if (!skipParens()) break;
-			// Handle body
-			skipWs();
-			if (pos >= end) break;
-			if (isFor && isFirst && keyExprRange && source[pos] === '(') {
-				// For-loop with key: inject key expression before return
-				wrapParenBody('{ ');
-				// move() was already done by stripForClauses; just append the separator
-				ms.move(keyExprRange.start, keyExprRange.end, pos);
-				ms.appendLeft(keyExprRange.end, '; return ');
-			} else if (!handleBody()) break;
-			isFirst = false;
+			// Handle body — for for-loops with clauses, move index/key into body
+			if (isFor && forClauses) {
+				skipWs();
+				if (pos >= end) break;
+				if (source[pos] === '(') {
+					// Paren body: wrap as { <moved clauses> return (...) }
+					const closeBody = findMatchingParen(source, pos);
+					if (closeBody === -1 || closeBody > end) break;
+					ms.appendLeft(pos, '{ ');
+					// Move index var and key expr into the body, with trailing 'return '
+					injectForClausesAtBody(ms, forClauses, pos, true);
+					ms.prependLeft(closeBody + 1, '}');
+					pos = closeBody + 1;
+				} else if (source[pos] === '{') {
+					// Block body: move clauses after opening brace
+					injectForClausesAtBody(ms, forClauses, pos + 1, false, true);
+					const closeBlock = findMatchingBrace(source, pos);
+					if (closeBlock !== -1) { pos = closeBlock + 1; } else break;
+				} else break;
+			} else {
+				if (!handleBody()) break;
+			}
 		} else if (/^else/.test(slice)) {
 			pos += 4; // skip 'else'
 			skipWs();
@@ -725,8 +741,7 @@ function findMatchingBrace(code: string, openPos: number): number {
 
 /**
  * Single-pass transform for all JSX attribute operations:
- * - `bind:{x}` → `__bind_value={x}`
- * - `bind:prop={x}` → `__bind_prop={x}`
+ * - `bind:{x}` → `bind:x={x}` (shorthand expansion for TS parser)
  * - `attr={count += 1}` → `attr={() => count += 1}` (assignment/update wrapping)
  *
  * Finds JSX opening tags, then processes attributes within each.
@@ -739,20 +754,12 @@ function transformJsxAttributes(ms: MagicString, source: string): void {
 		const tagClose = findJsxTagClose(source, attrStart);
 		if (tagClose === -1) continue;
 
-		// bind:{x} → __bind_value={x}
+		// bind:{x} → bind:value={x}  (shorthand expansion — TS can't parse `:{`)
 		const bindShortRe = /bind:\{(\w+)\}/g;
 		bindShortRe.lastIndex = attrStart;
 		let m;
 		while ((m = bindShortRe.exec(source)) !== null && m.index < tagClose) {
-			ms.overwrite(m.index, m.index + m[0].length, `__bind_value={${m[1]}}`);
-		}
-
-		// bind:prop= → __bind_prop=
-		const bindAttrRe = /bind:([a-zA-Z][\w-]*)(\s*=)/g;
-		bindAttrRe.lastIndex = attrStart;
-		while ((m = bindAttrRe.exec(source)) !== null && m.index < tagClose) {
-			const bindEnd = m.index + 'bind:'.length + m[1].length;
-			ms.overwrite(m.index, bindEnd, `__bind_${m[1]}`);
+			ms.overwrite(m.index, m.index + m[0].length, `bind:${m[1]}={${m[1]}}`);
 		}
 
 		// Wrap assignment/update expressions: attr={x += 1} → attr={() => x += 1}

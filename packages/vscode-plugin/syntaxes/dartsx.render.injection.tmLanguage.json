@@ -129,7 +129,7 @@
 				{ "match": "\\b(switch|case|default)\\b", "name": "keyword.control.switch.tsx" },
 				{ "match": "\\b(try|catch|finally|throw)\\b", "name": "keyword.control.trycatch.tsx" },
 				{ "match": "\\b(pending)\\b", "name": "keyword.control.dartsx" },
-				{ "match": "\\b(index|key)\\b", "name": "keyword.other.dartsx" }
+				{ "match": ";\\s*(index|key)\\b", "captures": { "1": { "name": "keyword.other.dartsx" } } }
 			]
 		},
 		"jsx-attributes": {
