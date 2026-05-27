@@ -14,27 +14,27 @@ export default function Counter() {
 }
 
 async function Loader() {
-  return (<>
+  return (
     <p>loaded</p>
-  </>)
+  )
 }
 
 export function UserCard({name, age, active = true}: {name: string, age: number, active?: boolean}) {
   export let theme = "light"
   let editing = false
 
-  return (<>
+  return (
     <div>
       <span>{name}</span>
       <span>{age}</span>
     </div>
-  </>)
+  )
 }
 
 export function UserBadge({'display-name': displayName, status = 'offline'}: {'display-name': string, status?: string}) {
-  return (<>
+  return (
     <span>{displayName} ({status})</span>
-  </>)
+  )
 }
 
 function DerivedPatterns() {
@@ -67,7 +67,7 @@ function ControlFlow() {
   let items = [1, 2, 3]
   let status = "active" as string
 
-  return (<>
+  return (
     <div>
       {(() => { if (loading) { return (
         <p>Loading...</p>
@@ -102,7 +102,7 @@ function ControlFlow() {
       </ul>
 
       <ul>
-        {(() => { for (const item of items) { let i = 0; item.id; 
+        {(() => { for (const item of items) { let i = 0; item.id;
           return <li>{i}: {item}</li>
         }})()}
       </ul>
@@ -134,7 +134,7 @@ function ControlFlow() {
 
       {(() => { try { return (<p>Data</p>)} catch (e) { return (<p>Error</p>)}})()}
     </div>
-  </>)
+  )
 }
 
 function Events() {
@@ -153,14 +153,14 @@ function Events() {
 function GenericComponent<T extends Record<string, unknown>>({data, label}: {data: T, label: string}) {
   const keys = Object.keys(data)
 
-  return (<>
+  return (
     <div>
       <h2>{label}</h2>
       {(() => { for (const key of keys) { return (
         <span>{key}</span>
       )}})()}
     </div>
-  </>)
+  )
 }
 
 // Non-DarTsx code should pass through unchanged

@@ -463,10 +463,17 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 		const closeParen = findMatchingParen(source, openParen);
 		if (closeParen === -1) continue;
 
-		// render( → return(<>...</>)
+		const inner = source.slice(openParen + 1, closeParen);
+		const trimmedInner = inner.trim();
+
+		// render( → return(...)
 		ms.overwrite(renderStart, openParen, 'return ');
-		ms.appendLeft(openParen + 1, '<>');
-		ms.appendLeft(closeParen, '</>');
+
+		// Only wrap in fragment when there are multiple JSX roots
+		if (trimmedInner.startsWith('<') && !isSingleJSXRoot(trimmedInner)) {
+			ms.appendLeft(openParen + 1, '<>');
+			ms.appendLeft(closeParen, '</>');
+		}
 
 		// Wrap control flow blocks in IIFEs (skip nested render blocks)
 		if (!processed.some(r => match!.index > r.start && match!.index < r.end)) {
@@ -480,6 +487,80 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 	while ((match = reOther.exec(source)) !== null) {
 		ms.overwrite(match.index, match.index + 'render'.length, 'return');
 	}
+}
+
+function isSingleJSXRoot(code: string): boolean {
+	const trimmed = code.trim();
+	if (!trimmed.startsWith('<')) return false;
+	const end = findJSXElementEnd(trimmed, 0);
+	if (end <= 0) return false;
+	return trimmed.slice(end).trim() === '';
+}
+
+function findJSXElementEnd(code: string, start: number): number {
+	let i = start + 1;
+
+	const tagStart = i;
+	while (i < code.length && /[\w.$]/.test(code[i])) i++;
+	const tagName = code.slice(tagStart, i);
+	if (!tagName) return start;
+
+	while (i < code.length) {
+		if (code[i] === '/' && code[i + 1] === '>') return i + 2;
+		if (code[i] === '>') { i++; break; }
+		if (code[i] === '{') { i = skipJSXExpr(code, i); continue; }
+		if (code[i] === "'" || code[i] === '"') { i = skipString(code, i); continue; }
+		i++;
+	}
+
+	let nesting = 1;
+	while (i < code.length && nesting > 0) {
+		if (code[i] === '<') {
+			if (code[i + 1] === '/') {
+				const ns = i + 2;
+				let ne = ns;
+				while (ne < code.length && /[\w.$]/.test(code[ne])) ne++;
+				if (code.slice(ns, ne) === tagName) {
+					nesting--;
+					if (nesting === 0) { while (ne < code.length && code[ne] !== '>') ne++; return ne + 1; }
+				}
+				i = ne;
+			} else {
+				const ns = i + 1;
+				let ne = ns;
+				while (ne < code.length && /[\w.$]/.test(code[ne])) ne++;
+				if (code.slice(ns, ne) === tagName && !isSelfClosingJSXTag(code, ne)) nesting++;
+				i = ne;
+			}
+			continue;
+		}
+		if (code[i] === '{') { i = skipJSXExpr(code, i); continue; }
+		i++;
+	}
+	return i;
+}
+
+function skipJSXExpr(code: string, start: number): number {
+	let depth = 1;
+	let i = start + 1;
+	while (i < code.length && depth > 0) {
+		if (code[i] === '{') depth++;
+		else if (code[i] === '}') depth--;
+		else if (code[i] === "'" || code[i] === '"' || code[i] === '`') { i = skipString(code, i); continue; }
+		i++;
+	}
+	return i;
+}
+
+function isSelfClosingJSXTag(code: string, attrStart: number): boolean {
+	let j = attrStart;
+	while (j < code.length && code[j] !== '>') {
+		if (code[j] === '/' && code[j + 1] === '>') return true;
+		if (code[j] === '{') { j = skipJSXExpr(code, j); continue; }
+		if (code[j] === "'" || code[j] === '"') { j = skipString(code, j); continue; }
+		j++;
+	}
+	return false;
 }
 
 function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, end: number): void {
@@ -610,12 +691,12 @@ function injectForClausesAtBody(ms: MagicString, clauses: ForClauseInfo, target:
 	if (clauses.indexVar) {
 		ms.move(clauses.indexVar.start, clauses.indexVar.end, target);
 		ms.appendLeft(target, 'let ');
-		const indexSuffix = clauses.keyExpr ? ' = 0; ' : ` = 0; ${returnStr}`;
+		const indexSuffix = clauses.keyExpr ? ' = 0; ' : (returnStr ? ` = 0; ${returnStr}` : ' = 0;');
 		ms.appendLeft(clauses.indexVar.end, indexSuffix);
 	}
 	if (clauses.keyExpr) {
 		ms.move(clauses.keyExpr.start, clauses.keyExpr.end, target);
-		ms.appendLeft(clauses.keyExpr.end, `; ${returnStr}`);
+		ms.appendLeft(clauses.keyExpr.end, returnStr ? `; ${returnStr}` : ';');
 	}
 }
 
