@@ -4,7 +4,7 @@
 
 DarTsx tooling currently ships as a VS Code-extension-first stack:
 
-- `packages/vscode-plugin` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
+- `packages/vscode-extension` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
 - `packages/typescript-plugin` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
 - `packages/vite-plugin` compiles DarTsx source for dev/build and propagates cross-file reactivity metadata.
 - `packages/dartsx` remains the source of truth for compiler and runtime behavior.
@@ -72,7 +72,7 @@ DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts
 
 ```
 ┌────────────────────────────────────────────────────┐
-│ VS Code Extension (packages/vscode-plugin)        │
+│ VS Code Extension (packages/vscode-extension)     │
 │ - User-facing DarTsx support in JS/TS/JSX/TSX     │
 │ - Injects TextMate grammar into supported editors │
 │ - Hooks into VS Code's built-in JS/TS service     │

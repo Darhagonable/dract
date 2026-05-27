@@ -28,7 +28,7 @@ function hoverText(hovers: vscode.Hover[]): string {
 	).join('\n');
 }
 
-describe('DarTsx E2E', () => {
+describe('VSCode Extension', () => {
 	it('extension activates', async () => {
 		const ext = vscode.extensions.getExtension('dartsx.dartsx-vscode');
 		expect(ext).toBeDefined();
@@ -199,4 +199,31 @@ describe('DarTsx E2E', () => {
 		const errors = diags.filter(d => d.severity === vscode.DiagnosticSeverity.Error && d.source === 'ts');
 		expect(errors.length).toBeGreaterThan(0);
 	});
+
+	it('component usage infers prop types from declaration', async () => {
+		const uri = fixtureUri('PropsInferenceDemo.tsx');
+		const doc = await vscode.workspace.openTextDocument(uri);
+		await vscode.window.showTextDocument(doc);
+		const text = doc.getText();
+
+		const firstUsageOffset = text.indexOf('<Badge title={label} count={total} active={true} />');
+		const secondUsageOffset = text.indexOf('<Badge title={123} count={\'bad\'} />');
+
+		const firstUsageLine = doc.positionAt(firstUsageOffset).line;
+		const secondUsageLine = doc.positionAt(secondUsageOffset).line;
+
+		const diags = await waitFor(
+			() => Promise.resolve(vscode.languages.getDiagnostics(uri)),
+			(d) => d.some(x => x.severity === vscode.DiagnosticSeverity.Error && x.source === 'ts'),
+		);
+
+		const errors = diags.filter(d => d.severity === vscode.DiagnosticSeverity.Error && d.source === 'ts');
+
+		const firstUsageErrors = errors.filter(d => d.range.start.line === firstUsageLine);
+		const secondUsageErrors = errors.filter(d => d.range.start.line === secondUsageLine);
+
+		expect(firstUsageErrors.length).toBe(0);
+		expect(secondUsageErrors.length).toBe(2);
+		expect(secondUsageErrors.every(d => d.message.includes('not assignable to type'))).toBe(true);
+	}, 20000);
 });

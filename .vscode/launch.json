@@ -7,10 +7,10 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.dartsx-vscode",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-plugin/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
 				"${workspaceFolder}/playground"
 			],
-			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
+			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
 			"sourceMaps": true,
 			"preLaunchTask": "build-extension"
 		},
@@ -20,10 +20,10 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.dartsx-vscode",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-plugin/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
 				"${workspaceFolder}/toolkit/router"
 			],
-			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
+			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
 			"sourceMaps": true,
 			"preLaunchTask": "build-extension"
 		},
@@ -33,10 +33,10 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.dartsx-vscode",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-plugin/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
 				"${workspaceFolder}/toolkit/query"
 			],
-			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
+			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
 			"sourceMaps": true,
 			"preLaunchTask": "build-extension"
 		},
@@ -46,10 +46,10 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.dartsx-vscode",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-plugin/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
 				"${workspaceFolder}/website"
 			],
-			"outFiles": ["${workspaceFolder}/packages/vscode-plugin/dist/**/*.js"],
+			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
 			"sourceMaps": true,
 			"preLaunchTask": "build-extension"
 		}

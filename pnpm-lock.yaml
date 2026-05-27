@@ -130,7 +130,7 @@ importers:
         specifier: ^8.0.13
         version: 8.0.13(@types/node@25.9.0)(jiti@2.7.0)
 
-  packages/vscode-plugin:
+  packages/vscode-extension:
     dependencies:
       '@volar/language-server':
         specifier: ~2.4.28
