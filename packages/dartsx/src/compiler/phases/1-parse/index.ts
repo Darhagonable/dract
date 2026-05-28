@@ -8,7 +8,6 @@
 import MagicString, { type SourceMap } from 'magic-string';
 import {
 	parseSync as oxcParseSync,
-	type SwitchStatement,
 } from 'oxc-parser';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -242,10 +241,16 @@ export function preprocess(source: string): PreprocessResult {
 		}
 	}
 
+	// ── 5b. Replace `pending` → `finally` (before render and IIFE handling) ──
+	const editedRanges: [number, number][] = [];
+	replacePendingWithFinally(source, s, 0, source.length, editedRanges);
+
 	// ── 6. Render → return ──
+	const renderRanges: [number, number][] = [];
 	const renderRe = /(?<![.\w])\brender(?=[\s(<])/g;
 	while ((m = renderRe.exec(source)) !== null) {
 		if (inSkipRange(m.index)) continue;
+		if (editedRanges.some(([s, e]) => m!.index >= s && m!.index < e)) continue;
 		const renderStart = m.index;
 		const renderEnd = renderStart + 'render'.length;
 		let j = renderEnd;
@@ -260,9 +265,26 @@ export function preprocess(source: string): PreprocessResult {
 				s.overwrite(renderStart, renderEnd, 'return');
 				s.appendLeft(j + 1, '<>');
 				s.prependRight(closePos, '</>');
+			} else if (trimmedInner.startsWith('{')) {
+				// Root-level expression block: replace {CF} with IIFE directly
+				// The outer {} are DarTsx markers, not JSX expression containers
+				s.overwrite(renderStart, renderEnd, 'return');
+				const bracePos = j + 1 + inner.indexOf('{');
+				const closeBracePos = findMatchingBrace(source, bracePos);
+				s.overwrite(bracePos, bracePos + 1, '(() => {');
+				s.overwrite(closeBracePos, closeBracePos + 1, '})()');
+				// Process inner content (strip for clauses, rewrite paren bodies)
+				stripForClauses(source, s, bracePos + 1, closeBracePos);
+				rewriteParenBodies(source, s, bracePos + 1, closeBracePos, editedRanges);
+				wrapMultiRootParenBodies(source, s, bracePos + 1, closeBracePos);
+				editedRanges.push([bracePos, bracePos + 1]);
+				editedRanges.push([closeBracePos, closeBracePos + 1]);
+				// Still register as render range for nested JSX expressions
+				renderRanges.push([bracePos + 1, closeBracePos]);
 			} else {
 				s.overwrite(renderStart, renderEnd, 'return');
 			}
+			renderRanges.push([j + 1, closePos]);
 		} else {
 			// render <jsx> or render expr → return ...
 			s.overwrite(renderStart, renderEnd, 'return');
@@ -286,14 +308,16 @@ export function preprocess(source: string): PreprocessResult {
 		styleBlocks.push({ css, isGlobal, markerName });
 
 		s.overwrite(m.index, fullEnd, `<${markerName} />`);
+		editedRanges.push([m.index, fullEnd]);
 	}
 
 	// ── 8. Bind shorthand ──
-	// bind:{x} → bind:value={x}
+	// bind:{x} → bind:x={x}
 	const bindShortRe = /bind:\{(\w+)\}/g;
 	while ((m = bindShortRe.exec(source)) !== null) {
 		if (inSkipRange(m.index)) continue;
-		s.overwrite(m.index, m.index + m[0].length, `bind:value={${m[1]}}`);
+		s.overwrite(m.index, m.index + m[0].length, `bind:${m[1]}={${m[1]}}`);
+		editedRanges.push([m.index, m.index + m[0].length]);
 	}
 
 	// ── 9. Function bindings ──
@@ -308,13 +332,12 @@ export function preprocess(source: string): PreprocessResult {
 		if (hasTopLevelComma(inner)) {
 			s.appendLeft(openBrace + 1, '[');
 			s.prependRight(closeBrace, ']');
+			editedRanges.push([openBrace, closeBrace + 1]);
 		}
 	}
 
-	// ── 10. Control flow blocks ──
-	// Must scan original source for `{if`, `{for`, `{switch`, `{try` in JSX context
-	// and overwrite each block with the transformed call expression.
-	transformControlFlow(source, s);
+	// ── 11. Wrap all JSX expressions in IIFEs ──
+	wrapJSXExpressionsInIIFEs(source, s, editedRanges, renderRanges);
 
 	const code = s.toString();
 	const map = s.generateMap({ hires: true });
@@ -322,14 +345,28 @@ export function preprocess(source: string): PreprocessResult {
 	return { code, map, components, stateVars, derivedVars, renamedParams, styleBlocks };
 }
 
-// ── Control flow transformation ────────────────────────────────────
+// ── IIFE wrapping ──────────────────────────────────────────────────
 
 /**
- * Find and transform all JSX control flow blocks using the MagicString instance.
- * Scans the original source for `{if`, `{for`, `{switch`, `{try` blocks and
- * overwrites them with `{__if(...)}`, `{__for(...)}`, etc.
+ * Wrap every JSX expression `{...}` in an IIFE: `{(() => { ... })()}`
+ * Also wraps multi-root paren bodies in fragments: `(a b)` → `(<>a b</>)`
+ * Only operates within render block ranges.
  */
-function transformControlFlow(source: string, s: MagicString): void {
+function wrapJSXExpressionsInIIFEs(source: string, s: MagicString, editedRanges: [number, number][], renderRanges: [number, number][]): void {
+	function inEditedRange(pos: number): boolean {
+		for (const [start, end] of editedRanges) {
+			if (pos >= start && pos < end) return true;
+		}
+		return false;
+	}
+
+	function inRenderRange(pos: number): boolean {
+		for (const [start, end] of renderRanges) {
+			if (pos >= start && pos <= end) return true;
+		}
+		return false;
+	}
+
 	let i = 0;
 	while (i < source.length) {
 		if (source[i] === "'" || source[i] === '"') { i = skipString(source, i); continue; }
@@ -338,15 +375,85 @@ function transformControlFlow(source: string, s: MagicString): void {
 		if (source[i] === '/' && source[i + 1] === '*') { i = skipBlockComment(source, i); continue; }
 
 		if (source[i] === '{') {
-			const result = tryParseCFBlock(source, i);
-			if (result) {
-				let text = result.text;
-				// If the CF block is inside `return (` context (not JSX), strip outer { }
-				if (text.startsWith('{') && text.endsWith('}') && isCFInsideReturnParen(source, i)) {
-					text = text.slice(1, -1);
+			if (inEditedRange(i)) { i++; continue; }
+			if (inRenderRange(i)) {
+				if (isJSXExpressionContext(source, i)) {
+					const closeBrace = findMatchingBrace(source, i);
+					if (closeBrace > i) {
+						// Skip spread attributes: {...expr}
+						const inner = source.slice(i + 1, closeBrace).trimStart();
+						if (inner.startsWith('...')) { i = closeBrace + 1; continue; }
+						// @html directive: {@html expr} → {__html(expr)}
+						if (inner.startsWith('@html')) {
+							const expr = inner.slice(5).trim();
+							s.overwrite(i, closeBrace + 1, `{__html(${expr})}`);
+							i = closeBrace + 1;
+							continue;
+						}
+						s.appendLeft(i + 1, '(() => {');
+						s.prependRight(closeBrace, '})()');
+						// Strip `; index <var>` and `; key <expr>` from for-loop headers
+						stripForClauses(source, s, i + 1, closeBrace);
+						// Rewrite paren bodies to block bodies with return
+						rewriteParenBodies(source, s, i + 1, closeBrace, editedRanges);
+						// Fragment-wrap multi-root paren bodies inside this expression
+						wrapMultiRootParenBodies(source, s, i + 1, closeBrace);
+						// Continue scanning inside for nested JSX expressions
+						i++;
+						continue;
+					}
+				} else {
+					// In render range but not a JSX expression.
+					// Skip object literals (preceded by { or =) to avoid wrapping their contents.
+					// But for control flow bodies (else, try, etc.), just advance past the brace char.
+					let k = i - 1;
+					while (k >= 0 && /\s/.test(source[k])) k--;
+					const pc = k >= 0 ? source[k] : '';
+					if (pc === '{' || pc === '=' || pc === '(') {
+						const closeBrace = findMatchingBrace(source, i);
+						if (closeBrace > i) { i = closeBrace + 1; continue; }
+					}
 				}
-				s.overwrite(i, result.end, text);
-				i = result.end;
+			}
+		}
+		i++;
+	}
+}
+
+/**
+ * Find paren bodies `(...)` inside a range that contain multiple JSX roots
+ * and wrap their content in `<>...</>`.
+ */
+function wrapMultiRootParenBodies(source: string, s: MagicString, start: number, end: number): void {
+	let i = start;
+	while (i < end) {
+		const ch = source[i];
+		if (ch === "'" || ch === '"' || ch === '`') { i = skipString(source, i); continue; }
+		if (ch === '/' && source[i + 1] === '/') { i = skipLineComment(source, i); continue; }
+		if (ch === '/' && source[i + 1] === '*') { i = skipBlockComment(source, i); continue; }
+		if (ch === '{') {
+			const close = findMatchingBrace(source, i);
+			if (close > i) {
+				// Only recurse into non-JSX-expression braces (control flow bodies, etc.)
+				// JSX expression braces get their own wrapMultiRootParenBodies call from the main scan
+				if (!isJSXExpressionContext(source, i)) {
+					wrapMultiRootParenBodies(source, s, i + 1, close);
+				}
+				i = close + 1;
+				continue;
+			}
+		}
+		if (ch === '(') {
+			const closeParen = findMatchingParen(source, i);
+			if (closeParen > i && closeParen < end) {
+				const inner = source.slice(i + 1, closeParen).trim();
+				if (inner.startsWith('<') && !isSingleJSXRoot(inner)) {
+					s.appendLeft(i + 1, '<>');
+					s.prependRight(closeParen, '</>');
+				}
+				// Recurse inside paren body
+				wrapMultiRootParenBodies(source, s, i + 1, closeParen);
+				i = closeParen + 1;
 				continue;
 			}
 		}
@@ -355,62 +462,272 @@ function transformControlFlow(source: string, s: MagicString): void {
 }
 
 /**
- * Check if a `{` at position `pos` is the sole content inside a `return (...)`.
- * This means the CF call should not be wrapped in `{}` since it's a direct expression.
- */
-function isCFInsideReturnParen(source: string, pos: number): boolean {
-	// Look backwards: skip whitespace, expect `(`
-	let k = pos - 1;
-	while (k >= 0 && /\s/.test(source[k])) k--;
-	if (k < 0 || source[k] !== '(') return false;
-	// Before `(`, skip whitespace, expect `return` (or just-modified to `return`)
-	k--;
-	while (k >= 0 && /\s/.test(source[k])) k--;
-	if (k < 5) return false;
-	const word = source.slice(k - 5, k + 1);
-	if (word !== 'return' && word !== 'render') return false;
-	// Also check that the closing `}` of the CF block aligns with the closing `)` of `return (...)`
-	// (i.e., the CF block is the only content inside the parens)
-	const closeBrace = findMatchingBrace(source, pos);
-	let after = closeBrace + 1;
-	while (after < source.length && /\s/.test(source[after])) after++;
-	return after < source.length && source[after] === ')';
-}
+ * Strip `; index <var>` and `; key <expr>` clauses from for-loop headers.
+ * Scans for `for` keyword(s) in the range and removes the custom clauses.
+ * `for (const x of items; index i; key x.id)` → `for (const x of items)`
+/** Handle `pending` clauses: inject `let __pending = () => {BODY}` into the try block */
+function replacePendingWithFinally(source: string, s: MagicString, start: number, end: number, editedRanges?: [number, number][]): void {
+	const pendingRe = /[})]\s*pending\s*[{(]/g;
+	pendingRe.lastIndex = start;
+	let m: RegExpExecArray | null;
+	while ((m = pendingRe.exec(source)) !== null) {
+		if (m.index >= end) break;
+		const tryBlockClosePos = m.index; // } or ) that closes the try block
+		const pendingKwStart = source.indexOf('pending', m.index);
+		let pendingBlockStart = pendingKwStart + 7;
+		while (pendingBlockStart < end && /\s/.test(source[pendingBlockStart])) pendingBlockStart++;
+		const isParen = source[pendingBlockStart] === '(';
+		const pendingBlockEnd = isParen
+			? findMatchingParen(source, pendingBlockStart)
+			: findMatchingBrace(source, pendingBlockStart);
 
-// ── JSX block detection ────────────────────────────────────────────
+		// Extract pending body and replace `render` with `return`
+		let pendingBody = source.slice(pendingBlockStart + 1, pendingBlockEnd);
+		const renderKwRe = /(?<![.\w])\brender(?=[\s(<])/g;
+		pendingBody = pendingBody.replace(renderKwRe, 'return');
+		// For paren-body pending (single expression), add return
+		if (isParen) pendingBody = `return (${pendingBody})`;
 
-interface CFResult {
-	text: string;
-	end: number;
+		// Build the __pending declaration
+		const pendingDecl = `let __pending = () => {${pendingBody}};`;
+
+		// Find the try block's opening
+		const tryBlockClose = source[tryBlockClosePos];
+		if (tryBlockClose === '}') {
+			// Brace-body try: inject __pending at start of block
+			const tryBlockOpenPos = findMatchingBraceBackward(source, tryBlockClosePos);
+			s.appendLeft(tryBlockOpenPos + 1, pendingDecl);
+			// Remove pending clause text between try close and pending block end
+			// Use individual small overwrites to avoid conflicting with later edits
+			// Overwrite from after } to end of pending block (the gap + pending keyword + pending body)
+			s.overwrite(tryBlockClosePos + 1, pendingBlockEnd + 1, '');
+			editedRanges?.push([tryBlockClosePos + 1, pendingBlockEnd + 1]);
+		} else {
+			// Paren-body try: convert using small targeted edits
+			// Source: try (EXPR) pending (PEND) ...
+			// Target: try { __pending decl; return (EXPR) } ...
+			const tryBlockOpenPos = findMatchingParenBackward(source, tryBlockClosePos);
+			// 1. Replace opening ( with { + __pending decl + return (
+			s.overwrite(tryBlockOpenPos, tryBlockOpenPos + 1, `{ ${pendingDecl} return (`);
+			// 2. Replace ) pending (PEND) with ) }
+			s.overwrite(tryBlockClosePos, pendingBlockEnd + 1, ') }');
+			editedRanges?.push([tryBlockOpenPos, tryBlockOpenPos + 1]);
+			editedRanges?.push([tryBlockClosePos, pendingBlockEnd + 1]);
+		}
+	}
 }
 
 /**
- * Attempts to parse a `{...}` block as a JSX control flow expression.
- * Returns null if the block is not a CF block (plain expression, function body, etc.)
+ * Strip `; index <var>` and `; key <expr>` clauses from for-loop headers.
+ * Injects `let i = 0;` and `x.id;` at the start of the for-loop body.
  */
-function tryParseCFBlock(code: string, openBrace: number): CFResult | null {
-	if (!isJSXExpressionContext(code, openBrace)) return null;
+function stripForClauses(source: string, s: MagicString, start: number, end: number): void {
+	let pos = start;
+	while (pos < end) {
+		// Skip strings/comments
+		if (source[pos] === "'" || source[pos] === '"') { pos = skipString(source, pos); continue; }
+		if (source[pos] === '`') { pos = skipTemplateLiteral(source, pos); continue; }
+		if (source[pos] === '/' && source[pos + 1] === '/') { pos = skipLineComment(source, pos); continue; }
+		if (source[pos] === '/' && source[pos + 1] === '*') { pos = skipBlockComment(source, pos); continue; }
 
-	const outerClose = findMatchingBrace(code, openBrace);
-	const content = code.slice(openBrace + 1, outerClose).trim();
-	if (!content) return null;
+		// Skip nested brace blocks (they get their own stripForClauses call)
+		if (source[pos] === '{') {
+			const close = findMatchingBrace(source, pos);
+			if (close > pos) { pos = close + 1; continue; }
+		}
 
-	if (/^if\s*\(/.test(content)) return tryParseIfBlock(code, openBrace, outerClose);
-	if (/^for\s*\(/.test(content)) return tryParseForBlock(code, openBrace, outerClose);
-	if (/^switch\s*\(/.test(content)) return tryParseSwitchBlock(code, openBrace, outerClose);
-	if (/^try\s*[({]/.test(content)) return tryParseTryBlock(code, openBrace, outerClose);
+		// Look for `for` keyword at top level only
+		if (source[pos] === 'f' && /^for\s*[\s(]/.test(source.slice(pos, pos + 10))) {
+			let p = pos + 3;
+			while (p < end && /\s/.test(source[p])) p++;
+			if (p < end && source[p] === '(') {
+				const closeParen = findMatchingParen(source, p);
+				if (closeParen > p && closeParen < end) {
+					const header = source.slice(p + 1, closeParen);
+					const clauseRe = /;\s*(index|key)\s+/g;
+					let firstClauseIdx = -1;
+					let indexVar: string | undefined;
+					let keyExpr: string | undefined;
+					let clauseMatch;
 
-	// Block with variable declarations → __block
-	if (/^(?:const |let |var )/.test(content)) return tryParseBlock(content, outerClose);
+					while ((clauseMatch = clauseRe.exec(header)) !== null) {
+						if (firstClauseIdx === -1) firstClauseIdx = clauseMatch.index;
+						const afterKw = clauseMatch.index + clauseMatch[0].length;
+						if (clauseMatch[1] === 'index') {
+							const varMatch = header.slice(afterKw).match(/^([A-Za-z_$][\w$]*)/);
+							if (varMatch) indexVar = varMatch[1];
+						} else if (clauseMatch[1] === 'key') {
+							const nextSemi = header.indexOf(';', afterKw);
+							const exprEnd = nextSemi !== -1 ? nextSemi : header.length;
+							keyExpr = header.slice(afterKw, exprEnd).trim();
+						}
+					}
 
-	// {@html expr} → {__html(expr)}
-	const htmlMatch = content.match(/^@html\s+/);
-	if (htmlMatch) {
-		const expr = content.slice(htmlMatch[0].length).trim();
-		return { text: `{__html(${expr})}`, end: outerClose + 1 };
+					if (firstClauseIdx !== -1) {
+						// Remove the clauses from the header (up to but not including `)`)
+						const removeStart = p + 1 + firstClauseIdx;
+						s.overwrite(removeStart, closeParen, '');
+						// Find the for-loop body start to inject declarations
+						let bodyStart = closeParen + 1;
+						while (bodyStart < end && /\s/.test(source[bodyStart])) bodyStart++;
+
+						let inject = '';
+						if (indexVar) inject += `let ${indexVar} = 0; `;
+						if (keyExpr) inject += `${keyExpr}; `;
+
+						if (inject && source[bodyStart] === '{') {
+							// Block body: inject after `{`
+							s.appendLeft(bodyStart + 1, ' ' + inject);
+						} else if (inject && source[bodyStart] === '(') {
+							// Paren body: rewriteParenBodies will convert to { return ... }
+							// We need to inject before the return, so prepend to the paren body
+							// rewriteParenBodies will add `{ return` before `(` and `}` after `)`
+							// So inject BEFORE the `(` as a block prefix that rewriteParenBodies will include
+							s.appendLeft(bodyStart, '{ ' + inject + 'return ');
+							const bodyClose = findMatchingParen(source, bodyStart);
+							if (bodyClose > bodyStart) {
+								s.appendLeft(bodyClose + 1, ' }');
+							}
+						}
+					}
+
+					pos = closeParen + 1;
+					continue;
+				}
+			}
+		}
+		pos++;
+	}
+}
+
+/**
+ * Rewrite paren-body control flow to block-body with return.
+ * `if (cond) (<jsx>)` → `if (cond) { return (<jsx>) }`
+ */
+function rewriteParenBodies(source: string, s: MagicString, start: number, end: number, editedRanges?: [number, number][]): void {
+	let pos = start;
+
+	function inEdited(offset: number): boolean {
+		if (!editedRanges) return false;
+		for (const [s, e] of editedRanges) {
+			if (offset >= s && offset < e) return true;
+		}
+		return false;
 	}
 
-	return null;
+	function wrapParenBody(): boolean {
+		if (pos >= end || source[pos] !== '(') return false;
+		if (inEdited(pos)) {
+			// Skip past matching paren without editing
+			const cp = findMatchingParen(source, pos);
+			if (cp !== -1) pos = cp + 1;
+			return true;
+		}
+		const closeParen = findMatchingParen(source, pos);
+		if (closeParen === -1 || closeParen > end) return false;
+		s.appendLeft(pos, '{ return ');
+		s.prependLeft(closeParen + 1, '}');
+		pos = closeParen + 1;
+		return true;
+	}
+
+	function skipWs(): void {
+		while (pos < end && /\s/.test(source[pos])) pos++;
+	}
+
+	function skipParens(): boolean {
+		if (pos >= end || source[pos] !== '(') return false;
+		const close = findMatchingParen(source, pos);
+		if (close === -1 || close >= end) return false;
+		pos = close + 1;
+		return true;
+	}
+
+	function handleBody(): boolean {
+		skipWs();
+		if (pos >= end) return false;
+		if (inEdited(pos)) {
+			// Skip past edited region
+			if (source[pos] === '(') { const cp = findMatchingParen(source, pos); if (cp !== -1) pos = cp + 1; return true; }
+			if (source[pos] === '{') { const cb = findMatchingBrace(source, pos); if (cb !== -1) pos = cb + 1; return true; }
+			return false;
+		}
+		if (source[pos] === '(') return wrapParenBody();
+		if (source[pos] === '{') {
+			const closeBlock = findMatchingBrace(source, pos);
+			if (closeBlock !== -1) {
+				// Recurse into block body to rewrite nested paren bodies
+				rewriteParenBodies(source, s, pos + 1, closeBlock, editedRanges);
+				pos = closeBlock + 1;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	while (pos < end) {
+		skipWs();
+		if (pos >= end) break;
+
+		const slice = source.slice(pos, pos + 10);
+
+		if (/^(if|for|while)\s*[\s(]/.test(slice)) {
+			const kwEnd = source.indexOf('(', pos);
+			if (kwEnd === -1 || kwEnd >= end) break;
+			pos = kwEnd;
+			// For for-loops with ; index/key clauses, stripForClauses already handled the body
+			if (/^for\s/.test(slice)) {
+				const headerClose = findMatchingParen(source, pos);
+				if (headerClose === -1 || headerClose >= end) break;
+				const header = source.slice(pos + 1, headerClose);
+				if (/;\s*(index|key)\s+/.test(header)) {
+					pos = headerClose + 1;
+					// stripForClauses handled the for body conversion,
+					// but enter the body to process nested paren bodies
+					skipWs();
+					if (source[pos] === '{') {
+						pos++; // enter the block body
+					} else if (source[pos] === '(') {
+						// paren body already handled by stripForClauses
+						const cp = findMatchingParen(source, pos);
+						if (cp !== -1) pos = cp + 1;
+					}
+					continue;
+				}
+			}
+			if (!skipParens()) break;
+			if (!handleBody()) break;
+		} else if (/^else/.test(slice)) {
+			pos += 4;
+			skipWs();
+			if (pos >= end) break;
+			if (/^if\s*\(/.test(source.slice(pos, pos + 10))) continue;
+			if (!handleBody()) break;
+		} else if (/^try/.test(slice)) {
+			pos += 3;
+			if (!handleBody()) break;
+		} else if (/^catch/.test(slice)) {
+			pos += 5;
+			skipWs();
+			skipParens();
+			if (!handleBody()) break;
+		} else if (/^pending/.test(slice)) {
+			pos += 7;
+			if (!handleBody()) break;
+		} else if (/^switch/.test(slice)) {
+			const kwEnd = source.indexOf('(', pos);
+			if (kwEnd === -1 || kwEnd >= end) break;
+			pos = kwEnd;
+			if (!skipParens()) break;
+			skipWs();
+			if (source[pos] === '{') {
+				const closeBlock = findMatchingBrace(source, pos);
+				if (closeBlock !== -1) { pos = closeBlock + 1; } else break;
+			} else break;
+		} else {
+			break;
+		}
+	}
 }
 
 /**
@@ -424,11 +741,15 @@ function isJSXExpressionContext(code: string, openBrace: number): boolean {
 
 	const pc = code[k];
 
+	// Attribute value: attr={expr}
+	if (pc === '=') return false;
 	// Function/arrow/if/for body
+	if (pc === '(') return false;
 	if (pc === ')') return false;
 	if (pc === '>' && k > 0 && code[k - 1] === '=') return false;
 	if (/\belse$/.test(code.slice(Math.max(0, k - 4), k + 1))) return false;
 	if (/\btry$/.test(code.slice(Math.max(0, k - 2), k + 1))) return false;
+	if (/\bpending$/.test(code.slice(Math.max(0, k - 6), k + 1))) return false;
 
 	// case/default label
 	if (pc === ':') {
@@ -472,581 +793,6 @@ function isJSXExpressionContext(code: string, openBrace: number): boolean {
 
 	return true;
 }
-
-// ── If block ───────────────────────────────────────────────────────
-
-function tryParseIfBlock(code: string, outerBrace: number, outerClose: number): CFResult | null {
-	const content = code.slice(outerBrace + 1, outerClose).trim();
-	if (!content.startsWith('if')) return null;
-
-	const withReturns = transformRendersInText(content);
-	const transformed = transformCFInText(withReturns);
-
-	const output = parseIfChain(transformed);
-	if (!output) return null;
-
-	return { text: `{${output}}`, end: outerClose + 1 };
-}
-
-function parseIfChain(text: string): string | null {
-	let pos = 0;
-	if (text.slice(pos, pos + 2) !== 'if') return null;
-	pos += 2;
-	while (pos < text.length && /\s/.test(text[pos])) pos++;
-
-	if (text[pos] !== '(') return null;
-	const condEnd = findMatchingParen(text, pos);
-	const condition = text.slice(pos + 1, condEnd);
-	pos = condEnd + 1;
-	while (pos < text.length && /\s/.test(text[pos])) pos++;
-
-	const trueBranch = extractBody(text, pos);
-	if (!trueBranch) return null;
-	pos = trueBranch.end;
-	while (pos < text.length && /\s/.test(text[pos])) pos++;
-
-	if (pos < text.length && text.slice(pos, pos + 4) === 'else' && !/\w/.test(text[pos + 4] || '')) {
-		pos += 4;
-		while (pos < text.length && /\s/.test(text[pos])) pos++;
-
-		if (text.slice(pos, pos + 2) === 'if') {
-			const nestedCall = parseIfChain(text.slice(pos));
-			if (!nestedCall) return null;
-			return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, () => ${nestedCall})`;
-		}
-
-		const falseBranch = extractBody(text, pos);
-		if (!falseBranch) return null;
-		return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)}, ${buildCFCallback(falseBranch.body)})`;
-	}
-
-	return `__if(() => (${condition}), ${buildCFCallback(trueBranch.body)})`;
-}
-
-// ── For block ──────────────────────────────────────────────────────
-
-function tryParseForBlock(code: string, outerBrace: number, outerClose: number): CFResult | null {
-	const content = code.slice(outerBrace + 1, outerClose).trim();
-	if (!content.startsWith('for')) return null;
-
-	const parenStart = content.indexOf('(');
-	if (parenStart === -1) return null;
-	const parenEnd = findMatchingParen(content, parenStart);
-	const fullHeader = content.slice(parenStart + 1, parenEnd).trim();
-
-	const bodyText = content.slice(parenEnd + 1).trim();
-	let transformedBody: string;
-	if (bodyText.startsWith('{') && bodyText.endsWith('}')) {
-		const inner = bodyText.slice(1, -1);
-		const trimmedInner = inner.trim();
-		if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(trimmedInner)) {
-			const withReturns = transformRendersInText(trimmedInner);
-			const cfExpr = transformDirectCF(withReturns);
-			const startIdx = inner.indexOf(trimmedInner);
-			transformedBody = `{${inner.slice(0, startIdx)}${cfExpr}${inner.slice(startIdx + trimmedInner.length)}}`;
-		} else {
-			transformedBody = `{${transformCFInText(transformRendersInText(inner))}}`;
-		}
-	} else if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(bodyText.trim())) {
-		// Bare CF as for-body (no wrapping braces) — transform directly
-		const withReturns = transformRendersInText(bodyText);
-		transformedBody = transformDirectCF(withReturns);
-	} else {
-		transformedBody = transformCFInText(transformRendersInText(bodyText));
-	}
-
-	// Try parsing as standard for statement
-	const forSource = `for (${fullHeader}) {}`;
-	const fullResult = oxcParseSync('for-block.tsx', forSource, { sourceType: 'script', lang: 'tsx' });
-
-	if (fullResult.errors.length === 0 && fullResult.program.body.length > 0) {
-		const forStmt = fullResult.program.body[0];
-
-		if (forStmt.type === 'ForInStatement') {
-			const leftSource = forSource.slice(forStmt.left.start, forStmt.left.end);
-			const objectExpr = forSource.slice(forStmt.right.start, forStmt.right.end);
-			const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
-			return { text: `{__for(() => (Object.keys(${objectExpr})), ${buildCFCallback(transformedBody, paramPattern)})}`, end: outerClose + 1 };
-		}
-
-		if (forStmt.type === 'ForStatement') {
-			const initSrc = forStmt.init ? forSource.slice(forStmt.init.start, forStmt.init.end) : '';
-			const testSrc = forStmt.test ? forSource.slice(forStmt.test.start, forStmt.test.end) : '';
-			const updateSrc = forStmt.update ? forSource.slice(forStmt.update.start, forStmt.update.end) : '';
-			let loopVar = '__i';
-			if (forStmt.init && forStmt.init.type === 'VariableDeclaration') {
-				const firstDecl = forStmt.init.declarations[0];
-				if (firstDecl && firstDecl.id.type === 'Identifier') loopVar = firstDecl.id.name;
-			} else if (forStmt.init && forStmt.init.type === 'AssignmentExpression' && forStmt.init.left.type === 'Identifier') {
-				loopVar = forStmt.init.left.name;
-			}
-			const collectionFn = `{ const __a = []; for (${initSrc}; ${testSrc}; ${updateSrc}) __a.push(${loopVar}); return __a; }`;
-			return { text: `{__for(() => ${collectionFn}, ${buildCFCallback(transformedBody, loopVar)})}`, end: outerClose + 1 };
-		}
-
-		if (forStmt.type === 'ForOfStatement') {
-			const leftSource = forSource.slice(forStmt.left.start, forStmt.left.end);
-			const collection = forSource.slice(forStmt.right.start, forStmt.right.end);
-			const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
-			return { text: `{__for(() => (${collection}), ${buildCFCallback(transformedBody, paramPattern)})}`, end: outerClose + 1 };
-		}
-	}
-
-	// DarTsx extensions: for (const item of items; key expr; index i)
-	const parts = fullHeader.split(';').map((p) => p.trim());
-	const mainPart = parts[0];
-	let indexName: string | null = null;
-	let keyExpr: string | null = null;
-	for (let k = 1; k < parts.length; k++) {
-		const part = parts[k];
-		if (part.startsWith('index ')) indexName = part.slice(6).trim();
-		else if (part.startsWith('key ')) keyExpr = part.slice(4).trim();
-	}
-
-	const forOfSource = `for (${mainPart}) {}`;
-	const forOfResult = oxcParseSync('for-block.tsx', forOfSource, { sourceType: 'script', lang: 'tsx' });
-	if (forOfResult.errors.length > 0 || forOfResult.program.body.length === 0) return null;
-
-	const forOfStmt = forOfResult.program.body[0];
-	if (forOfStmt.type !== 'ForOfStatement') return null;
-
-	const leftSource = forOfSource.slice(forOfStmt.left.start, forOfStmt.left.end);
-	const collection = forOfSource.slice(forOfStmt.right.start, forOfStmt.right.end);
-	const paramPattern = leftSource.replace(/^(?:const|let|var)\s+/, '');
-
-	const params = indexName ? `${paramPattern}, ${indexName}` : paramPattern;
-	const callback = buildCFCallback(transformedBody, params);
-	let text: string;
-	if (keyExpr) {
-		const lineStart = code.lastIndexOf('\n', outerBrace);
-		const outerIndent = lineStart >= 0 ? (code.slice(lineStart + 1, outerBrace).match(/^(\s*)/) || ['', ''])[1] : '';
-		const bodyIndent = outerIndent + '  ';
-		text = `{__for(() => (${collection}), ${callback},\n${bodyIndent}(${paramPattern}) => (${keyExpr})\n${outerIndent})}`;
-	} else {
-		text = `{__for(() => (${collection}), ${callback})}`;
-	}
-
-	return { text, end: outerClose + 1 };
-}
-
-// ── Switch block ───────────────────────────────────────────────────
-
-function tryParseSwitchBlock(code: string, outerBrace: number, outerClose: number): CFResult | null {
-	const content = code.slice(outerBrace + 1, outerClose).trim();
-	if (!content.startsWith('switch')) return null;
-
-	const outerLineStart = code.lastIndexOf('\n', outerBrace);
-	const closeIndent = outerLineStart >= 0 ? (code.slice(outerLineStart + 1, outerBrace).match(/^(\s*)/) || ['', ''])[1] : '';
-
-	const transformed = transformCFInText(transformRendersInText(content));
-
-	let src = transformed;
-	let result = oxcParseSync('switch-block.tsx', src, { sourceType: 'script', lang: 'tsx' });
-	if (result.errors.length > 0) {
-		src = `function __(){${transformed}}`;
-		result = oxcParseSync('switch-block.tsx', src, { sourceType: 'script', lang: 'tsx' });
-		if (result.errors.length > 0) return null;
-		const fnDecl = result.program.body[0];
-		if (!fnDecl || fnDecl.type !== 'FunctionDeclaration' || !fnDecl.body) return null;
-		const firstStmt = fnDecl.body.body[0];
-		if (!firstStmt || firstStmt.type !== 'SwitchStatement') return null;
-		const discriminant = src.slice(firstStmt.discriminant.start, firstStmt.discriminant.end);
-		return buildSwitchOutput(src, firstStmt, discriminant, outerClose, closeIndent);
-	}
-
-	const firstStmt = result.program.body[0];
-	if (!firstStmt || firstStmt.type !== 'SwitchStatement') return null;
-	const discriminant = src.slice(firstStmt.discriminant.start, firstStmt.discriminant.end);
-	return buildSwitchOutput(src, firstStmt, discriminant, outerClose, closeIndent);
-}
-
-function buildSwitchOutput(source: string, switchStmt: SwitchStatement, discriminant: string, outerClose: number, closeIndent: string): CFResult {
-	const switchCases = switchStmt.cases || [];
-
-	const groups: { values: string[]; isDefault: boolean; body: string; bodyPrefix: string }[] = [];
-	let pendingValues: string[] = [];
-	let pendingDefault = false;
-
-	for (let ci = 0; ci < switchCases.length; ci++) {
-		const sc = switchCases[ci];
-		if (sc.test) pendingValues.push(source.slice(sc.test.start, sc.test.end));
-		else pendingDefault = true;
-
-		const consequent = sc.consequent || [];
-		const bodyStmts = consequent.filter((st) => st.type !== 'BreakStatement' && st.type !== 'ReturnStatement');
-		const hasBreak = consequent.some((st) => st.type === 'BreakStatement');
-		const hasReturn = consequent.some((st) => st.type === 'ReturnStatement');
-		const isLast = ci === switchCases.length - 1;
-
-		if (bodyStmts.length > 0 || hasBreak || hasReturn || isLast) {
-			let body = '';
-			let bodyPrefix = '';
-			const allBodyStmts = hasReturn ? consequent.filter((st) => st.type !== 'BreakStatement') : bodyStmts;
-			if (allBodyStmts.length > 0) {
-				const start = allBodyStmts[0].start;
-				const end = allBodyStmts[allBodyStmts.length - 1].end;
-				body = source.slice(start, end);
-				const caseEnd = sc.test ? sc.test.end : sc.start + 7;
-				const between = source.slice(caseEnd, start);
-				const nlIdx = between.indexOf('\n');
-				if (nlIdx >= 0) bodyPrefix = between.slice(nlIdx);
-			}
-
-			groups.push({ values: [...pendingValues], isDefault: pendingDefault, body: body.trim(), bodyPrefix });
-			pendingValues = [];
-			pendingDefault = false;
-		}
-	}
-
-	let caseIndent = '  ';
-	if (switchCases.length > 0) {
-		const firstStart = switchCases[0].start;
-		const lineStart = source.lastIndexOf('\n', firstStart);
-		if (lineStart >= 0) {
-			const linePrefix = source.slice(lineStart + 1, firstStart);
-			const indent = linePrefix.match(/^(\s*)/);
-			if (indent) caseIndent = indent[1];
-		}
-	}
-	const bodyIndent = caseIndent + '  ';
-
-	const discArg = `() => (${discriminant})`;
-	const cases: string[] = [];
-	for (const g of groups) {
-		const valuesStr = g.isDefault ? 'null' : `[${g.values.join(', ')}]`;
-		let body = g.body;
-		if (/\breturn\b/.test(body)) {
-			const lines = body.split('\n').map(l => l.trimStart());
-			body = `{\n${bodyIndent}${lines.join('\n' + bodyIndent)}\n${caseIndent}}`;
-			cases.push(`${valuesStr}, ${buildCFCallback(body)}`);
-		} else if (g.bodyPrefix && body.startsWith('<')) {
-			cases.push(`${valuesStr}, () =>${g.bodyPrefix}${body}`);
-		} else {
-			cases.push(`${valuesStr}, ${buildCFCallback(body)}`);
-		}
-	}
-
-	const output = `__switch(${discArg},\n${caseIndent}${cases.join(',\n' + caseIndent)}\n${closeIndent})`;
-	return { text: `{${output}}`, end: outerClose + 1 };
-}
-
-// ── Try block ──────────────────────────────────────────────────────
-
-function tryParseTryBlock(code: string, outerBrace: number, outerClose: number): CFResult | null {
-	const content = code.slice(outerBrace + 1, outerClose).trim();
-	if (!content.startsWith('try')) return null;
-
-	let pos = 3;
-	while (pos < content.length && /\s/.test(content[pos])) pos++;
-
-	let tryBody: string;
-	if (content[pos] === '{') {
-		const tryBodyEnd = findMatchingBrace(content, pos);
-		tryBody = content.slice(pos, tryBodyEnd + 1);
-		pos = tryBodyEnd + 1;
-	} else if (content[pos] === '(') {
-		const tryBodyEnd = findMatchingParen(content, pos);
-		tryBody = content.slice(pos + 1, tryBodyEnd).trim();
-		pos = tryBodyEnd + 1;
-	} else {
-		return null;
-	}
-
-	let catchParam: string | null = null;
-	let catchBody: string | null = null;
-	let pendingBody: string | null = null;
-
-	while (pos < content.length) {
-		while (pos < content.length && /\s/.test(content[pos])) pos++;
-		if (pos >= content.length) break;
-		const remaining = content.slice(pos);
-
-		if (remaining.startsWith('pending')) {
-			pos += 7;
-			while (pos < content.length && /\s/.test(content[pos])) pos++;
-			if (content[pos] === '{') {
-				const pendEnd = findMatchingBrace(content, pos);
-				pendingBody = content.slice(pos, pendEnd + 1);
-				pos = pendEnd + 1;
-			} else if (content[pos] === '(') {
-				const pendEnd = findMatchingParen(content, pos);
-				pendingBody = content.slice(pos + 1, pendEnd).trim();
-				pos = pendEnd + 1;
-			} else return null;
-		} else if (remaining.startsWith('catch')) {
-			pos += 5;
-			while (pos < content.length && /\s/.test(content[pos])) pos++;
-			if (content[pos] === '(') {
-				const parenClose = findMatchingParen(content, pos);
-				catchParam = content.slice(pos + 1, parenClose).trim();
-				pos = parenClose + 1;
-			}
-			while (pos < content.length && /\s/.test(content[pos])) pos++;
-			if (content[pos] === '{') {
-				const catchEnd = findMatchingBrace(content, pos);
-				catchBody = content.slice(pos, catchEnd + 1);
-				pos = catchEnd + 1;
-			} else if (content[pos] === '(') {
-				const catchEnd = findMatchingParen(content, pos);
-				catchBody = content.slice(pos + 1, catchEnd).trim();
-				pos = catchEnd + 1;
-			} else return null;
-		} else break;
-	}
-
-	const xformBody = (b: string) => {
-		return b.startsWith('{')
-			? `{${transformCFInText(transformRendersInText(b.slice(1, -1)))}}`
-			: transformCFInText(transformRendersInText(b));
-	};
-
-	const transformedTryBody = xformBody(tryBody);
-	const transformedCatchBody = catchBody ? xformBody(catchBody) : null;
-	const transformedPendingBody = pendingBody ? xformBody(pendingBody) : null;
-
-	let call = `__try(${buildCFCallback(transformedTryBody)}`;
-	if (transformedCatchBody !== null) {
-		call += `, ${buildCFCallback(transformedCatchBody, catchParam || 'e')}`;
-	} else if (transformedPendingBody !== null) {
-		call += ', null';
-	}
-	if (transformedPendingBody !== null) {
-		call += `, ${buildCFCallback(transformedPendingBody)}`;
-	}
-	call += ')';
-
-	return { text: `{${call}}`, end: outerClose + 1 };
-}
-
-// ── Block scope ────────────────────────────────────────────────────
-
-function tryParseBlock(content: string, outerClose: number): CFResult | null {
-	let bodyIdx = -1;
-	let i = 0;
-	while (i < content.length) {
-		const ch = content[i];
-		if (ch === "'" || ch === '"') { i = skipString(content, i); continue; }
-		if (ch === '`') { i = skipTemplateLiteral(content, i); continue; }
-		if (ch === '{') { i = findMatchingBrace(content, i) + 1; continue; }
-		if (ch === '(') { i = findMatchingParen(content, i) + 1; continue; }
-
-		const tail = content.slice(i);
-		const wb = i === 0 || !/\w/.test(content[i - 1]);
-		if (wb && /^(?:if\s*\(|for\s*\(|switch\s*\(|try\s*[({]|(?:return|render)[\s(<])/.test(tail)) { bodyIdx = i; break; }
-		i++;
-	}
-	if (bodyIdx === -1) return null;
-
-	let preamble = content.slice(0, bodyIdx).trim();
-	const body = content.slice(bodyIdx).trim();
-	if (!preamble) return null;
-	if (!preamble.endsWith(';')) preamble += ';';
-
-	let finalBody: string;
-	if (body.startsWith('return') || body.startsWith('render')) {
-		// Replace 'render' with 'return' since we're operating on original source
-		finalBody = body.startsWith('render') ? 'return' + body.slice(6) : body;
-	} else if (/^(?:if|for|switch|try)\b/.test(body)) {
-		const cfExpr = transformDirectCF(body);
-		finalBody = `return (<>{${cfExpr}}</>)`;
-	} else {
-		return null;
-	}
-
-	return { text: `{__block(() => { ${preamble} ${finalBody} })}`, end: outerClose + 1 };
-}
-
-// ── Callback builder ───────────────────────────────────────────────
-
-function buildCFCallback(body: string, params?: string): string {
-	const arrow = params ? `(${params}) =>` : `() =>`;
-	const trimmed = body.trim();
-
-	if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-		const inner = trimmed.slice(1, -1).trim();
-		if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(inner)) {
-			const cfExpr = transformDirectCF(inner);
-			return `${arrow} (${cfExpr})`;
-		}
-		return `${arrow} ${body}`;
-	}
-
-	if (/^(?:if\s*\(|for\s*[\s(]|switch\s*\(|try\s*[({])/.test(trimmed)) {
-		const cfExpr = transformDirectCF(body);
-		return `${arrow} ${cfExpr}`;
-	}
-
-	if (trimmed.startsWith('<')) {
-		if (isSingleJSXRoot(body)) return `${arrow} ${body.trim()}`;
-		return `${arrow} (<>${body}</>)`;
-	}
-
-	if (trimmed.startsWith('(') && trimmed.endsWith(')')) return `${arrow} ${trimmed}`;
-
-	return `${arrow} (${body})`;
-}
-
-// ── Text-level render transform (for CF body text) ─────────────────
-
-function transformRendersInText(code: string): string {
-	let result = '';
-	let i = 0;
-
-	while (i < code.length) {
-		if (code[i] === '/' && code[i + 1] === '/') { const end = skipLineComment(code, i); result += code.slice(i, end); i = end; continue; }
-		if (code[i] === '/' && code[i + 1] === '*') { const end = skipBlockComment(code, i); result += code.slice(i, end); i = end; continue; }
-		if (code[i] === "'" || code[i] === '"') { const end = skipString(code, i); result += code.slice(i, end); i = end; continue; }
-		if (code[i] === '`') { const end = skipTemplateLiteral(code, i); result += code.slice(i, end); i = end; continue; }
-
-		if (
-			code.slice(i, i + 6) === 'render' &&
-			(i === 0 || (!/\w/.test(code[i - 1]) && code[i - 1] !== '.')) &&
-			/[\s(<]/.test(code[i + 6] || '')
-		) {
-			let j = i + 6;
-			while (j < code.length && /[ \t]/.test(code[j])) j++;
-
-			if (code[j] === '(') {
-				const closePos = findMatchingParen(code, j);
-				const content = code.slice(j + 1, closePos);
-				const inner = transformRendersInText(content);
-				if (isSingleJSXRoot(inner)) {
-					result += `return (${inner})`;
-				} else {
-					result += `return (<>${inner}</>)`;
-				}
-				i = closePos + 1;
-				continue;
-			} else if (code[j] === '<') {
-				const jsxEnd = findJSXElementEnd(code, j);
-				if (jsxEnd > j) {
-					result += `return ${transformRendersInText(code.slice(j, jsxEnd))}`;
-					i = jsxEnd;
-					continue;
-				}
-			} else if (code[j] && code[j] !== '{') {
-				const exprEnd = findExpressionEnd(code, j);
-				let expr = code.slice(j, exprEnd).replace(/[\s;]+$/, '');
-				result += `return ${expr}`;
-				i = exprEnd;
-				continue;
-			}
-		}
-
-		result += code[i];
-		i++;
-	}
-
-	return result;
-}
-
-// ── Direct CF transform (for known-CF text without JSX context) ────
-
-/**
- * Transforms a CF expression directly, bypassing JSX context detection.
- * Use when the text is known to be a CF block (if/for/switch/try).
- */
-function transformDirectCF(text: string): string {
-	const trimmed = text.trim();
-	if (/^if\s*\(/.test(trimmed)) {
-		const result = parseIfChain(transformCFInText(trimmed));
-		return result || text;
-	}
-	// Wrap in synthetic context so transformCFInText can find it
-	const wrapped = `>\n{${trimmed}}`;
-	const transformed = transformCFInText(wrapped);
-	// Strip the synthetic prefix
-	const braceStart = transformed.indexOf('{');
-	if (braceStart >= 0 && transformed.endsWith('}')) {
-		return transformed.slice(braceStart + 1, -1);
-	}
-	return text;
-}
-
-// ── Text-level CF transform (for nested CF in bodies) ──────────────
-
-function transformCFInText(code: string): string {
-	let result = '';
-	let i = 0;
-
-	while (i < code.length) {
-		if (code[i] === "'" || code[i] === '"') { const end = skipString(code, i); result += code.slice(i, end); i = end; continue; }
-		if (code[i] === '`') { const end = skipTemplateLiteral(code, i); result += code.slice(i, end); i = end; continue; }
-
-		if (code[i] === '{') {
-			const htmlMatch = code.slice(i).match(/^\{@html\s+/);
-			if (htmlMatch) {
-				const exprStart = i + htmlMatch[0].length;
-				const closeBrace = findMatchingBrace(code, i);
-				if (closeBrace > exprStart) {
-					const expr = code.slice(exprStart, closeBrace).trim();
-					result += `{__html(${expr})}`;
-					i = closeBrace + 1;
-					continue;
-				}
-			}
-
-			const parsed = tryParseCFBlockInText(code, i);
-			if (parsed) {
-				result += parsed.text;
-				i = parsed.end;
-				continue;
-			}
-		}
-
-		result += code[i];
-		i++;
-	}
-
-	return result;
-}
-
-function tryParseCFBlockInText(code: string, openBrace: number): CFResult | null {
-	if (!isJSXExpressionContext(code, openBrace)) return null;
-
-	const outerClose = findMatchingBrace(code, openBrace);
-	const content = code.slice(openBrace + 1, outerClose).trim();
-	if (!content) return null;
-
-	if (/^if\s*\(/.test(content)) return tryParseIfBlock(code, openBrace, outerClose);
-	if (/^for\s*\(/.test(content)) return tryParseForBlock(code, openBrace, outerClose);
-	if (/^switch\s*\(/.test(content)) return tryParseSwitchBlock(code, openBrace, outerClose);
-	if (/^try\s*[({]/.test(content)) return tryParseTryBlock(code, openBrace, outerClose);
-	if (/^(?:const |let |var )/.test(content)) return tryParseBlock(content, outerClose);
-
-	return null;
-}
-
-// ── Extract body helper ────────────────────────────────────────────
-
-function extractBody(text: string, pos: number): { body: string; end: number } | null {
-	if (pos >= text.length) return null;
-	const ch = text[pos];
-
-	if (ch === '{') {
-		const close = findMatchingBrace(text, pos);
-		return { body: text.slice(pos, close + 1), end: close + 1 };
-	}
-
-	if (ch === '(') {
-		const close = findMatchingParen(text, pos);
-		const raw = text.slice(pos + 1, close);
-		const trimmed = raw.trim();
-		if (trimmed.startsWith('<') && !isSingleJSXRoot(trimmed)) {
-			return { body: `(<>${raw}</>)`, end: close + 1 };
-		}
-		return { body: `(${raw})`, end: close + 1 };
-	}
-
-	if (ch === '<') {
-		const end = findJSXElementEnd(text, pos);
-		return { body: text.slice(pos, end), end };
-	}
-
-	const end = findExpressionEnd(text, pos);
-	return { body: text.slice(pos, end), end };
-}
-
 // ── Utility functions ──────────────────────────────────────────────
 
 function buildSkipRanges(src: string): [number, number][] {
@@ -1151,6 +897,32 @@ function findMatchingBracket(code: string, openPos: number): number {
 	return i - 1;
 }
 
+/** Find the matching opening `{` for a closing `}` by scanning backward */
+function findMatchingBraceBackward(code: string, closePos: number): number {
+	let depth = 1;
+	let i = closePos - 1;
+	while (i >= 0 && depth > 0) {
+		const ch = code[i];
+		if (ch === '}') depth++;
+		else if (ch === '{') depth--;
+		i--;
+	}
+	return i + 1;
+}
+
+/** Find the matching opening `(` for a closing `)` by scanning backward */
+function findMatchingParenBackward(code: string, closePos: number): number {
+	let depth = 1;
+	let i = closePos - 1;
+	while (i >= 0 && depth > 0) {
+		const ch = code[i];
+		if (ch === ')') depth++;
+		else if (ch === '(') depth--;
+		i--;
+	}
+	return i + 1;
+}
+
 function hasTopLevelComma(expr: string): boolean {
 	let depth = 0;
 	for (let i = 0; i < expr.length; i++) {
@@ -1162,22 +934,6 @@ function hasTopLevelComma(expr: string): boolean {
 		else if (ch === '`') i = skipTemplateLiteral(expr, i) - 1;
 	}
 	return false;
-}
-
-function findExpressionEnd(code: string, start: number): number {
-	let i = start;
-	let depth = 0;
-	while (i < code.length) {
-		const ch = code[i];
-		if (ch === '(' || ch === '[') { depth++; i++; continue; }
-		if (ch === ')' || ch === ']') { depth--; i++; continue; }
-		if (ch === "'" || ch === '"') { i = skipString(code, i); continue; }
-		if (ch === '`') { i = skipTemplateLiteral(code, i); continue; }
-		if (ch === ';') return i + 1;
-		if (ch === '\n' && depth === 0) return i;
-		i++;
-	}
-	return i;
 }
 
 function isSingleJSXRoot(code: string): boolean {

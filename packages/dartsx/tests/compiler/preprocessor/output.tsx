@@ -9,77 +9,76 @@ function Dashboard<T extends Record<string, unknown>>(user: { name: string, role
 
   return (
     <main>
-      {__if(() => (loading), () => (
+      {(() => {if (loading) { return (
         <p>Loading...</p>
-      ), () => __if(() => (error), () => {
+      )} else if (error) {
         const msg = error.toUpperCase();
-        return <p class="error">{msg}</p>
-      }, () => (
+        return <p class="error">{(() => {msg})()}</p>
+      } else { return (
         <section>
-          <h1>Welcome {user.name}</h1>
+          <h1>Welcome {(() => {user.name})()}</h1>
 
-					{__if(() => (true), () => (
+					{(() => {if (true) { return (
 						<div>test</div>
-					))}
+					)}})()}
 
-					{__if(() => (false), () => (
+					{(() => {if (false) { return (
 						<div>test</div>
-					), () => (
+					)} else { return (
 						<div>else test</div>
-					))}
+					)}})()}
 
 
-          {__switch(() => (user.role),
-            ['admin'], () => {
+          {(() => {switch (user.role) {
+            case 'admin':
               const badge = "[ADMIN]";
-              return <span class="badge">{badge}</span>
-            },
-            ['mod'], () =>
-              <span class="badge">MOD</span>,
-            null, () =>
+              return <span class="badge">{(() => {badge})()}</span>
+              break;
+            case 'mod':
+              <span class="badge">MOD</span>
+              break;
+            default:
               <span class="badge">USER</span>
-          )}
+          }})()}
 
-          {__for(() => (items), (item) => {
+          {(() => {for (const item of items) {
             return (
               <div class="item">
-                {__if(() => (item.ok), () => (<>
-                  <span class="ok">{item.label}</span>
+                {(() => {if (item.ok) { return (<>
+                  <span class="ok">{(() => {item.label})()}</span>
 									<span class="ok">something else</span>
-                </>), () => {
+                </>)} else {
                   const fallback = `Item #${item.id}`;
-                  return <span class="fallback">{fallback}</span>
-                })}
+                  return <span class="fallback">{(() => {fallback})()}</span>
+                }})()}
               </div>
             )
-          })}
+          }})()}
 
-          {__try(() => {
-            <AsyncData />
-          }, (e) => {
-            const reason = e.message;
-            return <p class="err">{reason}</p>
-          }, () => {
+          {(() => {try {let __pending = () => {
             const text = "fetching...";
             return <p>{text}</p>
-          })}
+          };
+            <AsyncData />
+          } catch (e) {
+            const reason = e.message;
+            return <p class="err">{(() => {reason})()}</p>
+          }})()}
 
-          {__for(() => (items), (item) => {
-            __if(() => (item.ok), () => (
-              <span>{item.label}</span>
-            ), () => (<>
+          {(() => {for (const item of items) { item.id; 
+            if (item.ok) { return (
+              <span>{(() => {item.label})()}</span>
+            )} else { return (<>
               <span>—</span>
 							<span>2</span>
-            </>))
-          },
-            (item) => (item.id)
-          )}
+            </>)}
+          }})()}
 
           <footer>
-            <p>{count} items</p>
+            <p>{(() => {count})()} items</p>
           </footer>
         </section>
-      )))}
+      )}})()}
     </main>
   )
 }
@@ -98,7 +97,7 @@ export default async function AsyncPage(dataId, __bind__count) {
     <div>
       <input bind:value={count} />
       <input bind:value={[count, setCount]} />
-      <p>{label}</p>
+      <p>{(() => {label})()}</p>
     </div>
   )
 
@@ -108,6 +107,6 @@ export default async function AsyncPage(dataId, __bind__count) {
 // Bind with renamed prop
 function BindRenamed(__bind__displayName: string, statusText: string = "offline") {
   return (
-    <p>{displayName} - {statusText}</p>
+    <p>{(() => {displayName})()} - {(() => {statusText})()}</p>
   )
 }
