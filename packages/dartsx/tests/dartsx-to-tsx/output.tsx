@@ -4,12 +4,12 @@ export default function Counter() {
   const doubled = count * 2
 
   return (<>
-    <h1>Hello {name}!</h1>
+    <h1>Hello {(() => { name})()}!</h1>
     <input bind:value={name} />
     <button onclick={() => count++}>
-      clicks: {count}
+      clicks: {(() => { count})()}
     </button>
-    <p>doubled: {doubled}</p>
+    <p>doubled: {(() => { doubled})()}</p>
   </>)
 }
 
@@ -25,15 +25,15 @@ export function UserCard({name, age, active = true}: {name: string, age: number,
 
   return (
     <div>
-      <span>{name}</span>
-      <span>{age}</span>
+      <span>{(() => { name})()}</span>
+      <span>{(() => { age})()}</span>
     </div>
   )
 }
 
 export function UserBadge({'display-name': displayName, status = 'offline'}: {'display-name': string, status?: string}) {
   return (
-    <span>{displayName} ({status})</span>
+    <span>{(() => { displayName})()} ({status})</span>
   )
 }
 
@@ -72,7 +72,7 @@ function ControlFlow() {
       {(() => { if (loading) { return (
         <p>Loading...</p>
       )} else if (error) { return (
-        <p>{error}</p>
+        <p>{(() => { error})()}</p>
       )} else { return (
         <p>Done</p>
       )}})()}
@@ -85,25 +85,25 @@ function ControlFlow() {
 
       <ul>
         {(() => { for (const item of items) { return (
-          <li>{item}</li>
+          <li>{(() => { item})()}</li>
         )}})()}
       </ul>
 
       <ul>
         {(() => { for (const item of items) { item.id; return (
-          <li>{item}</li>
-        )}})()}
+          <li>{(() => { item})()}</li>
+        ) }})()}
       </ul>
 
       <ul>
         {(() => { for (const item of items) { let i = 0; item.id; return (
-          <li>{i}: {item}</li>
-        )}})()}
+          <li>{(() => { i})()}: {(() => { item})()}</li>
+        ) }})()}
       </ul>
 
       <ul>
         {(() => { for (const item of items) { let i = 0; item.id;
-          return <li>{i}: {item}</li>
+          return <li>{(() => { i})()}: {(() => { item})()}</li>
         }})()}
       </ul>
 
@@ -155,9 +155,9 @@ function GenericComponent<T extends Record<string, unknown>>({data, label}: {dat
 
   return (
     <div>
-      <h2>{label}</h2>
+      <h2>{(() => { label})()}</h2>
       {(() => { for (const key of keys) { return (
-        <span>{key}</span>
+        <span>{(() => { key})()}</span>
       )}})()}
     </div>
   )

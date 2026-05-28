@@ -1,20 +1,15 @@
 /**
  * Phase 3 — Transform
  *
- * Walks the OXC AST with zimmerframe and replaces nodes to produce
- * the output JavaScript AST. Uses the scope tree and binding metadata
- * from Phase 2 to perform reactive transformations.
+ * Walks the OXC AST with zimmerframe to produce output JavaScript.
+ * Uses scope/binding info from Phase 2 for reactive transforms.
  *
- * Key visitors:
- * - `_` (universal): scope threading
- * - `Program`: runtime import injection
- * - `FunctionDeclaration`: component rewrite (params → $$props)
- * - `VariableDeclaration`: state/derived → $.state()/$.derived()
- * - `Identifier`: reactive reads → $.get()
- * - `AssignmentExpression`: reactive writes → $.set()
- * - `UpdateExpression`: count++ → $.set(count, $.get(count) + 1)
- * - JSX nodes: → $.jsx() runtime calls
- * - JSX expression IIFEs: unwrap and convert control flow (if/for/switch/try) → $.if/$.for/etc.
+ * Key transforms:
+ * - component → function with $$props
+ * - state/derived → $.state()/$.derived()
+ * - reactive reads/writes → $.get()/$.set()
+ * - JSX → $.jsx() runtime calls
+ * - IIFE-wrapped control flow → $.if/$.for/$.switch/$.try
  */
 import { walk, type Context } from 'zimmerframe';
 import type { AnalysisResult, ComponentInfo, StyleBlockIR } from '../2-analyze';
@@ -47,10 +42,7 @@ import type {
 
 // ── Types ──────────────────────────────────────────────────────────
 
-/** OXC AST node that has a span (filters out Modifier which lacks start/end) */
 type AstNode = Extract<Node, Span>;
-
-/** zimmerframe context specialized for our transform walk */
 type WalkContext = Context<AstNode, TransformState>;
 
 export interface TransformResult {
@@ -62,31 +54,79 @@ export interface TransformResult {
 interface TransformState {
 	scope: Scope;
 	analysis: AnalysisResult;
-	/** Current component info (null at module level) */
 	component: ComponentInfo | null;
-	/** Scope attrs from CSS scoping for the current component */
 	scopeAttrs: string[];
-	/** Processed styles with scope path info */
 	processedStyles: ProcessedStyle[];
-	/** Current element path in the JSX tree (for nested CSS scoping) */
 	elementPath: number[];
-	/** CSS vars for the current component */
 	cssVars: CSSVar[];
-	/** Reactive call targets */
 	reactiveCallTargets: Map<string, Set<number>>;
-	/** Current XML namespace context */
 	nsContext: 'html' | 'svg' | 'math';
-	/** Filename for CSS scoping */
 	filename: string;
-	/** Collected CSS fragments */
 	cssFragments: string[];
-	/** Whether to emit $.style() calls */
 	emitStyleCalls: boolean;
-	/** Whether we're inside a derived/effect callback body */
 	insideDerived: boolean;
 }
 
-// ── Main entry ─────────────────────────────────────────────────────
+// ── Shared Visitors ────────────────────────────────────────────────
+
+const sharedVisitors = {
+	_(node: AstNode, { next, state }: WalkContext) {
+		const scope = state.analysis.scopes.get(node);
+		if (scope && scope !== state.scope) next({ ...state, scope });
+		else next();
+	},
+
+	VariableDeclaration(node: AstNode, { state, next }: WalkContext) {
+		return transformVariableDeclaration(node as VariableDeclaration, state, next);
+	},
+
+	FunctionDeclaration(node: AstNode, { state, next }: WalkContext) {
+		const compInfo = state.analysis.components.get(node);
+		if (compInfo) return transformComponent(node, compInfo, state, state.filename, state.cssFragments, state.emitStyleCalls);
+		return next();
+	},
+
+	Identifier(node: AstNode, { state, path }: WalkContext) {
+		return transformIdentifier(node, state, path);
+	},
+
+	Property(node: AstNode, { state, next }: WalkContext) {
+		if (node.type !== 'Property') return next();
+		return transformShorthandProperty(node as any, state, next);
+	},
+
+	AssignmentExpression(node: AstNode, { state, visit }: WalkContext) {
+		return transformAssignment(node as AssignmentExpression, state, visit);
+	},
+
+	UpdateExpression(node: AstNode, { state }: WalkContext) {
+		return transformUpdate(node as UpdateExpression, state);
+	},
+
+	JSXElement(node: AstNode, { state, visit }: WalkContext) {
+		return transformJSXElement(node as JSXElement, state, visit);
+	},
+
+	JSXFragment(node: AstNode, { state, visit }: WalkContext) {
+		const children = transformJSXChildren((node as any).children, state, visit, true);
+		if (children.length === 0) return b.literal(null);
+		if (children.length === 1) return children[0];
+		return b.call('$.jsx', [b.member('$.Fragment'), b.object([b.prop('children', b.array(children))])]);
+	},
+
+	CallExpression(node: AstNode, { state, next }: WalkContext) {
+		if ((node as CallExpression).callee.type !== 'Identifier') return next();
+		const fn = ((node as CallExpression).callee as any).name;
+		if (fn === '__html') return transformHtmlCall(node as CallExpression, state);
+		return transformReactiveCallOrNext(node as CallExpression, state, next);
+	},
+
+	JSXExpressionContainer(node: AstNode, { state, visit }: WalkContext) {
+		return visit((node as any).expression, state);
+	},
+};
+
+// ── Main Entry ─────────────────────────────────────────────────────
 
 export function transform(
 	analysis: AnalysisResult,
@@ -115,14 +155,7 @@ export function transform(
 	derivedDestructureCounter = 0;
 
 	const transformed = walk<AstNode, TransformState>(analysis.ast, initialState, {
-		_(node, { next, state }) {
-			const scope = state.analysis.scopes.get(node);
-			if (scope && scope !== state.scope) {
-				next({ ...state, scope });
-			} else {
-				next();
-			}
-		},
+		...sharedVisitors,
 
 		Program(node, { state, visit }) {
 			const body: AstNode[] = [];
@@ -132,85 +165,22 @@ export function transform(
 				needsRuntime = true;
 			}
 
-			if (needsRuntime) {
-				body.push(b.importDefault('$', 'dartsx/internal/client'));
-			}
+			if (needsRuntime) body.push(b.importDefault('$', 'dartsx/internal/client'));
 
 			for (const stmt of node.body) {
-				// Skip dartsx internal imports
 				if (stmt.type === 'ImportDeclaration') {
-					const src = stmt.source.value;
-					if (src.startsWith('dartsx/internal')) continue;
+					if (stmt.source.value.startsWith('dartsx/internal')) continue;
 					body.push(stmt);
 					continue;
 				}
-
-				// Component function declaration
 				const compInfo = state.analysis.components.get(stmt);
 				if (compInfo) {
 					body.push(transformComponent(stmt, compInfo, state, state.filename, state.cssFragments, state.emitStyleCalls));
 					continue;
 				}
-
-				// Transform regular statements
 				body.push(visit(stmt, state));
 			}
-
 			return b.program(body);
-		},
-
-		VariableDeclaration(node, { state, next }) {
-			return transformVariableDeclaration(node, state, next);
-		},
-
-		FunctionDeclaration(node, { state, next }) {
-			const compInfo = state.analysis.components.get(node);
-			if (compInfo) {
-				return transformComponent(node, compInfo, state, state.filename, state.cssFragments, state.emitStyleCalls);
-			}
-			return next();
-		},
-
-		Identifier(node, { state, path }) {
-			return transformIdentifier(node, state, path);
-		},
-
-		Property(node, { state, next }) {
-			if (node.type !== 'Property') return next();
-			return transformShorthandProperty(node, state, next);
-		},
-
-		AssignmentExpression(node, { state, visit }) {
-			return transformAssignment(node, state, visit);
-		},
-
-		UpdateExpression(node, { state }) {
-			return transformUpdate(node, state);
-		},
-
-		JSXElement(node, { state, visit }) {
-			return transformJSXElement(node, state, visit);
-		},
-
-		JSXFragment(node, { state, visit }) {
-			const children = transformJSXChildren(node.children, state, visit);
-			if (children.length === 0) return b.literal(null);
-			if (children.length === 1) return children[0];
-			return b.call('$.jsx', [
-				b.member('$.Fragment'),
-				b.object([b.prop('children', b.array(children))]),
-			]);
-		},
-
-		CallExpression(node, { state, next }) {
-			if (node.callee.type !== 'Identifier') return next();
-			const fn = node.callee.name;
-			if (fn === '__html') return transformHtmlCall(node, state);
-			return transformReactiveCallOrNext(node, state, next);
-		},
-
-		JSXExpressionContainer(node, { state, visit }) {
-			return visit(node.expression, state);
 		},
 	});
 
@@ -223,7 +193,13 @@ export function transform(
 	return { code, map, css: cssFragments.join('\n') };
 }
 
-// ── Component transform ────────────────────────────────────────────
+// ── Walk Node ──────────────────────────────────────────────────────
+
+function walkNode(node: AstNode, state: TransformState): AstNode {
+	return walk<AstNode, TransformState>(node, state, sharedVisitors);
+}
+
+// ── Component Transform ────────────────────────────────────────────
 
 function extractFnNode(node: AstNode): OxcFunction | null {
 	if (node.type === 'FunctionDeclaration') return node;
@@ -233,76 +209,65 @@ function extractFnNode(node: AstNode): OxcFunction | null {
 }
 
 function transformComponent(
-	outerNode: AstNode,
-	compInfo: ComponentInfo,
-	parentState: TransformState,
-	filename: string | undefined,
-	cssFragments: string[],
-	emitStyleCalls: boolean,
+	outerNode: AstNode, compInfo: ComponentInfo, parentState: TransformState,
+	filename: string | undefined, cssFragments: string[], emitStyleCalls: boolean,
 ) {
 	const { meta, styleBlocks, renamedParams, scope: compScope } = compInfo;
 
-	// Process scoped CSS
 	const processedStyles = processStyles(styleBlocks, meta.name, filename || 'input.tsx');
 	const scopeAttrs = processedStyles.filter(s => s.attr).map(s => s.attr);
 	const allCssVars = processedStyles.flatMap(s => s.cssVars);
 	for (const ps of processedStyles) cssFragments.push(ps.css);
 
-	// Get the function node — unwrap export wrappers
 	const fnNode = extractFnNode(outerNode);
 	if (!fnNode) return outerNode;
 
 	const hasProps = fnNode.params.length > 0;
 	const isNested = compScope.parent !== parentState.analysis.scope;
 	const propsName = isNested ? '$props' : '$$props';
-
 	const stmts: AstNode[] = [];
 
-	// Emit $.style() calls
 	if (emitStyleCalls) {
-		for (const ps of processedStyles) {
+		for (const ps of processedStyles)
 			stmts.push(b.exprStmt(b.call('$.style', [b.literal(ps.hash), b.literal(ps.css)])));
-		}
 	}
 
-	// Emit prop declarations
 	if (hasProps) {
-		for (const param of fnNode.params) {
-			const propStmt = transformParam(param, renamedParams, parentState.analysis.source, propsName);
-			if (propStmt) stmts.push(propStmt);
+		const firstParam = fnNode.params[0];
+		if (firstParam && firstParam.type === 'ObjectPattern') {
+			// Destructured form from preprocessor
+			for (const prop of (firstParam as any).properties) {
+				const propStmt = transformObjectPatternProp(prop, renamedParams, parentState.analysis.source, propsName);
+				if (propStmt) stmts.push(propStmt);
+			}
+		} else {
+			for (const param of fnNode.params) {
+				const propStmt = transformParam(param, renamedParams, parentState.analysis.source, propsName);
+				if (propStmt) stmts.push(propStmt);
+			}
 		}
 	}
 
-	// Create component state
 	const compState: TransformState = {
-		...parentState,
-		scope: compScope,
-		component: compInfo,
-		scopeAttrs,
-		processedStyles,
-		elementPath: [],
-		cssVars: allCssVars,
+		...parentState, scope: compScope, component: compInfo,
+		scopeAttrs, processedStyles, elementPath: [], cssVars: allCssVars,
 	};
 
-	// Walk body statements
 	if (!fnNode.body) return outerNode;
 	for (const stmt of fnNode.body.body) {
 		if (stmt.type === 'ReturnStatement' && stmt.argument) {
 			let jsxNode: Expression = stmt.argument;
 			while (jsxNode.type === 'ParenthesizedExpression') jsxNode = jsxNode.expression;
+
 			if (jsxNode.type === 'JSXElement' || jsxNode.type === 'JSXFragment') {
-				const jsxExpr = walkNode(jsxNode, compState);
-				stmts.push(b.returnStmt(jsxExpr));
+				stmts.push(b.returnStmt(walkNode(jsxNode, compState)));
 				continue;
 			}
-			// Root-level IIFE from preprocessor (control flow at render root)
 			const iifeBody = unwrapIIFE(jsxNode);
 			if (iifeBody) {
-				const result = transformIIFEBody(iifeBody, compState);
-				stmts.push(b.returnStmt(result));
+				stmts.push(b.returnStmt(transformIIFEBody(iifeBody, compState)));
 				continue;
 			}
-			// Non-JSX render expression: wrap in thunk if reactive
 			const transformed = walkNode(stmt.argument, compState);
 			if (expressionIsReactive(stmt.argument, compState)) {
 				stmts.push(b.returnStmt(b.arrow([], transformed)));
@@ -319,7 +284,6 @@ function transformComponent(
 		stmts.push(walkNode(stmt, compState));
 	}
 
-	// Build the function
 	const params = hasProps ? [b.id(propsName)] : [];
 	const funcDecl = b.func(meta.name, params, stmts, meta.isAsync);
 
@@ -334,19 +298,14 @@ function transformParam(param: ParamPattern, renamedParams: Record<string, strin
 		return b.letDecl(name, b.id(propsName));
 	}
 
-	// FormalParameter: BindingIdentifier | AssignmentPattern | ObjectPattern | ArrayPattern
 	let rawName: string | undefined;
-	if (param.type === 'Identifier') {
-		rawName = param.name;
-	} else if (param.type === 'AssignmentPattern' && param.left.type === 'Identifier') {
-		rawName = param.left.name;
-	}
+	if (param.type === 'Identifier') rawName = param.name;
+	else if (param.type === 'AssignmentPattern' && param.left.type === 'Identifier') rawName = param.left.name;
 	if (!rawName) return null;
 
 	const isBind = rawName.startsWith('__bind__');
 	const name = isBind ? rawName.slice(8) : rawName;
 	const externalName = renamedParams[name] || name;
-
 	const defaultValue = param.type === 'AssignmentPattern' ? param.right : null;
 
 	if (isBind) {
@@ -360,66 +319,46 @@ function transformParam(param: ParamPattern, renamedParams: Record<string, strin
 	return b.constDecl(name, b.call('$.prop', args));
 }
 
-// ── Walk a single node with component-level visitors ───────────────
+function transformObjectPatternProp(prop: any, renamedParams: Record<string, string>, source: string, propsName: string) {
+	if (prop.type === 'RestElement') {
+		const name = prop.argument.type === 'Identifier' ? prop.argument.name : 'rest';
+		return b.letDecl(name, b.id(propsName));
+	}
 
-function walkNode(node: AstNode, state: TransformState): AstNode {
-	return walk<AstNode, TransformState>(node, state, {
-		_(node, { next, state: s }) {
-			const scope = s.analysis.scopes.get(node);
-			if (scope && scope !== s.scope) {
-				next({ ...s, scope });
-			} else {
-				next();
-			}
-		},
-		FunctionDeclaration(node, { state: s, next }) {
-			const compInfo = s.analysis.components.get(node);
-			if (compInfo) {
-				return transformComponent(node, compInfo, s, s.filename, s.cssFragments, s.emitStyleCalls);
-			}
-			return next();
-		},
-		VariableDeclaration(node, { state: s, next }) {
-			return transformVariableDeclaration(node, s, next);
-		},
-		Identifier(node, { state: s, path }) {
-			return transformIdentifier(node, s, path);
-		},
-		Property(node, { state: s, next }) {
-			if (node.type !== 'Property') return next();
-			return transformShorthandProperty(node, s, next);
-		},
-		AssignmentExpression(node, { state: s, visit }) {
-			return transformAssignment(node, s, visit);
-		},
-		UpdateExpression(node, { state: s }) {
-			return transformUpdate(node, s);
-		},
-		JSXElement(node, { state: s, visit }) {
-			return transformJSXElement(node, s, visit);
-		},
-		JSXFragment(node, { state: s, visit }) {
-			const children = transformJSXChildren(node.children, s, visit, true);
-			if (children.length === 0) return b.literal(null);
-			if (children.length === 1) return children[0];
-			return b.call('$.jsx', [
-				b.member('$.Fragment'),
-				b.object([b.prop('children', b.array(children))]),
-			]);
-		},
-		CallExpression(node, { state: s, next }) {
-			if (node.callee.type !== 'Identifier') return next();
-			const fn = node.callee.name;
-			if (fn === '__html') return transformHtmlCall(node, s);
-			return transformReactiveCallOrNext(node, s, next);
-		},
-		JSXExpressionContainer(node, { state: s, visit }) {
-			return visit(node.expression, s);
-		},
-	});
+	// Property node: extract binding name from value
+	let rawName: string | undefined;
+	let defaultValue: AstNode | null = null;
+	if (prop.value.type === 'Identifier') {
+		rawName = prop.value.name;
+	} else if (prop.value.type === 'AssignmentPattern' && prop.value.left.type === 'Identifier') {
+		rawName = prop.value.left.name;
+		defaultValue = prop.value.right;
+	}
+	if (!rawName) return null;
+
+	const isBind = rawName.startsWith('__bind__');
+	const name = isBind ? rawName.slice(8) : rawName;
+
+	// For renamed props, the key is a string literal with the external name
+	let externalName: string;
+	if (prop.key.type === 'StringLiteral' || prop.key.type === 'Literal') {
+		externalName = prop.key.value;
+	} else {
+		externalName = renamedParams[name] || name;
+	}
+
+	if (isBind) {
+		const args: AstNode[] = [b.id(propsName), b.literal(externalName)];
+		if (defaultValue) args.push(defaultValue);
+		return b.letDecl(name, b.call('$.prop.bind', args));
+	}
+
+	const args: AstNode[] = [b.id(propsName), b.literal(externalName)];
+	if (defaultValue) args.push(defaultValue);
+	return b.constDecl(name, b.call('$.prop', args));
 }
 
-// ── Shared transform functions ─────────────────────────────────────
+// ── Variable Declaration Transform ─────────────────────────────────
 
 function transformVariableDeclaration(node: VariableDeclaration, state: TransformState, next: WalkContext['next']) {
 	const newDeclarators: typeof node.declarations = [];
@@ -428,12 +367,10 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 
 	for (const decl of node.declarations) {
 		if (decl.id.type !== 'Identifier') {
-			// Derived destructuring: pattern follows a $$d marker
 			if (prevMarker?.startsWith(DERIVED_MARKER) && (decl.id.type === 'ObjectPattern' || decl.id.type === 'ArrayPattern')) {
 				changed = true;
 				const derivedState = { ...state, insideDerived: true };
 				const initExpr = decl.init ? walkNode(decl.init, derivedState) : b.id('undefined');
-				// Lower destructuring: create temp + individual $.derived() per binding
 				lowerDerivedDestructuring(decl.id, initExpr, newDeclarators, state);
 			} else {
 				newDeclarators.push(decl);
@@ -443,7 +380,6 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 		}
 		const name = decl.id.name;
 
-		// Skip $$s*/$$d* marker declarators (emitted by preprocess)
 		if (name.startsWith(STATE_MARKER) || name.startsWith(DERIVED_MARKER)) {
 			changed = true;
 			prevMarker = name;
@@ -452,16 +388,12 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 		prevMarker = null;
 
 		const binding = state.scope.get(name);
-		if (!binding) {
-			newDeclarators.push(decl);
-			continue;
-		}
+		if (!binding) { newDeclarators.push(decl); continue; }
 
 		if (binding.kind === 'state') {
 			changed = true;
 			const initExpr = decl.init ? walkNode(decl.init, state) : undefined;
-			const args = initExpr ? [initExpr] : [];
-			newDeclarators.push(b.declarator(b.id(name), b.call('$.state', args)));
+			newDeclarators.push(b.declarator(b.id(name), b.call('$.state', initExpr ? [initExpr] : [])));
 			continue;
 		}
 
@@ -470,22 +402,17 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 			const derivedState = { ...state, insideDerived: true };
 			const initExpr = decl.init ? walkNode(decl.init, derivedState) : b.id('undefined');
 
-			// Detect IIFE pattern: (() => { ... })() → unwrap to block body
+			// Unwrap IIFE pattern → block body
 			if (initExpr.type === 'CallExpression') {
 				const iifeCallee = initExpr.callee.type === 'ParenthesizedExpression' ? initExpr.callee.expression : initExpr.callee;
 				if ((iifeCallee.type === 'ArrowFunctionExpression' || iifeCallee.type === 'FunctionExpression') &&
-					initExpr.arguments.length === 0 &&
-					iifeCallee.body &&
-					iifeCallee.body.type === 'BlockStatement') {
-					const stmtsBlock = iifeCallee.body;
-					newDeclarators.push(b.declarator(b.id(name), b.call('$.derived', [b.arrowBlock([], stmtsBlock.body)])));
+					initExpr.arguments.length === 0 && iifeCallee.body?.type === 'BlockStatement') {
+					newDeclarators.push(b.declarator(b.id(name), b.call('$.derived', [b.arrowBlock([], iifeCallee.body.body)])));
 					continue;
 				}
 			}
 
-			const body = isObjectLiteral(initExpr)
-				? b.sequence([initExpr])
-				: initExpr;
+			const body = isObjectLiteral(initExpr) ? b.sequence([initExpr]) : initExpr;
 			newDeclarators.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], body)])));
 			continue;
 		}
@@ -493,20 +420,15 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 		newDeclarators.push(decl);
 	}
 
-	if (changed) {
-		return { ...node, declarations: newDeclarators };
-	}
+	if (changed) return { ...node, declarations: newDeclarators };
 	return next();
 }
 
 let derivedDestructureCounter = 0;
 
 function lowerDerivedDestructuring(pattern: AstNode, initExpr: AstNode, out: AstNode[], state: TransformState): void {
-	// Create a temp variable for the source expression
 	const tempName = `__destructured_${derivedDestructureCounter++}`;
 	out.push(b.declarator(b.id(tempName), initExpr));
-
-	// Walk the pattern and create individual $.derived() bindings
 	emitDerivedBindings(pattern, b.id(tempName), out);
 }
 
@@ -528,18 +450,11 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 			if (!prop) continue;
 			if (prop.type === 'RestElement') {
 				if (prop.argument?.type === 'Identifier') {
-					// ...rest — use object spread minus other keys
 					const otherKeys = ((pattern as any).properties || [])
 						.filter((p: any) => p && p.type !== 'RestElement')
-						.map((p: any) => {
-							if (p.key?.type === 'Identifier') return p.key.name;
-							if (p.key?.type === 'StringLiteral') return p.key.value;
-							return null;
-						})
+						.map((p: any) => p.key?.type === 'Identifier' ? p.key.name : p.key?.type === 'StringLiteral' ? p.key.value : null)
 						.filter(Boolean) as string[];
-					// Build: (() => { const { knownKeys, ...rest } = baseExpr; return rest; })()
-					const restExpr = buildObjectRest(baseExpr, otherKeys, prop.argument.name);
-					out.push(b.declarator(b.id(prop.argument.name), b.call('$.derived', [b.arrow([], restExpr)])));
+					out.push(b.declarator(b.id(prop.argument.name), b.call('$.derived', [b.arrow([], buildObjectRest(baseExpr, otherKeys, prop.argument.name))])));
 				}
 				continue;
 			}
@@ -550,19 +465,16 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 			if (value.type === 'Identifier') {
 				out.push(b.declarator(b.id(value.name), b.call('$.derived', [b.arrow([], accessExpr)])));
 			} else if (value.type === 'AssignmentPattern' && value.left?.type === 'Identifier') {
-				// { a = defaultVal }
-				const name = value.left.name;
 				const cond = b.binary('!==', accessExpr, b.id('undefined'));
 				const ternary = { type: 'ConditionalExpression', test: cond, consequent: accessExpr, alternate: value.right, start: 0, end: 0, loc: null } as any;
-				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
+				out.push(b.declarator(b.id(value.left.name), b.call('$.derived', [b.arrow([], ternary)])));
 			} else if (value.type === 'ObjectPattern' || value.type === 'ArrayPattern') {
 				emitDerivedBindings(value, accessExpr, out);
 			}
 		}
 	} else if (pattern.type === 'ArrayPattern') {
-		const elements = (pattern as any).elements || [];
-		for (let i = 0; i < elements.length; i++) {
-			const elem = elements[i];
+		for (let i = 0; i < ((pattern as any).elements || []).length; i++) {
+			const elem = (pattern as any).elements[i];
 			if (!elem) continue;
 			if (elem.type === 'RestElement' && elem.argument?.type === 'Identifier') {
 				out.push(b.declarator(b.id(elem.argument.name), b.call('$.derived', [b.arrow([], sliceCall(baseExpr, i))])));
@@ -572,10 +484,9 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 			if (elem.type === 'Identifier') {
 				out.push(b.declarator(b.id(elem.name), b.call('$.derived', [b.arrow([], accessExpr)])));
 			} else if (elem.type === 'AssignmentPattern' && elem.left?.type === 'Identifier') {
-				const name = elem.left.name;
 				const cond = b.binary('!==', accessExpr, b.id('undefined'));
 				const ternary = { type: 'ConditionalExpression', test: cond, consequent: accessExpr, alternate: elem.right, start: 0, end: 0, loc: null } as any;
-				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
+				out.push(b.declarator(b.id(elem.left.name), b.call('$.derived', [b.arrow([], ternary)])));
 			} else if (elem.type === 'ObjectPattern' || elem.type === 'ArrayPattern') {
 				emitDerivedBindings(elem, accessExpr, out);
 			}
@@ -584,7 +495,6 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 }
 
 function buildObjectRest(baseExpr: AstNode, excludeKeys: string[], restName: string): AstNode {
-	// Build: (({ key1, key2, ...rest }) => rest)(baseExpr)
 	const restId = b.id(restName);
 	const props: AstNode[] = excludeKeys.map(k => ({
 		type: 'Property', key: b.id(k), value: b.id(k), kind: 'init', shorthand: true, computed: false, method: false, start: 0, end: 0, loc: null
@@ -596,6 +506,8 @@ function buildObjectRest(baseExpr: AstNode, excludeKeys: string[], restName: str
 	return b.call(paren, [baseExpr]);
 }
 
+// ── Identifier & Assignment Transforms ─────────────────────────────
+
 function transformShorthandProperty(node: Extract<AstNode, { type: 'Property' }>, state: TransformState, next: WalkContext['next']) {
 	if (!node.shorthand) return next();
 	const key = node.key;
@@ -603,12 +515,7 @@ function transformShorthandProperty(node: Extract<AstNode, { type: 'Property' }>
 	const binding = state.scope.get(key.name);
 	if (!binding?.reactive) return next();
 
-	if (state.insideDerived) {
-		// Inside derived/thunk callbacks: eager $.get() value
-		return b.prop(key.name, b.call('$.get', [b.id(key.name)]));
-	}
-
-	// General case: convert to getter so the read is lazy
+	if (state.insideDerived) return b.prop(key.name, b.call('$.get', [b.id(key.name)]));
 	return b.getter(key.name, [b.returnStmt(b.call('$.get', [b.id(key.name)]))]);
 }
 
@@ -618,11 +525,9 @@ function transformIdentifier(node: AstNode, state: TransformState, path: AstNode
 	if (!binding?.reactive) return;
 
 	const parent = path.at(-1);
-
-	// Root node in a walkNode() call — no parent context, apply $.get()
 	if (!parent) return b.call('$.get', [node]);
 
-	// Skip positions where the identifier is being declared/written, not read
+	// Skip declaration/write positions
 	if (parent.type === 'AssignmentExpression' && parent.left === node) return;
 	if (parent.type === 'UpdateExpression') return;
 	if (parent.type === 'VariableDeclarator' && parent.id === node) return;
@@ -632,21 +537,21 @@ function transformIdentifier(node: AstNode, state: TransformState, path: AstNode
 	if ((parent.type === 'FunctionDeclaration' || parent.type === 'FunctionExpression' || parent.type === 'ArrowFunctionExpression') &&
 		parent.params.some(p => p.type === 'Identifier' && p.name === node.name)) return;
 
-	// Skip non-computed property keys (e.g. { count: ... } or obj.count)
+	// Skip non-computed property keys
 	if (parent.type === 'MemberExpression' && parent.property === node && !parent.computed) return;
 	if (parent.type === 'Property' && parent.key === node && !parent.computed) return;
 
-	// Proxy/derived/bind-prop: direct member access (obj.foo) or direct call (fn()), no $.get() on the root
+	// Direct member access (proxy/derived/bind-prop)
 	if (parent.type === 'MemberExpression' && parent.object === node && binding.directMemberAccess) return;
 	if (parent.type === 'CallExpression' && parent.callee === node && binding.directMemberAccess) return;
 
-	// Signal forwarding: don't unwrap when passing to a reactive-param function
+	// Signal forwarding
 	if (isInReactiveCallArg(node, path, state.reactiveCallTargets)) return;
 
-	// Shorthand properties handled by the Property visitor
+	// Shorthand properties handled by Property visitor
 	if (parent.type === 'Property' && parent.shorthand && parent.value === node) return;
 
-	// Derived signals returned from non-component functions stay as signals
+	// Derived signals returned from non-component functions
 	if (parent.type === 'ReturnStatement' && parent.argument === node &&
 		binding.kind === 'derived' && !state.component) return;
 
@@ -656,7 +561,6 @@ function transformIdentifier(node: AstNode, state: TransformState, path: AstNode
 function transformAssignment(node: AssignmentExpression, state: TransformState, visit: WalkContext['visit']) {
 	const left = node.left;
 	if (left.type !== 'Identifier') return;
-
 	const binding = state.scope.get(left.name);
 	if (!binding?.writable) return;
 
@@ -670,33 +574,22 @@ function transformAssignment(node: AssignmentExpression, state: TransformState, 
 function transformUpdate(node: UpdateExpression, state: TransformState) {
 	const arg = node.argument;
 	if (arg.type !== 'Identifier') return;
-
 	const binding = state.scope.get(arg.name);
 	if (!binding?.writable) return;
-
 	const op = node.operator === '++' ? '+' : '-';
 	return b.call('$.set', [b.id(arg.name), b.binary(op, b.call('$.get', [arg]), b.literal(1))]);
 }
 
-/**
- * Handle calls to functions in reactiveCallTargets.
- * Member expression args at reactive positions get wrapped in $.derived().
- * Array deps: each element is individually checked.
- * Falls through to next() for non-reactive calls.
- */
 function transformReactiveCallOrNext(node: CallExpression, state: TransformState, next: WalkContext['next']) {
 	if (node.callee.type !== 'Identifier') return next();
 	const fn = node.callee.name;
-
 	const reactiveIndices = state.reactiveCallTargets.get(fn);
 	if (!reactiveIndices || reactiveIndices.size === 0) return next();
 
-	// Let next() do the default traversal first, then fix up reactive arg positions
 	const result = next();
 	const transformed = result ?? node;
 	if (transformed.type !== 'CallExpression') return result;
 
-	// Now wrap member expression args at reactive positions in $.derived()
 	const args = [...transformed.arguments];
 	let changed = false;
 
@@ -706,7 +599,6 @@ function transformReactiveCallOrNext(node: CallExpression, state: TransformState
 		const original = node.arguments[idx];
 
 		if (original && original.type === 'ArrayExpression') {
-			// Array of deps: wrap each member expression element
 			const transformedArg = args[idx];
 			if (transformedArg.type !== 'ArrayExpression') continue;
 			const newElements: AstNode[] = transformedArg.elements.map((el, i) => {
@@ -719,50 +611,38 @@ function transformReactiveCallOrNext(node: CallExpression, state: TransformState
 			});
 			if (changed) args[idx] = b.array(newElements);
 		} else if (original && original.type === 'MemberExpression' && isMemberOnReactive(original, state)) {
-			// Single member expression dep
 			args[idx] = b.call('$.derived', [b.arrow([], arg)]);
 			changed = true;
 		}
 	}
 
-	if (changed) {
-		return { ...transformed, arguments: args };
-	}
-	return result;
+	return changed ? { ...transformed, arguments: args } : result;
 }
 
-/** Check if the root of a member expression chain is a callback/for-loop parameter */
 function memberRootIsCallbackParam(expr: Expression, state: TransformState): boolean {
 	let node: Expression = expr;
 	while (node.type === 'MemberExpression') node = node.object;
 	if (node.type !== 'Identifier') return false;
 	const binding = state.scope.get(node.name);
 	if (!binding) return false;
-	// If declared in a scope that's a child of the component scope, it's a callback param
 	return binding.scope !== state.component?.scope && binding.kind === 'normal';
 }
 
-/** Check if a member expression's root object is a reactive binding */
 function isMemberOnReactive(node: Expression, state: TransformState): boolean {
-	if (node.type === 'Identifier') {
-		const binding = state.scope.get(node.name);
-		return !!binding?.reactive;
-	}
+	if (node.type === 'Identifier') return !!state.scope.get(node.name)?.reactive;
 	if (node.type === 'MemberExpression') return isMemberOnReactive(node.object, state);
 	return false;
 }
 
-// ── JSX transform ──────────────────────────────────────────────────
+// ── JSX Transform ──────────────────────────────────────────────────
 
 function transformJSXElement(node: JSXElement, state: TransformState, visit: WalkContext['visit']) {
 	const opening = node.openingElement;
 	const tagName = getTagName(opening.name);
 
-	// Skip style marker elements
 	if (tagName.startsWith(STYLE_MARKER_PREFIX)) return b.literal(null);
 
 	const isComponent = /^[A-Z]/.test(tagName);
-
 	const props: AstNode[] = [];
 
 	const selfNs = isComponent ? 'html'
@@ -778,25 +658,20 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 		}
 		const attrResult = transformJSXAttribute(attr, state);
 		if (attrResult) {
-			if (Array.isArray(attrResult)) {
-				props.push(...attrResult);
-			} else {
-				props.push(attrResult);
-			}
+			if (Array.isArray(attrResult)) props.push(...attrResult);
+			else props.push(attrResult);
 		}
 	}
 
-	// Add scope attrs for scoped CSS
+	// Scope attrs for scoped CSS
 	if (!isComponent && state.processedStyles.length > 0) {
 		const attrs = computeScopeAttrsForElement(state.processedStyles, state.elementPath);
-		if (attrs.length > 0) {
-			props.push(b.prop(SCOPE_ATTR, b.literal(attrs.join(' '))));
-		}
+		if (attrs.length > 0) props.push(b.prop(SCOPE_ATTR, b.literal(attrs.join(' '))));
 	} else if (!isComponent && state.scopeAttrs.length > 0) {
 		props.push(b.prop(SCOPE_ATTR, b.literal(state.scopeAttrs.join(' '))));
 	}
 
-	// Add CSS vars style prop on the root element
+	// CSS vars style prop
 	if (!isComponent && state.cssVars.length > 0) {
 		const parseCSSVarExpr = (exprStr: string): Expression | null => {
 			const parsed = parseSync('x.ts', `(${exprStr})`, { sourceType: 'module' });
@@ -806,81 +681,56 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 			while (expr.type === 'ParenthesizedExpression') expr = expr.expression;
 			return expr;
 		};
-		const styleProps = state.cssVars.map((cv) => {
+		const styleProps = state.cssVars.map(cv => {
 			let valueExpr: AstNode = b.id(cv.expr);
 			const parsed = parseCSSVarExpr(cv.expr);
-			if (parsed) {
-				valueExpr = walkNode(parsed, state);
-			}
-			// If there's a suffix (e.g. "px"), add string concatenation
-			if (cv.suffix) {
-				valueExpr = b.binary('+', valueExpr, b.literal(cv.suffix));
-			}
+			if (parsed) valueExpr = walkNode(parsed, state);
+			if (cv.suffix) valueExpr = b.binary('+', valueExpr, b.literal(cv.suffix));
 			return b.prop(cv.varName, valueExpr);
 		});
-		const styleObj = b.object(styleProps);
-		// Check if any expression references reactive state
-		const isReactive = state.cssVars.some((cv) => {
+		const isReactive = state.cssVars.some(cv => {
 			const expr = parseCSSVarExpr(cv.expr);
 			return expr ? expressionIsReactive(expr, state) : false;
 		});
-		props.push(isReactive ? b.getter('style', [b.returnStmt(styleObj)]) : b.prop('style', styleObj));
+		props.push(isReactive ? b.getter('style', [b.returnStmt(b.object(styleProps))]) : b.prop('style', b.object(styleProps)));
 	}
 
-	// Process children
+	// Children
 	if (!opening.selfClosing) {
 		const childState: TransformState = { ...state, nsContext: childNs };
 		const children = transformJSXChildren(node.children, childState, visit, true);
-		if (children.length > 0) {
-			props.push(b.prop('children', b.array(children)));
-		}
+		if (children.length > 0) props.push(b.prop('children', b.array(children)));
 	}
 
 	const tag = isComponent ? b.id(tagName) : b.literal(tagName);
 	const factory = selfNs === 'svg' ? '$.svg' : selfNs === 'math' ? '$.math' : '$.jsx';
 	if (props.length === 0) return b.call(factory, [tag]);
 
-	// If there are spread elements, use $.mergeProps() to preserve getters
-	const hasSpread = props.some(p => p.type === 'SpreadElement');
-	if (hasSpread) {
-		const sources = buildMergeSources(props);
-		return b.call(factory, [tag, b.call('$.mergeProps', sources)]);
+	if (props.some(p => p.type === 'SpreadElement')) {
+		return b.call(factory, [tag, b.call('$.mergeProps', buildMergeSources(props))]);
 	}
 	return b.call(factory, [tag, b.object(props)]);
 }
 
-/**
- * Split a props array (which may contain SpreadElements) into merge sources.
- * Consecutive non-spread props become a single object literal.
- * Spread elements become their argument directly.
- *
- * [prop1, spread(x), prop2, prop3] → [{ prop1 }, x, { prop2, prop3 }]
- */
 function buildMergeSources(props: AstNode[]): AstNode[] {
 	const sources: AstNode[] = [];
 	let current: AstNode[] = [];
-
 	for (const prop of props) {
 		if (prop.type === 'SpreadElement') {
-			if (current.length > 0) {
-				sources.push(b.object(current));
-				current = [];
-			}
+			if (current.length > 0) { sources.push(b.object(current)); current = []; }
 			sources.push(prop.argument);
 		} else {
 			current.push(prop);
 		}
 	}
-	if (current.length > 0) {
-		sources.push(b.object(current));
-	}
+	if (current.length > 0) sources.push(b.object(current));
 	return sources;
 }
 
 function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 	const attrName = getAttrName(attr.name);
 
-	// Namespace: bind:value
+	// bind: namespace
 	if (attr.name.type === 'JSXNamespacedName') {
 		const ns = attr.name.namespace.name;
 		const local = attr.name.name.name;
@@ -888,19 +738,13 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 		if (ns === 'bind') {
 			let expr = attr.value?.type === 'JSXExpressionContainer' ? attr.value.expression : null;
 			if (expr && expr.type !== 'JSXEmptyExpression') {
-				// Unwrap IIFE from preprocessor
 				const inner = unwrapIIFEExpr(expr as AstNode);
 				if (inner) expr = inner as any;
 			}
 			if (expr && expr.type !== 'JSXEmptyExpression' && expr.type === 'ArrayExpression' && expr.elements.length === 2) {
-				const el0 = expr.elements[0];
-				const el1 = expr.elements[1];
+				const [el0, el1] = expr.elements;
 				if (el0 && el1) {
-					const result = [
-						buildBindGetter(local, walkNode(el0, state)),
-						buildBindSetter(local, walkNode(el1, state)),
-					].filter(Boolean) as AstNode[];
-					return result;
+					return [buildBindGetter(local, walkNode(el0, state)), buildBindSetter(local, walkNode(el1, state))].filter(Boolean) as AstNode[];
 				}
 			}
 			if (expr && expr.type !== 'JSXEmptyExpression') {
@@ -919,52 +763,37 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 					getExpr = walkNode(expr, state);
 					setBody = b.exprStmt(b.assignment('=', walkNode(expr, state), b.id('v')));
 				}
-				return [
-					b.getter(local, [b.returnStmt(getExpr)]),
-					b.setter(local, b.id('v'), [setBody])
-				];
+				return [b.getter(local, [b.returnStmt(getExpr)]), b.setter(local, b.id('v'), [setBody])];
 			}
 			return null;
 		}
 	}
 
-	// Boolean: disabled
-	if (attr.value === null && attr.name.type === 'JSXIdentifier') {
-		return b.prop(attrName, b.literal(true));
-	}
+	// Boolean
+	if (attr.value === null && attr.name.type === 'JSXIdentifier') return b.prop(attrName, b.literal(true));
 
 	// Static string
-	if (attr.value?.type === 'Literal') {
-		return b.prop(attrName, b.literal(attr.value.value));
-	}
+	if (attr.value?.type === 'Literal') return b.prop(attrName, b.literal(attr.value.value));
 
-	// Dynamic: {expr}
+	// Dynamic
 	if (attr.value?.type === 'JSXExpressionContainer') {
 		const expr = attr.value.expression;
 		if (expr.type === 'JSXEmptyExpression') return null;
 
-		// Assignment/Update expressions: wrap in arrow function
-		// e.g. onclick={count++} → onclick: () => $.set(count, ...)
 		if (expr.type === 'AssignmentExpression' || expr.type === 'UpdateExpression') {
 			return b.prop(attrName, b.arrow([], walkNode(expr, state)));
 		}
 
 		const isReactive = expressionIsReactive(expr, state);
-
 		if (isReactive) {
-			// Use a getter so reactive props are lazily evaluated.
-			// Walk with insideDerived so shorthand properties use eager $.get()
-			// instead of nested getters.
 			const transformed = walkNode(expr, { ...state, insideDerived: true });
 			return b.getter(attrName, [b.returnStmt(transformed)]);
 		}
-		const transformed = walkNode(expr, state);
-		return b.prop(attrName, transformed);
+		return b.prop(attrName, walkNode(expr, state));
 	}
 
 	return b.prop(attrName, b.literal(null));
 }
-
 
 function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: TransformState, visit: WalkContext['visit'], trackElementPath = false): AstNode[] {
 	const result: AstNode[] = [];
@@ -979,47 +808,32 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 			const text = normalizeJSXText(child.value, isFirst, isLast);
 			if (text.length === 0) continue;
 			if (text.trim().length === 0) {
-				// Drop whitespace-only text nodes around elements and control flow
 				const prev = i > 0 ? children[i - 1] : null;
 				const next = i < children.length - 1 ? children[i + 1] : null;
 				const prevIsElement = prev?.type === 'JSXElement';
 				const nextIsElement = next?.type === 'JSXElement';
-				const isControlFlow = (n: JSXChild | null) => {
+				const isCF = (n: JSXChild | null) => {
 					if (!n || n.type !== 'JSXExpressionContainer') return false;
-					const e = n.expression;
-					// IIFE with control flow body
-					const iifeBody = unwrapIIFE(e as AstNode);
+					const iifeBody = unwrapIIFE(n.expression as AstNode);
 					if (iifeBody && iifeBody.length >= 1) {
 						const first = iifeBody[0];
-						if (first && (first.type === 'IfStatement' || first.type === 'ForOfStatement' ||
+						return first && (first.type === 'IfStatement' || first.type === 'ForOfStatement' ||
 							first.type === 'ForInStatement' || first.type === 'ForStatement' ||
-							first.type === 'SwitchStatement' || first.type === 'TryStatement')) return true;
+							first.type === 'SwitchStatement' || first.type === 'TryStatement');
 					}
 					return false;
 				};
-				// Drop whitespace between element and control flow, or between two elements
-				if ((prevIsElement && nextIsElement) ||
-					(prevIsElement && isControlFlow(next)) ||
-					(isControlFlow(prev) && nextIsElement) ||
-					(isControlFlow(prev) && isControlFlow(next)) ||
-					isFirst || isLast) {
-					continue;
-				}
+				if ((prevIsElement && nextIsElement) || (prevIsElement && isCF(next)) ||
+					(isCF(prev) && nextIsElement) || (isCF(prev) && isCF(next)) || isFirst || isLast) continue;
 			}
 			result.push(b.literal(text));
 			continue;
 		}
 
 		if (child.type === 'JSXElement' || child.type === 'JSXFragment') {
-			// Skip style marker elements (e.g. <$$style0 />)
-			if (child.type === 'JSXElement') {
-				const name = getTagName(child.openingElement.name);
-				if (name.startsWith(STYLE_MARKER_PREFIX)) continue;
-			}
-			const childElementState = trackElementPath
-				? { ...state, elementPath: [...state.elementPath, elementIdx] }
-				: state;
-			result.push(walkNode(child, childElementState));
+			if (child.type === 'JSXElement' && getTagName(child.openingElement.name).startsWith(STYLE_MARKER_PREFIX)) continue;
+			const childState = trackElementPath ? { ...state, elementPath: [...state.elementPath, elementIdx] } : state;
+			result.push(walkNode(child, childState));
 			elementIdx++;
 			continue;
 		}
@@ -1028,49 +842,35 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 			let expr = child.expression;
 			if (expr.type === 'JSXEmptyExpression') continue;
 
-			// Step 1: Unwrap IIFE — {(() => { ...body... })()} → body statements
+			// IIFE → control flow
 			const iifeBody = unwrapIIFE(expr);
-			if (iifeBody) {
-				result.push(transformIIFEBody(iifeBody, state));
-				continue;
-			}
+			if (iifeBody) { result.push(transformIIFEBody(iifeBody, state)); continue; }
 
-			// __html call
+			// __html
 			if (expr.type === 'CallExpression' && expr.callee.type === 'Identifier' && expr.callee.name === '__html') {
-				result.push(walkNode(expr, state));
-				continue;
+				result.push(walkNode(expr, state)); continue;
 			}
 
 			// Nested JSX
-			if (expr.type === 'JSXElement' || expr.type === 'JSXFragment') {
-				result.push(walkNode(expr, state));
-				continue;
+			if (expr.type === 'JSXElement' || expr.type === 'JSXFragment') { result.push(walkNode(expr, state)); continue; }
+
+			// Ternary → $.if
+			if (expr.type === 'ConditionalExpression' && isJSXExpr(expr.consequent) && (isJSXExpr(expr.alternate) || isNullish(expr.alternate))) {
+				result.push(transformTernaryToIf(expr, state)); continue;
 			}
 
-			// Ternary: cond ? <jsx/> : <jsx/>
-			if (expr.type === 'ConditionalExpression') {
-				if (isJSXExpr(expr.consequent) && (isJSXExpr(expr.alternate) || isNullish(expr.alternate))) {
-					result.push(transformTernaryToIf(expr, state));
-					continue;
-				}
-			}
-
-			// Logical &&
+			// && → $.if
 			if (expr.type === 'LogicalExpression' && expr.operator === '&&' && isJSXExpr(expr.right)) {
-				result.push(transformLogicalAndToIf(expr, state));
-				continue;
+				result.push(transformLogicalAndToIf(expr, state)); continue;
 			}
 
-			// .map() → $.for()
-			if (expr.type === 'CallExpression' &&
-				expr.callee.type === 'MemberExpression' &&
+			// .map() → $.for
+			if (expr.type === 'CallExpression' && expr.callee.type === 'MemberExpression' &&
 				expr.callee.property.type === 'Identifier' && expr.callee.property.name === 'map') {
 				const callback = expr.arguments[0];
 				if (callback && (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression') &&
-					callback.body && callback.body.type !== 'BlockStatement' &&
-					isJSXBody(callback.body)) {
-					result.push(transformMapToFor(expr, state));
-					continue;
+					callback.body && callback.body.type !== 'BlockStatement' && isJSXBody(callback.body)) {
+					result.push(transformMapToFor(expr, state)); continue;
 				}
 			}
 
@@ -1078,32 +878,24 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 			const transformed = walkNode(expr, state);
 			const shouldThunk = expressionIsReactive(expr, state)
 				|| (expr.type === 'MemberExpression' && !memberRootIsCallbackParam(expr, state));
-			if (shouldThunk) {
-				result.push(b.arrow([], transformed));
-			} else {
-				result.push(transformed);
-			}
+			result.push(shouldThunk ? b.arrow([], transformed) : transformed);
 			continue;
 		}
 
 		result.push(walkNode(child, state));
 	}
-
 	return result;
 }
 
-// ── Control flow transforms ────────────────────────────────────────
+// ── Control Flow Transforms ────────────────────────────────────────
 
 function transformHtmlCall(node: CallExpression, state: TransformState) {
 	const arg = node.arguments[0];
 	if (!arg || arg.type === 'SpreadElement') return b.literal(null);
-	const transformed = walkNode(arg, state);
-	return b.call('$.html', [b.arrow([], transformed)]);
+	return b.call('$.html', [b.arrow([], walkNode(arg, state))]);
 }
 
-// ── IIFE-based control flow transforms ─────────────────────────────
-
-/** Unwrap an IIFE expression: (() => { ...body... })() → body statements array */
+/** Unwrap IIFE: (() => { ...body... })() → body */
 function unwrapIIFE(expr: AstNode): AstNode[] | null {
 	if (expr.type !== 'CallExpression') return null;
 	if ((expr as any).arguments.length !== 0) return null;
@@ -1115,7 +907,6 @@ function unwrapIIFE(expr: AstNode): AstNode[] | null {
 	return callee.body.body as AstNode[];
 }
 
-/** Unwrap a single-expression IIFE to its inner expression: (() => { expr; })() → expr */
 function unwrapIIFEExpr(expr: AstNode): AstNode | null {
 	const body = unwrapIIFE(expr);
 	if (!body || body.length !== 1) return null;
@@ -1125,9 +916,8 @@ function unwrapIIFEExpr(expr: AstNode): AstNode | null {
 	return null;
 }
 
-/** Process the unwrapped body of an IIFE into the appropriate runtime call */
+/** Convert IIFE body into runtime call */
 function transformIIFEBody(body: AstNode[], state: TransformState): AstNode {
-	// Single statement
 	if (body.length === 1) {
 		const stmt = body[0];
 		if (stmt.type === 'IfStatement') return transformIfStatement(stmt, state);
@@ -1136,29 +926,17 @@ function transformIIFEBody(body: AstNode[], state: TransformState): AstNode {
 		if (stmt.type === 'TryStatement') return transformTryStatement(stmt, state);
 		if (stmt.type === 'ExpressionStatement') {
 			const innerExpr = stmt.expression;
-			if (innerExpr.type === 'JSXElement' || innerExpr.type === 'JSXFragment') {
-				return walkNode(innerExpr, state);
-			}
-			// Ternary: cond ? <jsx/> : <jsx/>
-			if (innerExpr.type === 'ConditionalExpression') {
-				if (isJSXExpr(innerExpr.consequent) && (isJSXExpr(innerExpr.alternate) || isNullish(innerExpr.alternate))) {
-					return transformTernaryToIf(innerExpr, state);
-				}
-			}
-			// Logical &&
-			if (innerExpr.type === 'LogicalExpression' && innerExpr.operator === '&&' && isJSXExpr(innerExpr.right)) {
+			if (innerExpr.type === 'JSXElement' || innerExpr.type === 'JSXFragment') return walkNode(innerExpr, state);
+			if (innerExpr.type === 'ConditionalExpression' && isJSXExpr(innerExpr.consequent) && (isJSXExpr(innerExpr.alternate) || isNullish(innerExpr.alternate)))
+				return transformTernaryToIf(innerExpr, state);
+			if (innerExpr.type === 'LogicalExpression' && innerExpr.operator === '&&' && isJSXExpr(innerExpr.right))
 				return transformLogicalAndToIf(innerExpr, state);
-			}
-			// .map() → $.for()
-			if (innerExpr.type === 'CallExpression' &&
-				innerExpr.callee.type === 'MemberExpression' &&
+			if (innerExpr.type === 'CallExpression' && innerExpr.callee.type === 'MemberExpression' &&
 				innerExpr.callee.property.type === 'Identifier' && innerExpr.callee.property.name === 'map') {
 				const callback = innerExpr.arguments[0];
 				if (callback && (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression') &&
-					callback.body && callback.body.type !== 'BlockStatement' &&
-					isJSXBody(callback.body)) {
+					callback.body && callback.body.type !== 'BlockStatement' && isJSXBody(callback.body))
 					return transformMapToFor(innerExpr as any, state);
-				}
 			}
 			const transformed = walkNode(innerExpr, state);
 			const shouldThunk = expressionIsReactive(innerExpr, state)
@@ -1167,8 +945,18 @@ function transformIIFEBody(body: AstNode[], state: TransformState): AstNode {
 		}
 		if (stmt.type === 'ReturnStatement' && stmt.argument) {
 			const arg = stmt.argument;
-			if (arg.type === 'JSXElement' || arg.type === 'JSXFragment') {
-				return walkNode(arg, state);
+			if (arg.type === 'IfStatement') return transformIfStatement(arg as any, state);
+			if (arg.type === 'JSXElement' || arg.type === 'JSXFragment') return walkNode(arg, state);
+			if (arg.type === 'ConditionalExpression' && isJSXExpr(arg.consequent) && (isJSXExpr(arg.alternate) || isNullish(arg.alternate)))
+				return transformTernaryToIf(arg, state);
+			if (arg.type === 'LogicalExpression' && arg.operator === '&&' && isJSXExpr(arg.right))
+				return transformLogicalAndToIf(arg, state);
+			if (arg.type === 'CallExpression' && arg.callee.type === 'MemberExpression' &&
+				arg.callee.property.type === 'Identifier' && arg.callee.property.name === 'map') {
+				const callback = arg.arguments[0];
+				if (callback && (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression') &&
+					callback.body && callback.body.type !== 'BlockStatement' && isJSXBody(callback.body))
+					return transformMapToFor(arg as any, state);
 			}
 			const transformed = walkNode(arg, state);
 			const shouldThunk = expressionIsReactive(arg, state)
@@ -1177,10 +965,8 @@ function transformIIFEBody(body: AstNode[], state: TransformState): AstNode {
 		}
 	}
 
-	// Multiple statements
 	if (body.length > 1) {
 		const lastStmt = body[body.length - 1];
-		// Declarations + control flow at end
 		if (lastStmt.type === 'IfStatement' || lastStmt.type === 'ForOfStatement' ||
 			lastStmt.type === 'ForInStatement' || lastStmt.type === 'ForStatement' ||
 			lastStmt.type === 'SwitchStatement' || lastStmt.type === 'TryStatement') {
@@ -1190,41 +976,27 @@ function transformIIFEBody(body: AstNode[], state: TransformState): AstNode {
 			else if (lastStmt.type === 'ForOfStatement' || lastStmt.type === 'ForInStatement' || lastStmt.type === 'ForStatement') cfNode = transformForStatement(lastStmt, state);
 			else if (lastStmt.type === 'SwitchStatement') cfNode = transformSwitchStatement(lastStmt, state);
 			else cfNode = transformTryStatement(lastStmt as any, state);
-			const returnStmt = { type: 'ReturnStatement', argument: cfNode } as unknown as AstNode;
-			return b.arrowBlock([], [...preamble, returnStmt]);
+			return b.arrowBlock([], [...preamble, { type: 'ReturnStatement', argument: cfNode } as unknown as AstNode]);
 		}
-		// Declarations + return at end
-		if (lastStmt.type === 'ReturnStatement') {
-			const stmts = body.map(s => walkNode(s, state));
-			return b.arrowBlock([], stmts);
-		}
+		if (lastStmt.type === 'ReturnStatement') return b.arrowBlock([], body.map(s => walkNode(s, state)));
 	}
 
-	// Fallback: walk all statements as block arrow
-	const stmts = body.map(s => walkNode(s, state));
-	return b.arrowBlock([], stmts);
+	return b.arrowBlock([], body.map(s => walkNode(s, state)));
 }
 
-/** Transform an IfStatement from an IIFE body into $.if() */
 function transformIfStatement(node: AstNode, state: TransformState): AstNode {
 	if (node.type !== 'IfStatement') return b.literal(null);
 	const condExpr = walkNode(node.test, state);
-	const trueBranch = transformBranchBody(node.consequent, state);
+	const trueBranch = statementsToArrow(node.consequent, state);
 	const args: AstNode[] = [b.arrow([], condExpr), trueBranch];
 
 	if (node.alternate) {
-		if (node.alternate.type === 'IfStatement') {
-			// else if → nested $.if as the false branch
-			args.push(b.arrow([], transformIfStatement(node.alternate, state)));
-		} else {
-			args.push(transformBranchBody(node.alternate, state));
-		}
+		if (node.alternate.type === 'IfStatement') args.push(b.arrow([], transformIfStatement(node.alternate, state)));
+		else args.push(statementsToArrow(node.alternate, state));
 	}
-
 	return b.call('$.if', args);
 }
 
-/** Transform a for statement from an IIFE body into $.for() */
 function transformForStatement(node: AstNode, state: TransformState): AstNode {
 	if (node.type === 'ForOfStatement' || node.type === 'ForInStatement') {
 		const collection = node.type === 'ForOfStatement'
@@ -1232,14 +1004,12 @@ function transformForStatement(node: AstNode, state: TransformState): AstNode {
 			: b.call('Object.keys', [walkNode(node.right, state)]);
 		const param = extractForParam(node.left);
 
-		// Extract index/key markers from body
 		let bodyNode = node.body;
 		let indexParam: AstNode | null = null;
 		let keyExpr: AstNode | null = null;
 
 		if (bodyNode.type === 'BlockStatement') {
 			const stmts = (bodyNode.body as AstNode[]).slice();
-			// Detect `let i = 0;` at start → index param
 			if (stmts.length > 0 && stmts[0].type === 'VariableDeclaration' && stmts[0].kind === 'let') {
 				const decl = stmts[0].declarations[0];
 				if (decl && decl.id.type === 'Identifier' && decl.init && decl.init.type === 'Literal' && decl.init.value === 0) {
@@ -1247,7 +1017,6 @@ function transformForStatement(node: AstNode, state: TransformState): AstNode {
 					stmts.shift();
 				}
 			}
-			// Detect bare expression statement (non-JSX) at start → key expr
 			if (stmts.length > 0 && stmts[0].type === 'ExpressionStatement') {
 				const expr = stmts[0].expression;
 				if (expr.type !== 'JSXElement' && expr.type !== 'JSXFragment' && expr.type !== 'CallExpression') {
@@ -1255,25 +1024,22 @@ function transformForStatement(node: AstNode, state: TransformState): AstNode {
 					stmts.shift();
 				}
 			}
-			// Mutate body in place to preserve scope map reference
 			(bodyNode as any).body = stmts;
 		}
 
 		const allParams = indexParam ? [...param, indexParam] : param;
 		const bodyCallback = transformForBody(bodyNode, state, allParams);
 		const args: AstNode[] = [b.arrow([], collection), bodyCallback];
-		if (keyExpr) {
-			args.push(b.arrow(param, keyExpr));
-		}
+		if (keyExpr) args.push(b.arrow(param, keyExpr));
 		return b.call('$.for', args);
 	}
+
 	if (node.type === 'ForStatement') {
-		// Classic for → generate collection
 		const initSrc = node.init ? walkNode(node.init, state) : b.literal(null);
 		const testSrc = node.test ? walkNode(node.test, state) : b.literal(true);
 		const updateSrc = node.update ? walkNode(node.update, state) : b.literal(null);
 		let loopVar = '__i';
-		if (node.init && node.init.type === 'VariableDeclaration' && node.init.declarations[0]) {
+		if (node.init?.type === 'VariableDeclaration' && node.init.declarations[0]) {
 			const decl = node.init.declarations[0];
 			if (decl.id.type === 'Identifier') loopVar = decl.id.name;
 		}
@@ -1288,7 +1054,6 @@ function transformForStatement(node: AstNode, state: TransformState): AstNode {
 	return b.literal(null);
 }
 
-/** Transform a SwitchStatement from an IIFE body into $.switch() */
 function transformSwitchStatement(node: AstNode, state: TransformState): AstNode {
 	if (node.type !== 'SwitchStatement') return b.literal(null);
 	const discriminant = walkNode(node.discriminant, state);
@@ -1297,26 +1062,19 @@ function transformSwitchStatement(node: AstNode, state: TransformState): AstNode
 	let pendingValues: AstNode[] = [];
 	for (const sc of node.cases) {
 		if (sc.test) pendingValues.push(walkNode(sc.test, state));
-		// Get body statements (filter break)
 		const bodyStmts = (sc.consequent || []).filter((s: AstNode) => s.type !== 'BreakStatement');
-		if (bodyStmts.length === 0) continue; // fallthrough: accumulate values
+		if (bodyStmts.length === 0) continue;
 		const valuesExpr = pendingValues.length > 0 ? b.array(pendingValues) : b.literal(null);
-		const fn = transformStatementsToCallback(bodyStmts, state, [], true);
-		cases.push(b.object([
-			b.prop('values', valuesExpr),
-			b.prop('fn', fn),
-		]));
+		const fn = statementsToArrowCompact(bodyStmts, state);
+		cases.push(b.object([b.prop('values', valuesExpr), b.prop('fn', fn)]));
 		pendingValues = [];
 	}
-
 	return b.call('$.switch', [b.arrow([], discriminant), b.array(cases)]);
 }
 
-/** Transform a TryStatement from an IIFE body into $.try() */
 function transformTryStatement(node: AstNode, state: TransformState): AstNode {
 	if (node.type !== 'TryStatement') return b.literal(null);
 
-	// Check for __pending declaration at the start of the try body
 	let tryStmts = node.block.body as AstNode[];
 	let pendingCallback: AstNode | null = null;
 	if (tryStmts.length > 0 && tryStmts[0].type === 'VariableDeclaration') {
@@ -1327,13 +1085,12 @@ function transformTryStatement(node: AstNode, state: TransformState): AstNode {
 		}
 	}
 
-	const tryBody = transformStatementsToCallback(tryStmts, state);
+	const tryBody = statementsToArrowBasic(tryStmts, state);
 	const args: AstNode[] = [tryBody];
 
 	if (node.handler) {
 		const param = node.handler.param?.type === 'Identifier' ? [b.id(node.handler.param.name)] : [];
-		const catchBody = transformStatementsToCallback(node.handler.body.body, state, param);
-		args.push(catchBody);
+		args.push(statementsToArrowBasic(node.handler.body.body, state, param));
 	}
 
 	if (pendingCallback) {
@@ -1344,140 +1101,109 @@ function transformTryStatement(node: AstNode, state: TransformState): AstNode {
 	if (node.finalizer) {
 		if (!node.handler && !pendingCallback) args.push(b.id('undefined'));
 		if (!pendingCallback) args.push(b.id('undefined'));
-		const finallyBody = transformStatementsToCallback(node.finalizer.body, state);
-		args.push(finallyBody);
+		args.push(statementsToArrowBasic(node.finalizer.body, state));
 	}
-
 	return b.call('$.try', args);
 }
 
-/** Extract param identifiers from a for-loop left-hand side */
+// ── Shared Control Flow Helpers ────────────────────────────────────
+
 function extractForParam(left: AstNode): AstNode[] {
 	if (left.type === 'VariableDeclaration' && left.declarations[0]) {
 		const decl = left.declarations[0];
 		if (decl.id.type === 'Identifier') return [b.id(decl.id.name)];
-		// Destructuring pattern — pass through
 		return [decl.id as unknown as AstNode];
 	}
 	if (left.type === 'Identifier') return [b.id(left.name)];
 	return [b.id('item')];
 }
 
-/** Transform a for-loop body into a callback arrow */
 function transformForBody(body: AstNode, state: TransformState, params: AstNode[]): AstNode {
 	if (body.type === 'BlockStatement') {
 		const stmts = body.body as AstNode[];
-		// Use the block's scope if available
 		const blockScope = state.analysis.scopes.get(body);
 		const innerState = blockScope ? { ...state, scope: blockScope } : state;
 
-		// Check for single ReturnStatement with IIFE containing control flow
 		if (stmts.length === 1 && stmts[0].type === 'ReturnStatement' && stmts[0].argument) {
-			const arg = stmts[0].argument;
-			const iifeBody = unwrapIIFE(arg);
-			if (iifeBody) {
-				const result = transformIIFEBody(iifeBody, innerState);
-				return b.arrowBlock(params, [b.returnStmt(result)]);
-			}
+			const iifeBody = unwrapIIFE(stmts[0].argument);
+			if (iifeBody) return b.arrowBlock(params, [b.returnStmt(transformIIFEBody(iifeBody, innerState))]);
 		}
 
-		const transformed = stmts.map((s: AstNode) => walkNode(s, innerState));
-		return b.arrowBlock(params, transformed);
+		return b.arrowBlock(params, stmts.map((s: AstNode) => walkNode(s, innerState)));
 	}
-	// Bare ExpressionStatement body (braceless for)
-	if (body.type === 'ExpressionStatement') {
-		return b.arrow(params, walkNode(body.expression, state));
-	}
+	if (body.type === 'ExpressionStatement') return b.arrow(params, walkNode(body.expression, state));
 	return b.arrow(params, walkNode(body, state));
 }
 
-/** Transform a branch body (BlockStatement) into a callback arrow */
-function transformBranchBody(body: AstNode, state: TransformState): AstNode {
+/** Convert a body node (BlockStatement or expression) to an arrow callback */
+function statementsToArrow(body: AstNode, state: TransformState): AstNode {
 	if (body.type === 'BlockStatement') {
 		const stmts = body.body as AstNode[];
-		// Single nested if statement → recursive $.if()
-		if (stmts.length === 1 && stmts[0].type === 'IfStatement') {
-			return b.arrow([], transformIfStatement(stmts[0], state));
-		}
-		// Single for statement → recursive $.for()
-		if (stmts.length === 1 && (stmts[0].type === 'ForOfStatement' || stmts[0].type === 'ForInStatement' || stmts[0].type === 'ForStatement')) {
-			return b.arrow([], transformForStatement(stmts[0], state));
-		}
-		// Single return statement → expression arrow
-		if (stmts.length === 1 && stmts[0].type === 'ReturnStatement' && stmts[0].argument) {
-			let arg = stmts[0].argument;
-			while (arg.type === 'ParenthesizedExpression') arg = arg.expression;
-			return b.arrow([], walkNode(arg, state));
-		}
-		// Single expression statement with JSX → expression arrow
-		if (stmts.length === 1 && stmts[0].type === 'ExpressionStatement') {
-			const expr = stmts[0].expression;
-			if (expr.type === 'JSXElement' || expr.type === 'JSXFragment') {
-				return b.arrow([], walkNode(expr, state));
+		if (stmts.length === 1) {
+			const s = stmts[0];
+			if (s.type === 'IfStatement') return b.arrow([], transformIfStatement(s, state));
+			if (s.type === 'ForOfStatement' || s.type === 'ForInStatement' || s.type === 'ForStatement')
+				return b.arrow([], transformForStatement(s, state));
+			if (s.type === 'ReturnStatement' && s.argument) {
+				let arg = s.argument;
+				while (arg.type === 'ParenthesizedExpression') arg = arg.expression;
+				return b.arrow([], walkNode(arg, state));
+			}
+			if (s.type === 'ExpressionStatement') {
+				const expr = s.expression;
+				if (expr.type === 'JSXElement' || expr.type === 'JSXFragment') return b.arrow([], walkNode(expr, state));
 			}
 		}
-		// Block arrow for everything else
-		const transformed = stmts.map((s: AstNode) => walkNode(s, state));
-		return b.arrowBlock([], transformed);
+		return b.arrowBlock([], stmts.map((s: AstNode) => walkNode(s, state)));
 	}
-	// Bare ExpressionStatement body (braceless if)
-	if (body.type === 'ExpressionStatement') {
-		return b.arrow([], walkNode(body.expression, state));
-	}
+	if (body.type === 'ExpressionStatement') return b.arrow([], walkNode(body.expression, state));
 	return b.arrow([], walkNode(body, state));
 }
 
-/** Transform a list of statements into a callback arrow */
-function transformStatementsToCallback(stmts: AstNode[], state: TransformState, params: AstNode[] = [], compact = false): AstNode {
-	if (stmts.length === 1) {
-		const s = stmts[0];
-		if (s.type === 'ReturnStatement' && s.argument) {
-			return b.arrow(params, walkNode(s.argument, state));
-		}
-		if (compact && s.type === 'ExpressionStatement') {
-			const expr = s.expression;
-			if (expr.type === 'JSXElement' || expr.type === 'JSXFragment') {
-				return b.arrow(params, walkNode(expr, state));
-			}
-		}
+/** Convert statement array to arrow (return-only optimization) */
+function statementsToArrowBasic(stmts: AstNode[], state: TransformState, params: AstNode[] = []): AstNode {
+	if (stmts.length === 1 && stmts[0].type === 'ReturnStatement' && stmts[0].argument) {
+		return b.arrow(params, walkNode(stmts[0].argument, state));
 	}
-	const transformed = stmts.map((s: AstNode) => walkNode(s, state));
-	return b.arrowBlock(params, transformed);
+	return b.arrowBlock(params, stmts.map(s => walkNode(s, state)));
 }
 
-// ── JSX pattern transforms ─────────────────────────────────────────
+/** Convert statement array to arrow (compact: also optimizes single JSX expressions) */
+function statementsToArrowCompact(stmts: AstNode[], state: TransformState, params: AstNode[] = []): AstNode {
+	if (stmts.length === 1) {
+		const s = stmts[0];
+		if (s.type === 'ReturnStatement' && s.argument) return b.arrow(params, walkNode(s.argument, state));
+		if (s.type === 'ExpressionStatement') {
+			const expr = s.expression;
+			if (expr.type === 'JSXElement' || expr.type === 'JSXFragment') return b.arrow(params, walkNode(expr, state));
+		}
+	}
+	return b.arrowBlock(params, stmts.map(s => walkNode(s, state)));
+}
+
+// ── JSX Pattern Transforms ─────────────────────────────────────────
 
 function transformTernaryToIf(expr: Expression, state: TransformState) {
 	if (expr.type !== 'ConditionalExpression') return b.literal(null);
-	const condExpr = walkNode(expr.test, state);
-	const trueExpr = walkNode(unwrapParen(expr.consequent), state);
-	const args = [b.arrow([], condExpr), b.arrow([], trueExpr)];
-	if (!isNullish(expr.alternate)) {
-		args.push(b.arrow([], walkNode(unwrapParen(expr.alternate), state)));
-	}
+	const args = [b.arrow([], walkNode(expr.test, state)), b.arrow([], walkNode(unwrapParen(expr.consequent), state))];
+	if (!isNullish(expr.alternate)) args.push(b.arrow([], walkNode(unwrapParen(expr.alternate), state)));
 	return b.call('$.if', args);
 }
 
 function transformLogicalAndToIf(expr: Expression, state: TransformState) {
 	if (expr.type !== 'LogicalExpression') return b.literal(null);
-	return b.call('$.if', [
-		b.arrow([], walkNode(expr.left, state)),
-		b.arrow([], walkNode(unwrapParen(expr.right), state)),
-	]);
+	return b.call('$.if', [b.arrow([], walkNode(expr.left, state)), b.arrow([], walkNode(unwrapParen(expr.right), state))]);
 }
 
 function transformMapToFor(expr: CallExpression, state: TransformState) {
 	if (expr.callee.type !== 'MemberExpression') return b.literal(null);
 	const collection = walkNode(expr.callee.object, state);
 	const callback = expr.arguments[0];
-	if (!callback || (callback.type !== 'ArrowFunctionExpression' && callback.type !== 'FunctionExpression')) {
+	if (!callback || (callback.type !== 'ArrowFunctionExpression' && callback.type !== 'FunctionExpression'))
 		return b.call('$.for', [b.arrow([], collection), b.arrow([], b.literal(null))]);
-	}
-	const params = callback.params.map((p: ParamPattern) => {
-		if (p.type === 'Identifier') return b.id(p.name);
-		return b.id('item');
-	});
-	const callbackBody = callback.body && callback.body.type === 'BlockStatement'
+
+	const params = callback.params.map((p: ParamPattern) => p.type === 'Identifier' ? b.id(p.name) : b.id('item'));
+	const callbackBody = callback.body?.type === 'BlockStatement'
 		? b.arrowBlock(params, callback.body.body.map((s: AstNode) => walkNode(s, state)))
 		: b.arrow(params, walkNode(unwrapParen(callback.body!), state));
 	return b.call('$.for', [b.arrow([], collection), callbackBody]);
@@ -1662,11 +1388,9 @@ function isInReactiveCallArg(
 		if (ancestor.type === 'CallExpression' && ancestor.callee.type === 'Identifier') {
 			const indices = reactiveCallTargets.get(ancestor.callee.name);
 			if (!indices) continue;
-			const args = ancestor.arguments;
 			for (const idx of indices) {
-				const arg = args[idx];
-				if (!arg) continue;
-				if (node.start >= arg.start && node.end <= arg.end) return true;
+				const arg = ancestor.arguments[idx];
+				if (arg && node.start >= arg.start && node.end <= arg.end) return true;
 			}
 		}
 	}

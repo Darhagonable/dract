@@ -651,6 +651,41 @@ function upgradeComponentParams(
 	compScope: Scope,
 	renamedParams: Record<string, string>,
 ): void {
+	const firstParam = fnNode.params[0];
+
+	// Destructured form: ({name, __bind__x, ...rest}: {types})
+	if (firstParam && firstParam.type === 'ObjectPattern') {
+		for (const prop of (firstParam as any).properties) {
+			if (prop.type === 'RestElement') {
+				if (prop.argument.type === 'Identifier') {
+					const binding = compScope.get(prop.argument.name);
+					if (binding) binding.kind = 'rest-prop';
+				}
+				continue;
+			}
+			// Property node — extract binding name from value
+			let rawName: string | undefined;
+			if (prop.value.type === 'Identifier') {
+				rawName = prop.value.name;
+			} else if (prop.value.type === 'AssignmentPattern' && prop.value.left.type === 'Identifier') {
+				rawName = prop.value.left.name;
+			}
+			if (!rawName) continue;
+
+			const isBind = rawName.startsWith('__bind__');
+			const name = isBind ? rawName.slice(8) : rawName;
+
+			if (isBind) {
+				compScope.declare(name, 'bind-prop', 'let');
+			} else {
+				const binding = compScope.get(rawName);
+				if (binding) binding.kind = 'prop';
+			}
+		}
+		return;
+	}
+
+	// Flat params form (fallback): Identifier, AssignmentPattern, RestElement
 	for (const param of fnNode.params) {
 		if (param.type === 'RestElement') {
 			if (param.argument.type === 'Identifier') {

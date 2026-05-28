@@ -53,9 +53,9 @@ export function dartsxToTsx(source: string): TransformResult {
 	transformStateDeclarations(ms, source, commentRanges);
 	transformDerivedDeclarations(ms, source, commentRanges);
 	transformDefiniteAssignments(ms, source, commentRanges);
-	transformRenderBlocks(ms, source);
+	const renderRanges = transformRenderBlocks(ms, source);
+	wrapAllJSXExpressions(ms, source, renderRanges);
 	transformJsxAttributes(ms, source);
-	transformHtmlDirective(ms, source);
 	blankStyleBlocks(ms, source);
 
 	const code = ms.toString();
@@ -453,9 +453,9 @@ function transformDefiniteAssignments(ms: MagicString, source: string, commentRa
 	}
 }
 
-function transformRenderBlocks(ms: MagicString, source: string): void {
+function transformRenderBlocks(ms: MagicString, source: string): [number, number][] {
 	const re = /\brender\s*\(/g;
-	const processed: { start: number; end: number }[] = [];
+	const renderRanges: [number, number][] = [];
 	let match;
 	while ((match = re.exec(source)) !== null) {
 		const renderStart = match.index;
@@ -475,11 +475,7 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 			ms.appendLeft(closeParen, '</>');
 		}
 
-		// Wrap control flow blocks in IIFEs (skip nested render blocks)
-		if (!processed.some(r => match!.index > r.start && match!.index < r.end)) {
-			processed.push({ start: openParen, end: closeParen });
-			wrapControlFlowBlocks(ms, source, openParen + 1, closeParen);
-		}
+		renderRanges.push([openParen + 1, closeParen]);
 	}
 
 	// render <expr> or render <JSX> → return ...
@@ -487,6 +483,8 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 	while ((match = reOther.exec(source)) !== null) {
 		ms.overwrite(match.index, match.index + 'render'.length, 'return');
 	}
+
+	return renderRanges;
 }
 
 function isSingleJSXRoot(code: string): boolean {
@@ -563,39 +561,160 @@ function isSelfClosingJSXTag(code: string, attrStart: number): boolean {
 	return false;
 }
 
-function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, end: number): void {
+/**
+ * Wrap every JSX expression `{...}` in an IIFE: `{(() => { ... })()}`
+ * Also strips for-clauses, rewrites paren bodies, and wraps multi-root parens in fragments.
+ * Only operates within render block ranges.
+ */
+function wrapAllJSXExpressions(ms: MagicString, source: string, renderRanges: [number, number][]): void {
+	function inRenderRange(pos: number): boolean {
+		for (const [start, end] of renderRanges) {
+			if (pos >= start && pos <= end) return true;
+		}
+		return false;
+	}
+
+	let i = 0;
+	while (i < source.length) {
+		if (source[i] === "'" || source[i] === '"' || source[i] === '`') { i = skipString(source, i); continue; }
+		if (source[i] === '/' && source[i + 1] === '/') { i = skipLineComment(source, i); continue; }
+		if (source[i] === '/' && source[i + 1] === '*') { i = skipBlockComment(source, i); continue; }
+
+		if (source[i] === '{' && inRenderRange(i)) {
+			if (isJSXExpressionContext(source, i)) {
+				const closeBrace = findMatchingBrace(source, i);
+				if (closeBrace !== -1) {
+					const inner = source.slice(i + 1, closeBrace).trimStart();
+					// Skip spread attributes
+					if (inner.startsWith('...')) { i = closeBrace + 1; continue; }
+					// @html directive: {@html expr} → {expr}
+					if (inner.startsWith('@html')) {
+						const expr = inner.slice(5).trim();
+						ms.overwrite(i + 1, closeBrace, expr);
+						i = closeBrace + 1;
+						continue;
+					}
+					// Wrap in IIFE
+					ms.appendLeft(i + 1, '(() => { ');
+					ms.appendLeft(closeBrace, '})()');
+					// Strip for-clauses and rewrite paren bodies
+					stripForClauses(ms, source, i + 1, closeBrace);
+					rewriteParenBodies(ms, source, i + 1, closeBrace);
+					// Fragment-wrap multi-root paren bodies
+					wrapMultiRootParenBodies(ms, source, i + 1, closeBrace);
+					i++;
+					continue;
+				}
+			} else {
+				// In render range but not JSX expression — skip object literals
+				let k = i - 1;
+				while (k >= 0 && /\s/.test(source[k])) k--;
+				const pc = k >= 0 ? source[k] : '';
+				if (pc === '{' || pc === '=' || pc === '(') {
+					const closeBrace = findMatchingBrace(source, i);
+					if (closeBrace !== -1) { i = closeBrace + 1; continue; }
+				}
+			}
+		}
+		i++;
+	}
+}
+
+/**
+ * Determines whether a `{` at the given position is in JSX expression context
+ * (as opposed to a function body, arrow body, else body, etc.)
+ */
+function isJSXExpressionContext(code: string, openBrace: number): boolean {
+	let k = openBrace - 1;
+	while (k >= 0 && /\s/.test(code[k])) k--;
+	if (k < 0) return false;
+
+	const pc = code[k];
+
+	// Attribute value: attr={expr}
+	if (pc === '=') return false;
+	// Function/arrow/if/for body
+	if (pc === '(') return false;
+	if (pc === ')') return false;
+	if (pc === '>' && k > 0 && code[k - 1] === '=') return false;
+	if (/\belse$/.test(code.slice(Math.max(0, k - 4), k + 1))) return false;
+	if (/\btry$/.test(code.slice(Math.max(0, k - 2), k + 1))) return false;
+	if (/\bpending$/.test(code.slice(Math.max(0, k - 6), k + 1))) return false;
+
+	// case/default label
+	if (pc === ':') {
+		let t = k - 1;
+		while (t >= 0 && /\s/.test(code[t])) t--;
+		if (t >= 0 && (code[t] === "'" || code[t] === '"')) return false;
+		if (t >= 0 && /\w/.test(code[t])) {
+			let idEnd = t;
+			while (t >= 0 && /\w/.test(code[t])) t--;
+			const word = code.slice(t + 1, idEnd + 1);
+			if (word === 'case' || word === 'default') return false;
+			const lineStart = code.lastIndexOf('\n', k);
+			if (/^case\b/.test(code.slice(lineStart + 1, k + 1).trim())) return false;
+			let ss = t;
+			while (ss >= 0 && /\s/.test(code[ss])) ss--;
+			if (ss < 0 || code[ss] === ';' || code[ss] === '}' || code[ss] === '{' || code[ss] === '\n') return false;
+		}
+	}
+
+	// Return type annotation: `): ReturnType {`
+	if (/[\w\]>}]/.test(pc)) {
+		let t = k;
+		while (t >= 0) {
+			if (/[\w.$]/.test(code[t])) { t--; continue; }
+			if (code[t] === '|' || code[t] === '&') { t--; continue; }
+			if (/\s/.test(code[t])) { t--; continue; }
+			if (code[t] === ']' && t > 0 && code[t - 1] === '[') { t -= 2; continue; }
+			if (code[t] === '>') { let d = 1; t--; while (t >= 0 && d > 0) { if (code[t] === '>') d++; else if (code[t] === '<') d--; t--; } continue; }
+			if (code[t] === '}') { let d = 1; t--; while (t >= 0 && d > 0) { if (code[t] === '}') d++; else if (code[t] === '{') d--; t--; } continue; }
+			if (code[t] === ')') { let d = 1; t--; while (t >= 0 && d > 0) { if (code[t] === ')') d++; else if (code[t] === '(') d--; t--; } continue; }
+			break;
+		}
+		while (t >= 0 && /\s/.test(code[t])) t--;
+		if (t >= 0 && code[t] === ':') {
+			t--;
+			while (t >= 0 && /\s/.test(code[t])) t--;
+			if (t >= 0 && code[t] === ')') return false;
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Find paren bodies `(...)` that contain multiple JSX roots and wrap in `<>...</>`.
+ */
+function wrapMultiRootParenBodies(ms: MagicString, source: string, start: number, end: number): void {
 	let i = start;
 	while (i < end) {
 		const ch = source[i];
-		if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(source, i);
-			continue;
-		}
+		if (ch === "'" || ch === '"' || ch === '`') { i = skipString(source, i); continue; }
+		if (ch === '/' && source[i + 1] === '/') { i = skipLineComment(source, i); continue; }
+		if (ch === '/' && source[i + 1] === '*') { i = skipBlockComment(source, i); continue; }
 		if (ch === '{') {
-			const closeBrace = findMatchingBrace(source, i);
-			if (closeBrace === -1 || closeBrace > end) { i++; continue; }
-
-			// Check if this brace contains a control flow keyword at the top level
-			let j = i + 1;
-			while (j < closeBrace && /\s/.test(source[j])) j++;
-			const kw = source.slice(j, j + 10);
-
-			if (/^if\s*\(/.test(kw) || /^for\s*[\s(]/.test(kw) || /^switch\s*\(/.test(kw) || /^try[\s({<]/.test(kw)) {
-				ms.appendLeft(i + 1, '(() => { ');
-				ms.appendLeft(closeBrace, '})()');
-				// For for-loops, strip `; index <var>` and `; key <expr>` clauses
-				let forClauses: ForClauseInfo | null = null;
-				if (/^for\s*[\s(]/.test(kw)) {
-					forClauses = stripForClauses(ms, source, j, closeBrace);
+			const close = findMatchingBrace(source, i);
+			if (close !== -1) {
+				if (!isJSXExpressionContext(source, i)) {
+					wrapMultiRootParenBodies(ms, source, i + 1, close);
 				}
-				// Rewrite paren-body control flow to block-body with return
-				rewriteParenBodies(ms, source, j, closeBrace, forClauses);
+				i = close + 1;
+				continue;
 			}
-			// Always recurse into brace blocks to find nested control flow
-			wrapControlFlowBlocks(ms, source, i + 1, closeBrace);
-
-			i = closeBrace + 1;
-			continue;
+		}
+		if (ch === '(') {
+			const closeParen = findMatchingParen(source, i);
+			if (closeParen !== -1 && closeParen < end) {
+				const inner = source.slice(i + 1, closeParen).trim();
+				if (inner.startsWith('<') && !isSingleJSXRoot(inner)) {
+					ms.appendLeft(i + 1, '<>');
+					ms.appendLeft(closeParen, '</>');
+				}
+				wrapMultiRootParenBodies(ms, source, i + 1, closeParen);
+				i = closeParen + 1;
+				continue;
+			}
 		}
 		i++;
 	}
@@ -603,86 +722,100 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 
 /**
  * Info about for-loop clauses stripped from the header.
- * Positions reference the original source for use with ms.move().
  */
 interface ForClauseInfo {
-	/** Position range of the index variable name (e.g. `i`) */
 	indexVar?: { start: number; end: number };
-	/** Position range of the key expression (e.g. `item.id`) */
 	keyExpr?: { start: number; end: number };
 }
 
 /**
  * Strip `; index <var>` and `; key <expr>` clauses from for-loop headers.
- * `for (const x of items; index i; key x.id)` → `for (const x of items)`
- * Returns positions of index var and key expr for source-map-preserving move().
+ * Uses ms.move() to preserve source mappings.
  */
-function stripForClauses(ms: MagicString, source: string, forStart: number, end: number): ForClauseInfo | null {
-	// Find the opening paren of the for-loop
-	let pos = forStart + 3; // skip 'for'
-	while (pos < end && /\s/.test(source[pos])) pos++;
-	if (source[pos] !== '(') return null;
-	const openParen = pos;
-	const closeParen = findMatchingParen(source, openParen);
-	if (closeParen === -1 || closeParen > end) return null;
-
-	// Look for `; index <var>` and `; key <expr>` within the for parens
-	const header = source.slice(openParen + 1, closeParen);
-	const clauseRe = /;\s*(index|key)\s+/g;
-	let firstClauseIdx = -1;
-	let indexVarRange: { start: number; end: number } | undefined;
-	let keyExprRange: { start: number; end: number } | undefined;
-	let clauseMatch;
-
-	while ((clauseMatch = clauseRe.exec(header)) !== null) {
-		if (firstClauseIdx === -1) firstClauseIdx = clauseMatch.index;
-		const afterKw = clauseMatch.index + clauseMatch[0].length;
-		if (clauseMatch[1] === 'index') {
-			const varMatch = header.slice(afterKw).match(/^([A-Za-z_$][\w$]*)/);
-			if (varMatch) {
-				const start = openParen + 1 + afterKw;
-				indexVarRange = { start, end: start + varMatch[1].length };
-			}
-		} else if (clauseMatch[1] === 'key') {
-			const start = openParen + 1 + afterKw;
-			const nextSemi = header.indexOf(';', afterKw);
-			let exprEnd = nextSemi !== -1 ? openParen + 1 + nextSemi : closeParen;
-			// Trim trailing whitespace
-			while (exprEnd > start && /\s/.test(source[exprEnd - 1])) exprEnd--;
-			keyExprRange = { start, end: exprEnd };
+function stripForClauses(ms: MagicString, source: string, start: number, end: number): void {
+	let pos = start;
+	while (pos < end) {
+		if (source[pos] === "'" || source[pos] === '"' || source[pos] === '`') { pos = skipString(source, pos); continue; }
+		if (source[pos] === '{') {
+			const close = findMatchingBrace(source, pos);
+			if (close !== -1) { pos = close + 1; continue; }
 		}
+		if (source[pos] === 'f' && /^for\s*[\s(]/.test(source.slice(pos, pos + 10))) {
+			let p = pos + 3;
+			while (p < end && /\s/.test(source[p])) p++;
+			if (p >= end || source[p] !== '(') { pos++; continue; }
+			const closeParen = findMatchingParen(source, p);
+			if (closeParen === -1 || closeParen >= end) { pos++; continue; }
+
+			const header = source.slice(p + 1, closeParen);
+			const clauseRe = /;\s*(index|key)\s+/g;
+			let firstClauseIdx = -1;
+			let indexVarRange: { start: number; end: number } | undefined;
+			let keyExprRange: { start: number; end: number } | undefined;
+			let clauseMatch;
+
+			while ((clauseMatch = clauseRe.exec(header)) !== null) {
+				if (firstClauseIdx === -1) firstClauseIdx = clauseMatch.index;
+				const afterKw = clauseMatch.index + clauseMatch[0].length;
+				if (clauseMatch[1] === 'index') {
+					const varMatch = header.slice(afterKw).match(/^([A-Za-z_$][\w$]*)/);
+					if (varMatch) {
+						const s = p + 1 + afterKw;
+						indexVarRange = { start: s, end: s + varMatch[1].length };
+					}
+				} else if (clauseMatch[1] === 'key') {
+					const s = p + 1 + afterKw;
+					const nextSemi = header.indexOf(';', afterKw);
+					let exprEnd = nextSemi !== -1 ? p + 1 + nextSemi : closeParen;
+					while (exprEnd > s && /\s/.test(source[exprEnd - 1])) exprEnd--;
+					keyExprRange = { start: s, end: exprEnd };
+				}
+			}
+
+			if (firstClauseIdx !== -1) {
+				const removeStart = p + 1 + firstClauseIdx;
+				if (indexVarRange && keyExprRange) {
+					const first = indexVarRange.start < keyExprRange.start ? indexVarRange : keyExprRange;
+					const second = indexVarRange.start < keyExprRange.start ? keyExprRange : indexVarRange;
+					ms.remove(removeStart, first.start);
+					ms.remove(first.end, second.start);
+					ms.remove(second.end, closeParen + 1);
+				} else if (indexVarRange) {
+					ms.remove(removeStart, indexVarRange.start);
+					ms.remove(indexVarRange.end, closeParen + 1);
+				} else if (keyExprRange) {
+					ms.remove(removeStart, keyExprRange.start);
+					ms.remove(keyExprRange.end, closeParen + 1);
+				}
+				ms.appendLeft(closeParen + 1, ')');
+
+				// Inject clauses into body using move()
+				let bodyStart = closeParen + 1;
+				while (bodyStart < end && /\s/.test(source[bodyStart])) bodyStart++;
+
+				const clauses: ForClauseInfo = { indexVar: indexVarRange, keyExpr: keyExprRange };
+				if (source[bodyStart] === '{') {
+					injectForClausesAtBody(ms, clauses, bodyStart + 1, false, true);
+				} else if (source[bodyStart] === '(') {
+					// Paren body: wrap in block and inject clauses with return
+					const bodyCloseParen = findMatchingParen(source, bodyStart);
+					if (bodyCloseParen !== -1) {
+						ms.appendLeft(bodyStart, '{ ');
+						ms.prependLeft(bodyCloseParen + 1, ' }');
+					}
+					injectForClausesAtBody(ms, clauses, bodyStart, true);
+				}
+			}
+
+			pos = closeParen + 1;
+			continue;
+		}
+		pos++;
 	}
-
-	if (firstClauseIdx === -1) return null;
-
-	// Remove clause syntax but keep the meaningful ranges for move()
-	const removeStart = openParen + 1 + firstClauseIdx;
-
-	if (indexVarRange && keyExprRange) {
-		// Both present — remove everything except the var and expr ranges
-		const first = indexVarRange.start < keyExprRange.start ? indexVarRange : keyExprRange;
-		const second = indexVarRange.start < keyExprRange.start ? keyExprRange : indexVarRange;
-		ms.remove(removeStart, first.start);
-		ms.remove(first.end, second.start);
-		ms.remove(second.end, closeParen + 1);
-	} else if (indexVarRange) {
-		ms.remove(removeStart, indexVarRange.start);
-		ms.remove(indexVarRange.end, closeParen + 1);
-	} else if (keyExprRange) {
-		ms.remove(removeStart, keyExprRange.start);
-		ms.remove(keyExprRange.end, closeParen + 1);
-	}
-	// Re-add ')' without source mapping so hovering ')' doesn't leak type info
-	ms.appendLeft(closeParen + 1, ')');
-
-	return { indexVar: indexVarRange, keyExpr: keyExprRange };
 }
 
 /**
- * Move for-clause ranges (index var, key expr) into the for-body at `target`.
- * Uses ms.move() to preserve source mappings for hover/go-to-definition.
- * If `trailingReturn` is true, appends 'return ' after the last clause (for paren-body).
- * If `leadingSpace` is true, prepends a space before injected content (for block body after `{`).
+ * Move for-clause ranges into the for-body using ms.move() for source-map preservation.
  */
 function injectForClausesAtBody(ms: MagicString, clauses: ForClauseInfo, target: number, trailingReturn = false, leadingSpace = false): void {
 	const returnStr = trailingReturn ? 'return ' : '';
@@ -701,24 +834,21 @@ function injectForClausesAtBody(ms: MagicString, clauses: ForClauseInfo, target:
 }
 
 /**
- * Rewrite paren-body control flow to block-body with return so TS can type-check.
- * Handles: if/for/while/else/try/catch/pending with paren bodies.
+ * Rewrite paren-body control flow to block-body with return.
  */
-function rewriteParenBodies(ms: MagicString, source: string, start: number, end: number, forClauses?: ForClauseInfo | null): void {
+function rewriteParenBodies(ms: MagicString, source: string, start: number, end: number): void {
 	let pos = start;
 
-	/** Wrap a paren body `( ... )` → `{ return ( ... ) }` at current pos */
-	function wrapParenBody(prefix = '{ return '): boolean {
+	function wrapParenBody(): boolean {
 		if (pos >= end || source[pos] !== '(') return false;
 		const closeBody = findMatchingParen(source, pos);
 		if (closeBody === -1 || closeBody > end) return false;
-		ms.appendLeft(pos, prefix);
+		ms.appendLeft(pos, '{ return ');
 		ms.prependLeft(closeBody + 1, '}');
 		pos = closeBody + 1;
 		return true;
 	}
 
-	/** Skip `(...)` condition/params */
 	function skipParens(): boolean {
 		if (pos >= end || source[pos] !== '(') return false;
 		const close = findMatchingParen(source, pos);
@@ -727,19 +857,21 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 		return true;
 	}
 
-	/** Skip whitespace */
 	function skipWs(): void {
 		while (pos < end && /\s/.test(source[pos])) pos++;
 	}
 
-	/** Skip or wrap the body (block body skipped, paren body wrapped) */
-	function handleBody(prefix = '{ return '): boolean {
+	function handleBody(): boolean {
 		skipWs();
 		if (pos >= end) return false;
-		if (source[pos] === '(') return wrapParenBody(prefix);
+		if (source[pos] === '(') return wrapParenBody();
 		if (source[pos] === '{') {
 			const closeBlock = findMatchingBrace(source, pos);
-			if (closeBlock !== -1) { pos = closeBlock + 1; return true; }
+			if (closeBlock !== -1) {
+				rewriteParenBodies(ms, source, pos + 1, closeBlock);
+				pos = closeBlock + 1;
+				return true;
+			}
 		}
 		return false;
 	}
@@ -751,55 +883,74 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 		const slice = source.slice(pos, pos + 10);
 
 		if (/^(if|for|while)\s*[\s(]/.test(slice)) {
-			const isFor = /^for\s/.test(slice);
-			// Skip keyword to opening paren
+			const kwEnd = source.indexOf('(', pos);
+			if (kwEnd === -1 || kwEnd >= end) break;
+			pos = kwEnd;
+			// For for-loops with ; index/key clauses, stripForClauses already handled the body
+			if (/^for\s/.test(slice)) {
+				const headerClose = findMatchingParen(source, pos);
+				if (headerClose === -1 || headerClose >= end) break;
+				const header = source.slice(pos + 1, headerClose);
+				if (/;\s*(index|key)\s+/.test(header)) {
+					pos = headerClose + 1;
+					skipWs();
+					if (source[pos] === '{') {
+						pos++;
+					} else if (source[pos] === '(') {
+						const cp = findMatchingParen(source, pos);
+						if (cp !== -1) pos = cp + 1;
+					}
+					continue;
+				}
+			}
+			if (!skipParens()) break;
+			if (!handleBody()) break;
+		} else if (/^else/.test(slice)) {
+			pos += 4;
+			skipWs();
+			if (pos >= end) break;
+			if (/^if\s*\(/.test(source.slice(pos, pos + 10))) continue;
+			if (!handleBody()) break;
+		} else if (/^try/.test(slice)) {
+			pos += 3;
+			if (!handleBody()) break;
+		} else if (/^catch/.test(slice)) {
+			pos += 5;
+			skipWs();
+			skipParens();
+			if (!handleBody()) break;
+		} else if (/^pending/.test(slice)) {
+			pos += 7;
+			if (!handleBody()) break;
+		} else if (/^switch/.test(slice)) {
 			const kwEnd = source.indexOf('(', pos);
 			if (kwEnd === -1 || kwEnd >= end) break;
 			pos = kwEnd;
 			if (!skipParens()) break;
-			// Handle body — for for-loops with clauses, move index/key into body
-			if (isFor && forClauses) {
-				skipWs();
-				if (pos >= end) break;
-				if (source[pos] === '(') {
-					// Paren body: wrap as { <moved clauses> return (...) }
-					const closeBody = findMatchingParen(source, pos);
-					if (closeBody === -1 || closeBody > end) break;
-					ms.appendLeft(pos, '{ ');
-					// Move index var and key expr into the body, with trailing 'return '
-					injectForClausesAtBody(ms, forClauses, pos, true);
-					ms.prependLeft(closeBody + 1, '}');
-					pos = closeBody + 1;
-				} else if (source[pos] === '{') {
-					// Block body: move clauses after opening brace
-					injectForClausesAtBody(ms, forClauses, pos + 1, false, true);
-					const closeBlock = findMatchingBrace(source, pos);
-					if (closeBlock !== -1) { pos = closeBlock + 1; } else break;
-				} else break;
-			} else {
-				if (!handleBody()) break;
-			}
-		} else if (/^else/.test(slice)) {
-			pos += 4; // skip 'else'
 			skipWs();
-			if (pos >= end) break;
-			if (/^if\s*\(/.test(source.slice(pos, pos + 10))) continue; // else if → loop handles it
-			if (!handleBody()) break;
-		} else if (/^try/.test(slice)) {
-			pos += 3; // skip 'try'
-			if (!handleBody()) break;
-		} else if (/^catch/.test(slice)) {
-			pos += 5; // skip 'catch'
-			skipWs();
-			skipParens(); // skip (e)
-			if (!handleBody()) break;
-		} else if (/^pending/.test(slice)) {
-			pos += 7; // skip 'pending'
-			if (!handleBody()) break;
+			if (source[pos] === '{') {
+				const closeBlock = findMatchingBrace(source, pos);
+				if (closeBlock !== -1) { pos = closeBlock + 1; } else break;
+			} else break;
 		} else {
 			break;
 		}
 	}
+}
+
+function skipLineComment(code: string, start: number): number {
+	let i = start + 2;
+	while (i < code.length && code[i] !== '\n') i++;
+	return i;
+}
+
+function skipBlockComment(code: string, start: number): number {
+	let i = start + 2;
+	while (i < code.length - 1) {
+		if (code[i] === '*' && code[i + 1] === '/') return i + 2;
+		i++;
+	}
+	return code.length;
 }
 
 function findMatchingBrace(code: string, openPos: number): number {
@@ -907,19 +1058,6 @@ function findMatchingParen(code: string, openPos: number): number {
 		if (depth > 0) i++;
 	}
 	return depth === 0 ? i : -1;
-}
-
-// ── {@html expr} → {expr} ─────────────────────────────────────────
-
-function transformHtmlDirective(ms: MagicString, source: string): void {
-	// {@html expr} → {expr} — strip the @html directive for type-checking
-	const re = /\{@html\s+/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		const start = match.index + 1; // after '{'
-		const end = start + match[0].length - 1; // up to end of '@html '
-		ms.overwrite(start, end, '');
-	}
 }
 
 // ── <style> block blanking ─────────────────────────────────────────

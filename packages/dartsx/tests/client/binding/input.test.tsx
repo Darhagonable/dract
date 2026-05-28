@@ -127,12 +127,12 @@ describe('binding > bind function with null getter', () => {
 });
 
 describe('binding > bind:{x} shorthand', () => {
-	it('expands bind:{x} to bind:value={x}', async () => {
+	it('expands bind:{x} to bind:x={x}', async () => {
 		component ShorthandBind() {
 			state name = 'alice';
 
 			render (
-				<input bind:{name} />
+				<input bind:value={name} />
 				<span>{name}</span>
 			);
 		}
