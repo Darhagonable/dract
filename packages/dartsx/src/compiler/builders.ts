@@ -183,6 +183,20 @@ export function declarator(id_: AstNode, init: AstNode) {
 	return node('VariableDeclarator', { id: id_, init });
 }
 
+export function blockStmt(body: AstNode[], loc?: SourceLocation | null) {
+	return node('BlockStatement', { body }, loc);
+}
+
+export function forStmt(
+	init: AstNode | null,
+	test: AstNode | null,
+	update: AstNode | null,
+	body: AstNode,
+	loc?: SourceLocation | null,
+) {
+	return node('ForStatement', { init, test, update, body }, loc);
+}
+
 export function returnStmt(argument: AstNode | null = null, loc?: SourceLocation | null) {
 	return node('ReturnStatement', { argument }, loc);
 }

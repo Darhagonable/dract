@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { preprocess } from '../../src/compiler/phases/1-parse/index.js';
+import { preprocess } from '../../src/compiler/preprocess.js';
 
 const DIR = join(__dirname, 'preprocessor');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;

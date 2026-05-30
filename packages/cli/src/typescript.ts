@@ -7,7 +7,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { dartsxToTsx } from 'dartsx/dartsx-to-tsx';
+import { preprocess } from 'dartsx/preprocess';
 import { mkdirp, posixify, rimraf, walk, write } from './filesystem.js';
 import type { PackageFile } from './types.js';
 
@@ -39,7 +39,7 @@ export async function emit_dts(
 		if (file.isDartsx) {
 			// Transform DarTsx → valid TSX for tsc
 			const source = fs.readFileSync(srcPath, 'utf-8');
-			const { code } = dartsxToTsx(source);
+			const { code } = preprocess(source, { mode: 'typecheck' });
 			fs.writeFileSync(tmpPath, code);
 		} else {
 			fs.copyFileSync(srcPath, tmpPath);

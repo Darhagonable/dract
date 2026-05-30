@@ -25,9 +25,9 @@
 			"types": "./dist/compiler/index.d.ts",
 			"default": "./dist/compiler/index.js"
 		},
-		"./dartsx-to-tsx": {
-			"types": "./dist/dartsx-to-tsx.d.ts",
-			"default": "./dist/dartsx-to-tsx.js"
+		"./preprocess": {
+			"types": "./dist/preprocess.d.ts",
+			"default": "./dist/preprocess.js"
 		}
 	},
 	"scripts": {

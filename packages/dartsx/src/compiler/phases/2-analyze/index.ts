@@ -13,8 +13,8 @@
  * Does NOT build any JSX IR. The transform walks the OXC AST directly
  * with zimmerframe visitors.
  */
-import type { ComponentMeta, PreprocessResult } from '../1-parse';
-import { STATE_MARKER, DERIVED_MARKER } from '../1-parse';
+import type { ComponentMeta, PreprocessResult } from '../../preprocess';
+import { STATE_MARKER, DERIVED_MARKER } from '../../preprocess';
 import {
 	Scope,
 	ScopeRoot,
@@ -68,6 +68,8 @@ export interface ComponentInfo {
 	bodyNode: FunctionBody | null;
 	/** Per-component rename map (localName → externalName) */
 	renamedParams: Record<string, string>;
+	/** Local names that are bind props */
+	bindParams: string[];
 	/** Style blocks for this component */
 	styleBlocks: StyleBlockIR[];
 	/** Component's own scope (child of module scope, created by create_scopes) */
@@ -158,7 +160,7 @@ export function analyze(
 			const fnNode = fn.node;
 			const compScope = scopes.get(fnNode) || moduleScope;
 
-			upgradeComponentParams(fnNode, compScope, meta.renamedParams[compMeta.name] || {});
+			upgradeComponentParams(fnNode, compScope, meta.renamedParams[compMeta.name] || {}, meta.bindParams?.[compMeta.name] || []);
 
 			const styleBlockIRs: StyleBlockIR[] = compStyleBlocks.map((sb, index) => ({
 				css: sb.css,
@@ -172,6 +174,7 @@ export function analyze(
 				node,
 				bodyNode: fn.body,
 				renamedParams: meta.renamedParams[compMeta.name] || {},
+				bindParams: meta.bindParams?.[compMeta.name] || [],
 				styleBlocks: styleBlockIRs,
 				scope: compScope,
 			};
@@ -650,7 +653,41 @@ function upgradeComponentParams(
 	fnNode: OxcFunction,
 	compScope: Scope,
 	renamedParams: Record<string, string>,
+	bindParamNames: string[],
 ): void {
+	const bindSet = new Set(bindParamNames);
+
+	// New format: first param is ObjectPattern ({x, y, ...rest})
+	const firstParam = fnNode.params[0];
+	if (firstParam && firstParam.type === 'ObjectPattern') {
+		for (const prop of firstParam.properties) {
+			if (prop.type === 'RestElement') {
+				if (prop.argument.type === 'Identifier') {
+					const binding = compScope.get(prop.argument.name);
+					if (binding) binding.kind = 'rest-prop';
+				}
+				continue;
+			}
+			// Property — get local name from value (Identifier or AssignmentPattern)
+			let localName: string | undefined;
+			if (prop.value.type === 'Identifier') {
+				localName = prop.value.name;
+			} else if (prop.value.type === 'AssignmentPattern' && prop.value.left.type === 'Identifier') {
+				localName = prop.value.left.name;
+			}
+			if (!localName) continue;
+
+			if (bindSet.has(localName)) {
+				compScope.declare(localName, 'bind-prop', 'let');
+			} else {
+				const binding = compScope.get(localName);
+				if (binding) binding.kind = 'prop';
+			}
+		}
+		return;
+	}
+
+	// Legacy fallback: flat params with __bind__ prefix
 	for (const param of fnNode.params) {
 		if (param.type === 'RestElement') {
 			if (param.argument.type === 'Identifier') {
@@ -660,7 +697,6 @@ function upgradeComponentParams(
 			continue;
 		}
 
-		// FormalParameter (BindingIdentifier | AssignmentPattern | ObjectPattern | ArrayPattern)
 		let rawName: string | undefined;
 		if (param.type === 'Identifier') {
 			rawName = param.name;
@@ -673,8 +709,6 @@ function upgradeComponentParams(
 		const name = isBind ? rawName.slice(8) : rawName;
 
 		if (isBind) {
-			// Bind params: __bind__value → value in the scope
-			// The body references "value", not "__bind__value", so declare the clean name
 			compScope.declare(name, 'bind-prop', 'let');
 		} else {
 			const binding = compScope.get(rawName);
