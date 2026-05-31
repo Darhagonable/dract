@@ -6,15 +6,16 @@
  * - The TypeScript plugin (language service type-checking & intellisense)
  *
  * A `mode` option controls the few output differences:
- * - `compiler`: inserts $$s/$$d markers for AST identification, replaces styles with markers
- * - `typecheck`: uses `satisfies T as T` for state types, blanks CSS preserving interpolations
+ * - `compiler`: replaces styles with `<$$styleN />` markers
+ * - `typecheck`: blanks CSS preserving interpolations, wraps assignment attrs in arrows
  *
- * Both modes produce IIFEs for control flow and full destructured params.
+ * Both modes produce IIFEs for control flow, full destructured params,
+ * $$s/$$d markers, and `satisfies T as T` for typed state.
  * All transforms use MagicString for source-map-safe manipulation.
  *
  * Transforms:
  *   - `component Name(params)` → `function Name({params}: {types})`
- *   - `state x =` → `let $$sN = 0, x =` (+ `satisfies T as T` in typecheck)
+ *   - `state x: T =` → `let $$sN = 0, x = init satisfies T as T`
  *   - `derived x =` → `const $$dN = 0, x =`
  *   - `render (...)` → `return (<>...</>)` with IIFE-wrapped control flow
  *   - `{if/for/switch/try}` in JSX → IIFE wrappers `{(() => { ... })()}`
@@ -114,7 +115,7 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 
 	// Transform passes (order matters)
 	transformComponentDeclarations(ms, source, commentRanges, components, renamedParams, bindParams, mode);
-	transformStateDeclarations(ms, source, commentRanges, stateVars, mode);
+	transformStateDeclarations(ms, source, commentRanges, stateVars);
 	transformDerivedDeclarations(ms, source, commentRanges, derivedVars);
 	if (mode === 'typecheck') {
 		transformDefiniteAssignments(ms, source, commentRanges);
@@ -486,7 +487,7 @@ function findDefaultEquals(source: string, start = 0, end = source.length): numb
 
 function transformStateDeclarations(
 	ms: MagicString, source: string, commentRanges: SkipRange[],
-	stateVars: string[], mode: 'compiler' | 'typecheck',
+	stateVars: string[],
 ): void {
 	let stateCounter = 0;
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+(\w+))/g;
@@ -511,17 +512,23 @@ function transformStateDeclarations(
 		ms.overwrite(stateStart, stateEnd, 'let');
 		ms.appendLeft(stateEnd, ` ${STATE_MARKER}${stateCounter++} = 0,`);
 
-		// typecheck: also move type annotation to `satisfies T as T`
-		if (mode === 'typecheck') {
+		// Move type annotation to `satisfies T as T` (only when there's an initializer)
+		if (source[peek] === '=') {
 			const colonIdx = source.indexOf(':', afterVar);
-			const eqIdx = source.indexOf('=', afterVar);
-			if (colonIdx !== -1 && eqIdx !== -1 && colonIdx < eqIdx) {
-				const typeText = source.slice(colonIdx + 1, eqIdx).trim();
-				ms.overwrite(colonIdx, eqIdx, ' ');
-				const semiIdx = source.indexOf(';', eqIdx);
-				if (semiIdx !== -1) {
-					ms.appendLeft(semiIdx, ` satisfies ${typeText} as ${typeText}`);
+			if (colonIdx !== -1 && colonIdx < peek) {
+				const typeText = source.slice(colonIdx + 1, peek).trim();
+				ms.overwrite(colonIdx, peek, ' ');
+				// Find end of value expression (`;` or `\n` at bracket depth 0)
+				let ins = peek + 1, depth = 0;
+				while (ins < source.length) {
+					const ch = source[ins];
+					if (ch === "'" || ch === '"' || ch === '`') { ins = skipString(source, ins); continue; }
+					if (ch === '(' || ch === '{' || ch === '[') depth++;
+					else if (ch === ')' || ch === '}' || ch === ']') depth--;
+					else if (depth === 0 && (ch === ';' || ch === '\n')) break;
+					ins++;
 				}
+				ms.appendLeft(ins, ` satisfies ${typeText} as ${typeText}`);
 			}
 		}
 	}

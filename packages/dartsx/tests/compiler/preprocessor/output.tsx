@@ -1,8 +1,8 @@
 function Dashboard<T extends Record<string, unknown>>({user, items, status}: {user: { name: string, role: string }, items: { id: number, ok: boolean, label: string }[], status: string}) {
   let $$s0 = 0, loading = true
   let $$s1 = 0, error = null as string | null
-  let $$s2 = 0, count: number = 0
-  let $$s3 = 0, map: Map<string, number> = new Map()
+  let $$s2 = 0, count = 0 satisfies number as number
+  let $$s3 = 0, map = new Map() satisfies Map<string, number> as Map<string, number>
   const $$d0 = 0, count = items.length
   const $$d1 = 0, double: number = count * 2
   const $$d2 = 0, entries: [string, number][] = Array.from(map)
