@@ -14,8 +14,8 @@
  *
  * Transforms:
  *   - `component Name(params)` → `function Name({params}: {types})`
- *   - `state x =` → `let [$$sN = 0,] x =` (compiler) or `let x = init satisfies T as T` (typecheck)
- *   - `derived x =` → `const [$$dN = 0,] x =` (compiler) or `const x =` (typecheck)
+ *   - `state x =` → `let $$sN = 0, x =` (+ `satisfies T as T` in typecheck)
+ *   - `derived x =` → `const $$dN = 0, x =`
  *   - `render (...)` → `return (<>...</>)` with IIFE-wrapped control flow
  *   - `{if/for/switch/try}` in JSX → IIFE wrappers `{(() => { ... })()}`
  *   - `bind:{x}` → `bind:x={x}` (shorthand expansion)
@@ -115,7 +115,7 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	// Transform passes (order matters)
 	transformComponentDeclarations(ms, source, commentRanges, components, renamedParams, bindParams, mode);
 	transformStateDeclarations(ms, source, commentRanges, stateVars, mode);
-	transformDerivedDeclarations(ms, source, commentRanges, derivedVars, mode);
+	transformDerivedDeclarations(ms, source, commentRanges, derivedVars);
 	if (mode === 'typecheck') {
 		transformDefiniteAssignments(ms, source, commentRanges);
 	}
@@ -507,14 +507,12 @@ function transformStateDeclarations(
 
 		stateVars.push(name);
 
-		if (mode === 'compiler') {
-			// Insert marker: state x → let $$sN = 0, x
-			const replacement = `${exportKw}let ${STATE_MARKER}${stateCounter++} = 0, ${name}`;
-			ms.overwrite(match.index, afterVar, replacement);
-		} else {
-			// typecheck: state x → let x; also move type to `satisfies T as T`
-			ms.overwrite(stateStart, stateEnd, 'let');
+		// Replace `state` → `let` and insert marker (preserves identifier source positions)
+		ms.overwrite(stateStart, stateEnd, 'let');
+		ms.appendLeft(stateEnd, ` ${STATE_MARKER}${stateCounter++} = 0,`);
 
+		// typecheck: also move type annotation to `satisfies T as T`
+		if (mode === 'typecheck') {
 			const colonIdx = source.indexOf(':', afterVar);
 			const eqIdx = source.indexOf('=', afterVar);
 			if (colonIdx !== -1 && eqIdx !== -1 && colonIdx < eqIdx) {
@@ -533,7 +531,7 @@ function transformStateDeclarations(
 
 function transformDerivedDeclarations(
 	ms: MagicString, source: string, commentRanges: SkipRange[],
-	derivedVars: string[], mode: 'compiler' | 'typecheck',
+	derivedVars: string[],
 ): void {
 	let derivedCounter = 0;
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[\w{[])/g;
@@ -563,12 +561,8 @@ function transformDerivedDeclarations(
 			const pattern = source.slice(cursor, patternEnd + 1);
 			collectPatternIdentifiers(pattern, derivedVars);
 
-			if (mode === 'compiler') {
-				const keywordEnd = derivedStart + 'derived'.length;
-				ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
-			} else {
-				ms.overwrite(derivedStart, derivedStart + 'derived'.length, 'const');
-			}
+			const keywordEnd = derivedStart + 'derived'.length;
+			ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
 		} else {
 			// Simple: derived name = expr
 			const nameMatch = source.slice(cursor).match(/^(\w+)/);
@@ -583,12 +577,8 @@ function transformDerivedDeclarations(
 
 			derivedVars.push(name);
 
-			if (mode === 'compiler') {
-				const keywordEnd = derivedStart + 'derived'.length;
-				ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
-			} else {
-				ms.overwrite(derivedStart, derivedStart + 'derived'.length, 'const');
-			}
+			const keywordEnd = derivedStart + 'derived'.length;
+			ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
 		}
 	}
 }

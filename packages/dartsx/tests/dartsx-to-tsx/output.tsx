@@ -1,7 +1,7 @@
 export default function Counter() {
-  let name = "world"
-  let count = 0
-  const doubled = count * 2
+  let $$s0 = 0, name = "world"
+  let $$s1 = 0, count = 0
+  const $$d0 = 0, doubled = count * 2
 
   return (<>
     <h1>Hello {name}!</h1>
@@ -20,8 +20,8 @@ async function Loader() {
 }
 
 export function UserCard({name, age, active = true}: {name: string, age: number, active?: boolean}) {
-  export let theme = "light"
-  let editing = false
+  export let $$s2 = 0, theme = "light"
+  let $$s3 = 0, editing = false
 
   return (
     <div>
@@ -38,16 +38,16 @@ export function UserBadge({'display-name': displayName, status = 'offline'}: {'d
 }
 
 function DerivedPatterns() {
-  const { count, increment } = CounterCtx()
-  const { user: { name }, items: [first, { label: itemLabel }] } = loadData()
-  const { user: { name: userName = 'anon' }, ...rest } = loadMore()
-  const [head = 1, ...tail] = getList()
+  const $$d1 = 0, { count, increment } = CounterCtx()
+  const $$d2 = 0, { user: { name }, items: [first, { label: itemLabel }] } = loadData()
+  const $$d3 = 0, { user: { name: userName = 'anon' }, ...rest } = loadMore()
+  const $$d4 = 0, [head = 1, ...tail] = getList()
 }
 
 function Form() {
-  let text = ""
-  let checked = false
-  let selected = "a"
+  let $$s4 = 0, text = ""
+  let $$s5 = 0, checked = false
+  let $$s6 = 0, selected = "a"
 
   return (<>
     <input bind:value={text} />
@@ -62,10 +62,10 @@ function Form() {
 }
 
 function ControlFlow() {
-  let loading = true
-  let error = null as string | null
-  let items = [1, 2, 3]
-  let status = "active" as string
+  let $$s7 = 0, loading = true
+  let $$s8 = 0, error = null as string | null
+  let $$s9 = 0, items = [1, 2, 3]
+  let $$s10 = 0, status = "active" as string
 
   return (
     <div>
@@ -138,8 +138,8 @@ function ControlFlow() {
 }
 
 function Events() {
-  let count = 0
-  let x = 0
+  let $$s11 = 0, count = 0
+  let $$s12 = 0, x = 0
 
   return (<>
     <button onclick={() => count++}>increment</button>
@@ -151,7 +151,7 @@ function Events() {
 }
 
 function GenericComponent<T extends Record<string, unknown>>({data, label}: {data: T, label: string}) {
-  const keys = Object.keys(data)
+  const $$d5 = 0, keys = Object.keys(data)
 
   return (
     <div>
