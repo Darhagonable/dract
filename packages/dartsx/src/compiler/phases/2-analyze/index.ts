@@ -20,10 +20,9 @@ import {
 	ScopeRoot,
 	create_scopes,
 } from '../../scope';
+import type { AstNode } from '../../builders';
 import type {
 	Program,
-	Node,
-	Span,
 	Statement,
 	Directive,
 	Expression,
@@ -37,9 +36,6 @@ import type {
 } from 'oxc-parser';
 
 // ── Types ──────────────────────────────────────────────────────────
-
-/** OXC AST node that has a span (filters out Modifier which lacks start/end) */
-type AstNode = Extract<Node, Span>;
 
 /** Runtime type guard: checks that a value is a span-bearing AST node */
 function isAstNode(value: unknown): value is AstNode {
@@ -682,38 +678,6 @@ function upgradeComponentParams(
 			} else {
 				const binding = compScope.get(localName);
 				if (binding) binding.kind = 'prop';
-			}
-		}
-		return;
-	}
-
-	// Legacy fallback: flat params with __bind__ prefix
-	for (const param of fnNode.params) {
-		if (param.type === 'RestElement') {
-			if (param.argument.type === 'Identifier') {
-				const binding = compScope.get(param.argument.name);
-				if (binding) binding.kind = 'rest-prop';
-			}
-			continue;
-		}
-
-		let rawName: string | undefined;
-		if (param.type === 'Identifier') {
-			rawName = param.name;
-		} else if (param.type === 'AssignmentPattern' && param.left.type === 'Identifier') {
-			rawName = param.left.name;
-		}
-		if (!rawName) continue;
-
-		const isBind = rawName.startsWith('__bind__');
-		const name = isBind ? rawName.slice(8) : rawName;
-
-		if (isBind) {
-			compScope.declare(name, 'bind-prop', 'let');
-		} else {
-			const binding = compScope.get(rawName);
-			if (binding) {
-				binding.kind = 'prop';
 			}
 		}
 	}

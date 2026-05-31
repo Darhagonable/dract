@@ -684,9 +684,9 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 				overwrittenRanges?.push({ start: j, end: closeBrace });
 			} else if (topLevel && /^(const|let|var)\s/.test(inner)) {
 				// Anonymous block: { const x = ...; render <expr> }
-				// Wrap as {__block(() => { ... })}
-				ms.appendLeft(i + 1, '__block(() => {');
-				ms.appendLeft(closeBrace, '})');
+				// Wrap as IIFE: {(() => { ... })()}
+				ms.appendLeft(i + 1, '(() => {');
+				ms.appendLeft(closeBrace, '})()');
 				// Handle control flow inside the block (rewrite paren bodies, add returns)
 				rewriteParenBodies(ms, source, j, closeBrace, null);
 			} else {
@@ -843,66 +843,36 @@ function readBlockOrParenRange(source: string, pos: number, end: number): { star
 	return null;
 }
 
-function extractBlockOrParenBody(source: string, start: number, end: number): string {
-	const ch = source[start];
-	if (ch === '{') {
-		// Keep as block: { ... }
-		return source.slice(start, end);
-	}
-	if (ch === '(') {
-		// Paren body → block with return: ( ... ) → { return (...) }
-		return `{ return ${source.slice(start, end)} }`;
-	}
-	// Bare JSX → wrap in block with return
-	return `{ return (${source.slice(start, end)}) }`;
-}
-
-/**
- * Find the end of a JSX element starting at pos (self-closing or with close tag).
- * Very simplified — just finds the matching > or />.
- */
-function findJSXEnd(source: string, start: number, end: number): number {
-	let pos = start;
-	if (source[pos] !== '<') return -1;
-	pos++;
-	// Find tag name
-	while (pos < end && /[\w.]/.test(source[pos])) pos++;
-	// Find closing > or />
-	while (pos < end) {
-		if (source[pos] === '/' && pos + 1 < end && source[pos + 1] === '>') return pos + 2;
-		if (source[pos] === '>') {
-			// Need to find matching close tag
+/** Find the end of a JSX element starting at `<`. Returns position after element, or -1. */
+function findJSXEnd(source: string, start: number, end = source.length): number {
+	if (source[start] !== '<') return -1;
+	let pos = start + 1;
+	while (pos < end && /[a-zA-Z0-9._$]/.test(source[pos])) pos++;
+	let depth = 1;
+	while (pos < end && depth > 0) {
+		if (source[pos] === '/' && source[pos + 1] === '>') {
+			depth--;
+			pos += 2;
+		} else if (source[pos] === '<' && source[pos + 1] === '/') {
+			depth--;
+			const gt = source.indexOf('>', pos + 2);
+			pos = gt !== -1 ? gt + 1 : pos + 2;
+		} else if (source[pos] === '<' && source[pos + 1] !== '/' && source[pos + 1] !== '!') {
+			depth++;
 			pos++;
-			let depth = 1;
-			while (pos < end && depth > 0) {
-				if (source[pos] === '<') {
-					if (source[pos + 1] === '/') {
-						depth--;
-						if (depth === 0) {
-							const closeEnd = source.indexOf('>', pos);
-							return closeEnd !== -1 ? closeEnd + 1 : -1;
-						}
-					} else if (source[pos + 1] !== '!' && source[pos + 1] !== ' ') {
-						depth++;
-					}
-				}
-				pos++;
-			}
-			return -1;
-		}
-		if (source[pos] === '{') {
+		} else if (source[pos] === '>' && depth === 1) {
+			pos++;
+		} else if (source[pos] === '{') {
 			const close = findMatchingBrace(source, pos);
 			if (close === -1) return -1;
 			pos = close + 1;
-			continue;
-		}
-		if (source[pos] === '"' || source[pos] === "'") {
+		} else if (source[pos] === "'" || source[pos] === '"' || source[pos] === '`') {
 			pos = skipString(source, pos);
-			continue;
+		} else {
+			pos++;
 		}
-		pos++;
 	}
-	return -1;
+	return depth === 0 ? pos : -1;
 }
 
 // ── For-clause handling ────────────────────────────────────────────
@@ -1146,8 +1116,9 @@ function removeCaseBreak(ms: MagicString, source: string, exprStart: number, end
 		if (pos === -1) return;
 		pos++;
 	} else if (source[pos] === '<') {
-		// Skip JSX element — find matching close tag or self-closing
-		pos = skipJSXElement(source, pos, end);
+		const jsxEnd = findJSXEnd(source, pos, end);
+		if (jsxEnd === -1) return;
+		pos = jsxEnd;
 	}
 	// Skip whitespace
 	while (pos < end && /\s/.test(source[pos])) pos++;
@@ -1160,40 +1131,6 @@ function removeCaseBreak(ms: MagicString, source: string, exprStart: number, end
 		if (breakEnd < end && source[breakEnd] === ';') breakEnd++;
 		ms.overwrite(pos, breakEnd, ' '.repeat(breakEnd - pos));
 	}
-}
-
-/** Skip a JSX element starting at `<` — finds the end of the element */
-function skipJSXElement(source: string, start: number, end: number): number {
-	let pos = start + 1;
-	// Find the tag name end
-	while (pos < end && /[a-zA-Z0-9._]/.test(source[pos])) pos++;
-	// Find the `>` or `/>` for the opening tag
-	let depth = 1;
-	while (pos < end && depth > 0) {
-		if (source[pos] === '/' && source[pos + 1] === '>') {
-			depth--;
-			pos += 2;
-		} else if (source[pos] === '<' && source[pos + 1] === '/') {
-			depth--;
-			// Find closing >
-			const gt = source.indexOf('>', pos + 2);
-			pos = gt !== -1 ? gt + 1 : pos + 2;
-		} else if (source[pos] === '<' && source[pos + 1] !== '/' && source[pos + 1] !== '!') {
-			depth++;
-			pos++;
-		} else if (source[pos] === '>' && depth === 1) {
-			// Opening tag closed, look for close tag
-			pos++;
-		} else if (source[pos] === '{') {
-			const close = findMatchingBrace(source, pos);
-			pos = close !== -1 ? close + 1 : pos + 1;
-		} else if (source[pos] === "'" || source[pos] === '"' || source[pos] === '`') {
-			pos = skipString(source, pos);
-		} else {
-			pos++;
-		}
-	}
-	return pos;
 }
 
 /**
@@ -1481,125 +1418,29 @@ function skipTypeAnnotation(code: string, start: number): number {
 	return i;
 }
 
-function findMatchingParen(code: string, openPos: number): number {
+function findMatching(code: string, openPos: number, open: string, close: string): number {
 	let depth = 1;
 	let i = openPos + 1;
 	while (i < code.length && depth > 0) {
 		const ch = code[i];
-		if (ch === '(') depth++;
-		else if (ch === ')') depth--;
-		else if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(code, i);
-			continue;
-		}
-		if (depth > 0) i++;
-	}
-	return depth === 0 ? i : -1;
-}
-
-function findMatchingBrace(code: string, openPos: number): number {
-	let depth = 1;
-	let i = openPos + 1;
-	while (i < code.length && depth > 0) {
-		const ch = code[i];
-		if (ch === '{') depth++;
-		else if (ch === '}') { depth--; if (depth === 0) return i; }
-		else if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(code, i);
-			continue;
-		}
+		if (ch === open) depth++;
+		else if (ch === close) { depth--; if (depth === 0) return i; }
+		else if (ch === "'" || ch === '"' || ch === '`') { i = skipString(code, i); continue; }
 		i++;
 	}
 	return -1;
 }
 
-function findMatchingBracket(code: string, openPos: number): number {
-	let depth = 1;
-	let i = openPos + 1;
-	while (i < code.length && depth > 0) {
-		const ch = code[i];
-		if (ch === '[') depth++;
-		else if (ch === ']') { depth--; if (depth === 0) return i; }
-		else if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(code, i);
-			continue;
-		}
-		i++;
-	}
-	return -1;
-}
+const findMatchingParen = (code: string, pos: number) => findMatching(code, pos, '(', ')');
+const findMatchingBrace = (code: string, pos: number) => findMatching(code, pos, '{', '}');
+const findMatchingBracket = (code: string, pos: number) => findMatching(code, pos, '[', ']');
 
 function isSingleJSXRoot(code: string): boolean {
 	const trimmed = code.trim();
 	if (!trimmed.startsWith('<')) return false;
-	const end = findJSXElementEnd(trimmed, 0);
+	const end = findJSXEnd(trimmed, 0);
 	if (end <= 0) return false;
 	return trimmed.slice(end).trim() === '';
-}
-
-function findJSXElementEnd(code: string, start: number): number {
-	let i = start + 1;
-	const tagStart = i;
-	while (i < code.length && /[\w.$]/.test(code[i])) i++;
-	const tagName = code.slice(tagStart, i);
-	if (!tagName) return start;
-
-	while (i < code.length) {
-		if (code[i] === '/' && code[i + 1] === '>') return i + 2;
-		if (code[i] === '>') { i++; break; }
-		if (code[i] === '{') { i = skipJSXExpr(code, i); continue; }
-		if (code[i] === "'" || code[i] === '"') { i = skipString(code, i); continue; }
-		i++;
-	}
-
-	let nesting = 1;
-	while (i < code.length && nesting > 0) {
-		if (code[i] === '<') {
-			if (code[i + 1] === '/') {
-				const ns = i + 2;
-				let ne = ns;
-				while (ne < code.length && /[\w.$]/.test(code[ne])) ne++;
-				if (code.slice(ns, ne) === tagName) {
-					nesting--;
-					if (nesting === 0) { while (ne < code.length && code[ne] !== '>') ne++; return ne + 1; }
-				}
-				i = ne;
-			} else {
-				const ns = i + 1;
-				let ne = ns;
-				while (ne < code.length && /[\w.$]/.test(code[ne])) ne++;
-				if (code.slice(ns, ne) === tagName && !isSelfClosingTag(code, ne)) nesting++;
-				i = ne;
-			}
-			continue;
-		}
-		if (code[i] === '{') { i = skipJSXExpr(code, i); continue; }
-		i++;
-	}
-	return i;
-}
-
-function skipJSXExpr(code: string, start: number): number {
-	let depth = 1;
-	let i = start + 1;
-	while (i < code.length && depth > 0) {
-		if (code[i] === '{') depth++;
-		else if (code[i] === '}') depth--;
-		else if (code[i] === "'" || code[i] === '"' || code[i] === '`') { i = skipString(code, i); continue; }
-		i++;
-	}
-	return i;
-}
-
-function isSelfClosingTag(code: string, attrStart: number): boolean {
-	let j = attrStart;
-	while (j < code.length && code[j] !== '>') {
-		if (code[j] === '/' && code[j + 1] === '>') return true;
-		if (code[j] === '{') { j = skipJSXExpr(code, j); continue; }
-		if (code[j] === "'" || code[j] === '"') { j = skipString(code, j); continue; }
-		j++;
-	}
-	return false;
 }
 
 function collectPatternIdentifiers(pattern: string, names: string[]): void {

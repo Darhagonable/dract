@@ -14,7 +14,7 @@
  * - `AssignmentExpression`: reactive writes → $.set()
  * - `UpdateExpression`: count++ → $.set(count, $.get(count) + 1)
  * - JSX nodes: → $.jsx() runtime calls
- * - `CallExpression`: __if/__for/__switch/__try/__block → $.if/$.for/etc.
+ * - `CallExpression`: __try/__html → $.try/$.html, IIFEs → $.if/$.for/etc.
  */
 import { walk, type Context } from 'zimmerframe';
 import type { AnalysisResult, ComponentInfo, StyleBlockIR } from '../2-analyze';
@@ -22,13 +22,12 @@ import { STATE_MARKER, DERIVED_MARKER, STYLE_MARKER_PREFIX } from '../../preproc
 import type { Scope } from '../../scope';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 import * as b from '../../builders';
+import type { AstNode } from '../../builders';
 import { print, type PrintOptions } from 'esrap';
 import tsx from 'esrap/languages/tsx';
 import { decodeHTML } from 'entities';
 import { parseSync } from 'oxc-parser';
 import type {
-	Node,
-	Span,
 	Expression,
 	Argument,
 	ParamPattern,
@@ -44,19 +43,24 @@ import type {
 	ForInStatement,
 	ForStatement,
 	SwitchStatement,
-	SwitchCase,
 	JSXChild,
 	JSXElement,
 	JSXElementName,
 	JSXAttributeName,
 	JSXAttribute,
 	JSXMemberExpressionObject,
+	JSXFragment,
+	JSXExpressionContainer,
+	Program,
+	ReturnStatement,
+	ExpressionStatement,
+	ObjectPattern,
+	ArrayPattern,
+	BindingProperty,
+	BindingRestElement,
 } from 'oxc-parser';
 
 // ── Types ──────────────────────────────────────────────────────────
-
-/** OXC AST node that has a span (filters out Modifier which lacks start/end) */
-type AstNode = Extract<Node, Span>;
 
 /** zimmerframe context specialized for our transform walk */
 type WalkContext = Context<AstNode, TransformState>;
@@ -123,14 +127,7 @@ export function transform(
 	derivedDestructureCounter = 0;
 
 	const transformed = walk<AstNode, TransformState>(analysis.ast, initialState, {
-		_(node, { next, state }) {
-			const scope = state.analysis.scopes.get(node);
-			if (scope && scope !== state.scope) {
-				next({ ...state, scope });
-			} else {
-				next();
-			}
-		},
+		...visitors,
 
 		Program(node, { state, visit }) {
 			const body: AstNode[] = [];
@@ -165,65 +162,6 @@ export function transform(
 			}
 
 			return b.program(body);
-		},
-
-		VariableDeclaration(node, { state, next }) {
-			return transformVariableDeclaration(node, state, next);
-		},
-
-		FunctionDeclaration(node, { state, next }) {
-			const compInfo = state.analysis.components.get(node);
-			if (compInfo) {
-				return transformComponent(node, compInfo, state, state.filename, state.cssFragments, state.emitStyleCalls);
-			}
-			return next();
-		},
-
-		Identifier(node, { state, path }) {
-			return transformIdentifier(node, state, path);
-		},
-
-		Property(node, { state, next }) {
-			if (node.type !== 'Property') return next();
-			return transformShorthandProperty(node, state, next);
-		},
-
-		AssignmentExpression(node, { state, visit }) {
-			return transformAssignment(node, state, visit);
-		},
-
-		UpdateExpression(node, { state }) {
-			return transformUpdate(node, state);
-		},
-
-		JSXElement(node, { state, visit }) {
-			return transformJSXElement(node, state, visit);
-		},
-
-		JSXFragment(node, { state, visit }) {
-			const children = transformJSXChildren(node.children, state, visit);
-			if (children.length === 0) return b.literal(null);
-			if (children.length === 1) return children[0];
-			return b.call('$.jsx', [
-				b.member('$.Fragment'),
-				b.object([b.prop('children', b.array(children))]),
-			]);
-		},
-
-		CallExpression(node, { state, next }) {
-			if (node.callee.type !== 'Identifier') return next();
-			const fn = node.callee.name;
-			if (fn === '__if') return transformIfCall(node, state);
-			if (fn === '__for') return transformForCall(node, state);
-			if (fn === '__switch') return transformSwitchCall(node, state);
-			if (fn === '__try') return transformTryCall(node, state);
-			if (fn === '__block') return transformBlockCall(node, state);
-			if (fn === '__html') return transformHtmlCall(node, state);
-			return transformReactiveCallOrNext(node, state, next);
-		},
-
-		JSXExpressionContainer(node, { state, visit }) {
-			return visit(node.expression, state);
 		},
 	});
 
@@ -314,12 +252,6 @@ function transformComponent(
 					stmts.push(b.constDecl(localName, b.call('$.prop', args)));
 				}
 			}
-		} else {
-			// Legacy format: flat params with __bind__ prefix
-			for (const param of fnNode.params) {
-				const propStmt = transformParam(param, renamedParams, parentState.analysis.source, propsName);
-				if (propStmt) stmts.push(propStmt);
-			}
 		}
 	}
 
@@ -371,106 +303,69 @@ function transformComponent(
 	return funcDecl;
 }
 
-function transformParam(param: ParamPattern, renamedParams: Record<string, string>, source: string, propsName = '$$props') {
-	if (param.type === 'RestElement') {
-		const name = param.argument.type === 'Identifier' ? param.argument.name : 'rest';
-		return b.letDecl(name, b.id(propsName));
-	}
+// ── Shared visitors ────────────────────────────────────────────────
 
-	// FormalParameter: BindingIdentifier | AssignmentPattern | ObjectPattern | ArrayPattern
-	let rawName: string | undefined;
-	if (param.type === 'Identifier') {
-		rawName = param.name;
-	} else if (param.type === 'AssignmentPattern' && param.left.type === 'Identifier') {
-		rawName = param.left.name;
-	}
-	if (!rawName) return null;
-
-	const isBind = rawName.startsWith('__bind__');
-	const name = isBind ? rawName.slice(8) : rawName;
-	const externalName = renamedParams[name] || name;
-
-	const defaultValue = param.type === 'AssignmentPattern' ? param.right : null;
-
-	if (isBind) {
-		const args: AstNode[] = [b.id(propsName), b.literal(externalName)];
-		if (defaultValue) args.push(defaultValue);
-		return b.letDecl(name, b.call('$.prop.bind', args));
-	}
-
-	const args: AstNode[] = [b.id(propsName), b.literal(externalName)];
-	if (defaultValue) args.push(defaultValue);
-	return b.constDecl(name, b.call('$.prop', args));
-}
-
-// ── Walk a single node with component-level visitors ───────────────
+const visitors = {
+	_(node: AstNode, { next, state: s }: { next: WalkContext['next']; state: TransformState }) {
+		const scope = s.analysis.scopes.get(node);
+		if (scope && scope !== s.scope) {
+			next({ ...s, scope });
+		} else {
+			next();
+		}
+	},
+	FunctionDeclaration(node: AstNode, { state: s, next }: { state: TransformState; next: WalkContext['next'] }) {
+		const compInfo = s.analysis.components.get(node);
+		if (compInfo) {
+			return transformComponent(node, compInfo, s, s.filename, s.cssFragments, s.emitStyleCalls);
+		}
+		return next();
+	},
+	VariableDeclaration(node: VariableDeclaration, { state: s, next }: { state: TransformState; next: WalkContext['next'] }) {
+		return transformVariableDeclaration(node, s, next);
+	},
+	Identifier(node: AstNode, { state: s, path }: { state: TransformState; path: AstNode[] }) {
+		return transformIdentifier(node, s, path);
+	},
+	Property(node: AstNode, { state: s, next }: { state: TransformState; next: WalkContext['next'] }) {
+		if (node.type !== 'Property') return next();
+		return transformShorthandProperty(node, s, next);
+	},
+	AssignmentExpression(node: AssignmentExpression, { state: s, visit }: { state: TransformState; visit: WalkContext['visit'] }) {
+		return transformAssignment(node, s, visit);
+	},
+	UpdateExpression(node: UpdateExpression, { state: s }: { state: TransformState }) {
+		return transformUpdate(node, s);
+	},
+	JSXElement(node: JSXElement, { state: s, visit }: { state: TransformState; visit: WalkContext['visit'] }) {
+		return transformJSXElement(node, s, visit);
+	},
+	JSXFragment(node: JSXFragment, { state: s, visit }: { state: TransformState; visit: WalkContext['visit'] }) {
+		const children = transformJSXChildren(node.children, s, visit, true);
+		if (children.length === 0) return b.literal(null);
+		if (children.length === 1) return children[0];
+		return b.call('$.jsx', [
+			b.member('$.Fragment'),
+			b.object([b.prop('children', b.array(children))]),
+		]);
+	},
+	CallExpression(node: CallExpression, { state: s, next }: { state: TransformState; next: WalkContext['next'] }) {
+		if (node.callee.type !== 'Identifier') {
+			if (isControlFlowIIFE(node)) return transformIIFE(node, s);
+			return next();
+		}
+		const fn = node.callee.name;
+		if (fn === '__try') return transformTryCall(node, s);
+		if (fn === '__html') return transformHtmlCall(node, s);
+		return transformReactiveCallOrNext(node, s, next);
+	},
+	JSXExpressionContainer(node: JSXExpressionContainer, { state: s, visit }: { state: TransformState; visit: WalkContext['visit'] }) {
+		return visit(node.expression, s);
+	},
+};
 
 function walkNode(node: AstNode, state: TransformState): AstNode {
-	return walk<AstNode, TransformState>(node, state, {
-		_(node, { next, state: s }) {
-			const scope = s.analysis.scopes.get(node);
-			if (scope && scope !== s.scope) {
-				next({ ...s, scope });
-			} else {
-				next();
-			}
-		},
-		FunctionDeclaration(node, { state: s, next }) {
-			const compInfo = s.analysis.components.get(node);
-			if (compInfo) {
-				return transformComponent(node, compInfo, s, s.filename, s.cssFragments, s.emitStyleCalls);
-			}
-			return next();
-		},
-		VariableDeclaration(node, { state: s, next }) {
-			return transformVariableDeclaration(node, s, next);
-		},
-		Identifier(node, { state: s, path }) {
-			return transformIdentifier(node, s, path);
-		},
-		Property(node, { state: s, next }) {
-			if (node.type !== 'Property') return next();
-			return transformShorthandProperty(node, s, next);
-		},
-		AssignmentExpression(node, { state: s, visit }) {
-			return transformAssignment(node, s, visit);
-		},
-		UpdateExpression(node, { state: s }) {
-			return transformUpdate(node, s);
-		},
-		JSXElement(node, { state: s, visit }) {
-			return transformJSXElement(node, s, visit);
-		},
-		JSXFragment(node, { state: s, visit }) {
-			const children = transformJSXChildren(node.children, s, visit, true);
-			if (children.length === 0) return b.literal(null);
-			if (children.length === 1) return children[0];
-			return b.call('$.jsx', [
-				b.member('$.Fragment'),
-				b.object([b.prop('children', b.array(children))]),
-			]);
-		},
-		CallExpression(node, { state: s, next }) {
-			if (node.callee.type !== 'Identifier') {
-				// Check if this is a control flow IIFE
-				if (isControlFlowIIFE(node)) {
-					return transformIIFE(node, s);
-				}
-				return next();
-			}
-			const fn = node.callee.name;
-			if (fn === '__if') return transformIfCall(node, s);
-			if (fn === '__for') return transformForCall(node, s);
-			if (fn === '__switch') return transformSwitchCall(node, s);
-			if (fn === '__try') return transformTryCall(node, s);
-			if (fn === '__block') return transformBlockCall(node, s);
-			if (fn === '__html') return transformHtmlCall(node, s);
-			return transformReactiveCallOrNext(node, s, next);
-		},
-		JSXExpressionContainer(node, { state: s, visit }) {
-			return visit(node.expression, s);
-		},
-	});
+	return walk<AstNode, TransformState>(node, state, visitors);
 }
 
 // ── Shared transform functions ─────────────────────────────────────
@@ -565,11 +460,11 @@ function lowerDerivedDestructuring(pattern: AstNode, initExpr: AstNode, out: Ast
 }
 
 function memberComputed(obj: AstNode, index: number): AstNode {
-	return { type: 'MemberExpression', object: obj, property: b.literal(index), computed: true, start: 0, end: 0, loc: null } as any;
+	return b.computedMember(obj, b.literal(index));
 }
 
 function memberDot(obj: AstNode, prop: string): AstNode {
-	return { type: 'MemberExpression', object: obj, property: b.id(prop), computed: false, start: 0, end: 0, loc: null } as any;
+	return b.staticMember(obj, prop);
 }
 
 function sliceCall(obj: AstNode, from: number): AstNode {
@@ -578,57 +473,55 @@ function sliceCall(obj: AstNode, from: number): AstNode {
 
 function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]): void {
 	if (pattern.type === 'ObjectPattern') {
-		for (const prop of (pattern as any).properties || []) {
-			if (!prop) continue;
+		for (const prop of pattern.properties) {
 			if (prop.type === 'RestElement') {
-				if (prop.argument?.type === 'Identifier') {
+				if (prop.argument.type === 'Identifier') {
 					// ...rest — use object spread minus other keys
-					const otherKeys = ((pattern as any).properties || [])
-						.filter((p: any) => p && p.type !== 'RestElement')
-						.map((p: any) => {
-							if (p.key?.type === 'Identifier') return p.key.name;
-							if (p.key?.type === 'StringLiteral') return p.key.value;
+					const otherKeys = pattern.properties
+						.filter((p): p is BindingProperty => p.type === 'Property')
+						.map((p) => {
+							if (p.key.type === 'Identifier') return p.key.name;
+							if (p.key.type === 'Literal' && typeof p.key.value === 'string') return p.key.value;
 							return null;
 						})
-						.filter(Boolean) as string[];
-					// Build: (() => { const { knownKeys, ...rest } = baseExpr; return rest; })()
+						.filter((k): k is string => k !== null);
+					// Build: (({ key1, key2, ...rest }) => rest)(baseExpr)
 					const restExpr = buildObjectRest(baseExpr, otherKeys, prop.argument.name);
 					out.push(b.declarator(b.id(prop.argument.name), b.call('$.derived', [b.arrow([], restExpr)])));
 				}
 				continue;
 			}
-			const key = prop.key?.type === 'Identifier' ? prop.key.name : (prop.key?.type === 'StringLiteral' ? prop.key.value : null);
+			const key = prop.key.type === 'Identifier' ? prop.key.name : (prop.key.type === 'Literal' && typeof prop.key.value === 'string' ? prop.key.value : null);
 			if (!key) continue;
 			const accessExpr = memberDot(baseExpr, key);
-			const value = prop.value || prop.key;
+			const value = prop.value;
 			if (value.type === 'Identifier') {
 				out.push(b.declarator(b.id(value.name), b.call('$.derived', [b.arrow([], accessExpr)])));
-			} else if (value.type === 'AssignmentPattern' && value.left?.type === 'Identifier') {
+			} else if (value.type === 'AssignmentPattern' && value.left.type === 'Identifier') {
 				// { a = defaultVal }
 				const name = value.left.name;
 				const cond = b.binary('!==', accessExpr, b.id('undefined'));
-				const ternary = { type: 'ConditionalExpression', test: cond, consequent: accessExpr, alternate: value.right, start: 0, end: 0, loc: null } as any;
+				const ternary = b.conditional(cond, accessExpr, value.right);
 				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
 			} else if (value.type === 'ObjectPattern' || value.type === 'ArrayPattern') {
 				emitDerivedBindings(value, accessExpr, out);
 			}
 		}
 	} else if (pattern.type === 'ArrayPattern') {
-		const elements = (pattern as any).elements || [];
-		for (let i = 0; i < elements.length; i++) {
-			const elem = elements[i];
+		for (let i = 0; i < pattern.elements.length; i++) {
+			const elem = pattern.elements[i];
 			if (!elem) continue;
-			if (elem.type === 'RestElement' && elem.argument?.type === 'Identifier') {
+			if (elem.type === 'RestElement' && elem.argument.type === 'Identifier') {
 				out.push(b.declarator(b.id(elem.argument.name), b.call('$.derived', [b.arrow([], sliceCall(baseExpr, i))])));
 				continue;
 			}
 			const accessExpr = memberComputed(baseExpr, i);
 			if (elem.type === 'Identifier') {
 				out.push(b.declarator(b.id(elem.name), b.call('$.derived', [b.arrow([], accessExpr)])));
-			} else if (elem.type === 'AssignmentPattern' && elem.left?.type === 'Identifier') {
+			} else if (elem.type === 'AssignmentPattern' && elem.left.type === 'Identifier') {
 				const name = elem.left.name;
 				const cond = b.binary('!==', accessExpr, b.id('undefined'));
-				const ternary = { type: 'ConditionalExpression', test: cond, consequent: accessExpr, alternate: elem.right, start: 0, end: 0, loc: null } as any;
+				const ternary = b.conditional(cond, accessExpr, elem.right);
 				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
 			} else if (elem.type === 'ObjectPattern' || elem.type === 'ArrayPattern') {
 				emitDerivedBindings(elem, accessExpr, out);
@@ -640,14 +533,11 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 function buildObjectRest(baseExpr: AstNode, excludeKeys: string[], restName: string): AstNode {
 	// Build: (({ key1, key2, ...rest }) => rest)(baseExpr)
 	const restId = b.id(restName);
-	const props: AstNode[] = excludeKeys.map(k => ({
-		type: 'Property', key: b.id(k), value: b.id(k), kind: 'init', shorthand: true, computed: false, method: false, start: 0, end: 0, loc: null
-	} as any));
-	props.push({ type: 'RestElement', argument: restId, start: 0, end: 0, loc: null } as any);
-	const param = { type: 'ObjectPattern', properties: props, start: 0, end: 0, loc: null } as any;
-	const arrow = b.arrow([param], restId);
-	const paren = { type: 'ParenthesizedExpression', expression: arrow, start: 0, end: 0, loc: null } as any;
-	return b.call(paren, [baseExpr]);
+	const props: AstNode[] = excludeKeys.map(k => b.shorthandProp(k));
+	props.push(b.restElement(restId));
+	const param = b.objectPattern(props);
+	const arrowExpr = b.arrow([param], restId);
+	return b.call(b.paren(arrowExpr), [baseExpr]);
 }
 
 function transformShorthandProperty(node: Extract<AstNode, { type: 'Property' }>, state: TransformState, next: WalkContext['next']) {
@@ -948,7 +838,7 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 					const result = [
 						buildBindGetter(local, walkNode(el0, state)),
 						buildBindSetter(local, walkNode(el1, state)),
-					].filter(Boolean) as AstNode[];
+					].filter((n): n is AstNode => n !== null);
 					return result;
 				}
 			}
@@ -1031,8 +921,9 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 					if (n?.type !== 'JSXExpressionContainer') return false;
 					const e = n.expression;
 					if (e.type === 'CallExpression') {
-						if (e.callee.type === 'Identifier' && ['__if', '__for', '__switch', '__try', '__block'].includes(e.callee.name)) return true;
+						if (e.callee.type === 'Identifier' && ['__try', '__html'].includes(e.callee.name)) return true;
 						if (isControlFlowIIFE(e)) return true;
+						if (isBlockIIFE(e)) return true;
 					}
 					return false;
 				};
@@ -1070,7 +961,7 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 			// Control flow calls (__try, __html)
 			if (expr.type === 'CallExpression' && expr.callee.type === 'Identifier') {
 				const fn = expr.callee.name;
-				if (fn === '__if' || fn === '__for' || fn === '__switch' || fn === '__try' || fn === '__block' || fn === '__html') {
+				if (fn === '__try' || fn === '__html') {
 					result.push(walkNode(expr, state));
 					continue;
 				}
@@ -1078,7 +969,13 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 
 			// IIFE control flow: (() => { if/for/switch ... })()
 			if (isControlFlowIIFE(expr)) {
-				result.push(transformIIFE(expr as CallExpression, state));
+				result.push(transformIIFE(expr, state));
+				continue;
+			}
+
+			// Block IIFE: (() => { const x = ...; ... })()
+			if (isBlockIIFE(expr)) {
+				result.push(transformBlockIIFECall(expr, state));
 				continue;
 			}
 
@@ -1137,31 +1034,53 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 
 // ── IIFE detection & transformation ────────────────────────────────
 
+interface IIFEParts {
+	callee: ArrowFunctionExpression;
+	body: AstNode[];
+}
+
+/** Extract the arrow and block body from a zero-arg IIFE, or null */
+function extractIIFE(node: AstNode): IIFEParts | null {
+	if (node.type !== 'CallExpression') return null;
+	if (node.arguments.length !== 0) return null;
+	const callee = unwrapParen(node.callee);
+	if (callee.type !== 'ArrowFunctionExpression') return null;
+	if (callee.params.length !== 0) return null;
+	if (callee.body.type !== 'BlockStatement') return null;
+	const body = callee.body.body;
+	if (body.length === 0) return null;
+	return { callee, body };
+}
+
 /**
- * Detect an IIFE that wraps control flow: (() => { if/for/switch ... })()
+ * Detect an IIFE that wraps control flow:
+ * - (() => { if/for/switch ... })()
  */
 function isControlFlowIIFE(node: AstNode): boolean {
-	if (node.type !== 'CallExpression') return false;
-	const call = node as CallExpression;
-	if (call.arguments.length !== 0) return false;
-	const callee = unwrapParen(call.callee);
-	if (callee.type !== 'ArrowFunctionExpression') return false;
-	if (callee.params.length !== 0) return false;
-	if (callee.body.type !== 'BlockStatement') return false;
-	const body = callee.body.body;
-	if (body.length === 0) return false;
-	const first = body[0];
+	const parts = extractIIFE(node);
+	if (!parts) return false;
+	const first = parts.body[0];
 	return first.type === 'IfStatement' || first.type === 'ForOfStatement' ||
 		first.type === 'ForInStatement' || first.type === 'ForStatement' ||
 		first.type === 'SwitchStatement';
 }
 
 /**
- * Transform an IIFE control flow expression into runtime calls.
+ * Detect a block IIFE: (() => { const/let/var ...; ... })()
  */
-function transformIIFE(node: CallExpression, state: TransformState): AstNode {
-	const callee = unwrapParen(node.callee) as ArrowFunctionExpression;
-	const body = (callee.body as BlockStatement).body;
+function isBlockIIFE(node: AstNode): boolean {
+	const parts = extractIIFE(node);
+	if (!parts) return false;
+	return parts.body[0].type === 'VariableDeclaration';
+}
+
+/**
+ * Transform an IIFE control flow expression into runtime calls.
+ * Caller must have verified this is an IIFE via isControlFlowIIFE/extractIIFE.
+ */
+function transformIIFE(node: AstNode, state: TransformState): AstNode {
+	const parts = extractIIFE(node)!;
+	const { callee, body } = parts;
 	const first = body[0];
 
 	// Enter the IIFE's scope (the arrow function might have one)
@@ -1178,8 +1097,27 @@ function transformIIFE(node: CallExpression, state: TransformState): AstNode {
 		return transformSwitchStatementToRuntime(first, iifeState);
 	}
 
+	// Block IIFE (starts with variable declaration): produce a thunk
+	if (first.type === 'VariableDeclaration') {
+		return transformBlockIIFE(body, iifeState);
+	}
+
 	// Fallback: walk as-is
 	return walkNode(node, state);
+}
+
+/**
+ * Transform a block IIFE called from JSX children context.
+ * Caller must have verified this is a block IIFE via isBlockIIFE/extractIIFE.
+ */
+function transformBlockIIFECall(node: AstNode, state: TransformState): AstNode {
+	const parts = extractIIFE(node)!;
+	const { callee, body } = parts;
+
+	const iifeScope = state.analysis.scopes.get(callee) || state.scope;
+	const iifeState = iifeScope !== state.scope ? { ...state, scope: iifeScope } : state;
+
+	return transformBlockIIFE(body, iifeState);
 }
 
 /**
@@ -1311,7 +1249,7 @@ function transformCStyleFor(node: ForStatement, state: TransformState): AstNode 
 
 	// Build collection thunk: () => { const __a = []; for (init; test; update) __a.push(iterVar); return __a; }
 	const arrName = '__a';
-	const initStmt = node.init ? walkNode(node.init as AstNode, state) : null;
+	const initStmt = node.init ? walkNode(node.init, state) : null;
 	const testExpr = node.test ? walkNode(node.test, state) : b.literal(true);
 	const updateExpr = node.update ? walkNode(node.update, state) : null;
 
@@ -1434,79 +1372,21 @@ function blockToArrow(block: AstNode, state: TransformState): AstNode {
 		return b.arrowBlock([], transformedStmts);
 	}
 	// Single statement (shouldn't normally happen, but handle gracefully)
-	if (block.type === 'ReturnStatement' && (block as any).argument) {
-		return b.arrow([], walkNode(unwrapParen((block as any).argument), state));
+	if (block.type === 'ReturnStatement') {
+		if (block.argument) return b.arrow([], walkNode(unwrapParen(block.argument), state));
 	}
 	// ExpressionStatement → unwrap to get the expression for an expression arrow
 	if (block.type === 'ExpressionStatement') {
-		return b.arrow([], walkNode((block as any).expression, state));
+		return b.arrow([], walkNode(block.expression, state));
 	}
 	// Control flow statement directly
 	if (block.type === 'IfStatement') {
-		return b.arrow([], transformIfStatementToRuntime(block as IfStatement, state));
+		return b.arrow([], transformIfStatementToRuntime(block, state));
 	}
 	return b.arrow([], walkNode(block, state));
 }
 
-// ── Legacy control flow call transforms ────────────────────────────
-
-/** Extract the expression from a condition arrow `() => (expr)` */
-function transformConditionArrow(node: Argument | undefined, state: TransformState, fallback: AstNode): AstNode {
-	if (!node || node.type !== 'ArrowFunctionExpression') return fallback;
-	if (node.body.type === 'BlockStatement') return walkNode(node.body, state);
-	return walkNode(unwrapParen(node.body), state);
-}
-
-function transformIfCall(node: CallExpression, state: TransformState) {
-	const args = node.arguments;
-
-	const resultArgs = [
-		b.arrow([], transformConditionArrow(args[0], state, b.literal(true))),
-		transformCFCallback(args[1], state),
-	];
-
-	if (args[2]) {
-		resultArgs.push(transformCFCallback(args[2], state));
-	}
-
-	return b.call('$.if', resultArgs);
-}
-
-function transformForCall(node: CallExpression, state: TransformState) {
-	const args = node.arguments;
-
-	const resultArgs = [
-		b.arrow([], transformConditionArrow(args[0], state, b.array([]))),
-		transformCFCallback(args[1], state),
-	];
-
-	if (args[2] && args[2].type === 'ArrowFunctionExpression') {
-		resultArgs.push(transformCFCallback(args[2], state));
-	}
-
-	return b.call('$.for', resultArgs);
-}
-
-function transformSwitchCall(node: CallExpression, state: TransformState) {
-	const args = node.arguments;
-
-	const cases: AstNode[] = [];
-	for (let i = 1; i < args.length; i += 2) {
-		const valuesArg = args[i];
-		const fnArg = args[i + 1];
-
-		const valuesExpr = valuesArg?.type === 'ArrayExpression'
-			? b.array(valuesArg.elements.map((el) => el ? walkNode(el, state) : b.literal(null)))
-			: b.literal(null);
-
-		cases.push(b.object([
-			b.prop('values', valuesExpr),
-			b.prop('fn', fnArg ? transformCFCallback(fnArg, state) : b.arrow([], b.literal(null))),
-		]));
-	}
-
-	return b.call('$.switch', [b.arrow([], transformConditionArrow(args[0], state, b.literal(''))), b.array(cases)]);
-}
+// ── Control flow call transforms ───────────────────────────────────
 
 function transformTryCall(node: CallExpression, state: TransformState) {
 	const args = node.arguments;
@@ -1525,39 +1405,40 @@ function transformTryCall(node: CallExpression, state: TransformState) {
 	return b.call('$.try', resultArgs);
 }
 
-function transformBlockCall(node: CallExpression, state: TransformState) {
-	const arrowFn = node.arguments[0];
-	if (!arrowFn || arrowFn.type !== 'ArrowFunctionExpression') return b.literal(null);
+/**
+ * Transform a block IIFE (starts with variable declarations) into a thunk.
+ * If the last statement is control flow, convert it to runtime calls.
+ */
+function transformBlockIIFE(stmts: AstNode[], state: TransformState): AstNode {
+	if (stmts.length > 0) {
+		const last = stmts[stmts.length - 1];
+		const isControlFlow = last.type === 'IfStatement' || last.type === 'ForOfStatement' ||
+			last.type === 'ForInStatement' || last.type === 'ForStatement' || last.type === 'SwitchStatement';
 
-	// Check if the arrow body is a block with control flow as last statement
-	if (arrowFn.body.type === 'BlockStatement') {
-		const stmts = arrowFn.body.body;
-		if (stmts.length > 0) {
-			const last = stmts[stmts.length - 1];
-			const isControlFlow = last.type === 'IfStatement' || last.type === 'ForOfStatement' ||
-				last.type === 'ForInStatement' || last.type === 'ForStatement' || last.type === 'SwitchStatement';
-
-			if (isControlFlow) {
-				// Transform: wrap control flow in return + $.if/$.for/$.switch
-				const transformedStmts: AstNode[] = [];
-				for (let i = 0; i < stmts.length - 1; i++) {
-					transformedStmts.push(walkNode(stmts[i], state));
-				}
-				let cfResult: AstNode;
-				if (last.type === 'IfStatement') {
-					cfResult = transformIfStatementToRuntime(last, state);
-				} else if (last.type === 'ForOfStatement' || last.type === 'ForInStatement' || last.type === 'ForStatement') {
-					cfResult = transformForStatementToRuntime(last as ForOfStatement | ForInStatement | ForStatement, state);
-				} else {
-					cfResult = transformSwitchStatementToRuntime(last as SwitchStatement, state);
-				}
-				transformedStmts.push(b.returnStmt(cfResult));
-				return b.arrowBlock([], transformedStmts);
+		if (isControlFlow) {
+			// Transform: wrap control flow in return + $.if/$.for/$.switch
+			const transformedStmts: AstNode[] = [];
+			for (let i = 0; i < stmts.length - 1; i++) {
+				transformedStmts.push(walkNode(stmts[i], state));
 			}
+			let cfResult: AstNode;
+			if (last.type === 'IfStatement') {
+				cfResult = transformIfStatementToRuntime(last, state);
+			} else if (last.type === 'ForOfStatement' || last.type === 'ForInStatement' || last.type === 'ForStatement') {
+				cfResult = transformForStatementToRuntime(last, state);
+			} else if (last.type === 'SwitchStatement') {
+				cfResult = transformSwitchStatementToRuntime(last, state);
+			} else {
+				cfResult = walkNode(last, state);
+			}
+			transformedStmts.push(b.returnStmt(cfResult));
+			return b.arrowBlock([], transformedStmts);
 		}
 	}
 
-	return walkNode(arrowFn, state);
+	// No trailing control flow — walk all statements and produce a thunk
+	const transformedStmts = stmts.map(s => walkNode(s, state));
+	return b.arrowBlock([], transformedStmts);
 }
 
 function transformHtmlCall(node: CallExpression, state: TransformState) {
@@ -1668,26 +1549,24 @@ function hasModuleReactiveDecls(analysis: AnalysisResult): boolean {
 }
 
 function hasModuleLevelJsx(program: AstNode, analysis: AnalysisResult): boolean {
+	if (program.type !== 'Program') return false;
+
 	// Check if there are JSX nodes outside of component functions
-	function containsJsx(node: any): boolean {
+	function containsJsx(node: unknown): boolean {
 		if (!node || typeof node !== 'object') return false;
-		if (node.type === 'JSXElement' || node.type === 'JSXFragment') return true;
-		for (const key of Object.keys(node)) {
+		if ('type' in node && (node.type === 'JSXElement' || node.type === 'JSXFragment')) return true;
+		for (const [key, val] of Object.entries(node)) {
 			if (key === 'type' || key === 'start' || key === 'end') continue;
-			const val = node[key];
 			if (Array.isArray(val)) {
 				for (const item of val) {
-					if (item && typeof item === 'object' && containsJsx(item)) return true;
+					if (containsJsx(item)) return true;
 				}
-			} else if (val && typeof val === 'object' && containsJsx(val)) {
-				return true;
-			}
+			} else if (containsJsx(val)) return true;
 		}
 		return false;
 	}
 
-	if (program.type !== 'Program' || !('body' in program)) return false;
-	for (const stmt of (program as any).body) {
+	for (const stmt of program.body) {
 		// Skip component functions — they already trigger needsRuntime via components.size
 		if (analysis.components.has(stmt)) continue;
 		if (containsJsx(stmt)) return true;
