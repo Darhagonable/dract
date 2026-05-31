@@ -9,7 +9,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { isDarTsxFile } from 'dartsx/preprocess';
+import { isDarTsxFile } from 'dartsx/compiler/preprocess';
 import { posixify, walk } from './filesystem.js';
 import type { PackageFile } from './types.js';
 

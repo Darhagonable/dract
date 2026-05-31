@@ -16,7 +16,7 @@ import type {
 // `typescript` property to LanguagePlugin
 import type { } from '@volar/typescript';
 import { forEachEmbeddedCode } from '@volar/language-core';
-import { preprocess, isDarTsxFile } from 'dartsx/preprocess';
+import { preprocess, isDarTsxFile } from 'dartsx/compiler/preprocess';
 import { skipBracedExpression } from './unused-css';
 import * as fs from 'fs';
 

@@ -25,9 +25,9 @@
 			"types": "./dist/compiler/index.d.ts",
 			"default": "./dist/compiler/index.js"
 		},
-		"./preprocess": {
-			"types": "./dist/preprocess.d.ts",
-			"default": "./dist/preprocess.js"
+		"./compiler/preprocess": {
+			"types": "./dist/compiler/preprocess.d.ts",
+			"default": "./dist/compiler/preprocess.js"
 		}
 	},
 	"scripts": {

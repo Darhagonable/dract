@@ -7,7 +7,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { preprocess } from 'dartsx/preprocess';
+import { preprocess } from 'dartsx/compiler/preprocess';
 import { mkdirp, posixify, rimraf, walk, write } from './filesystem.js';
 import type { PackageFile } from './types.js';
 
