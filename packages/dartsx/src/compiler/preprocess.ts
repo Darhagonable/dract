@@ -117,12 +117,9 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	transformComponentDeclarations(ms, source, commentRanges, components, renamedParams, bindParams, mode);
 	transformStateDeclarations(ms, source, commentRanges, stateVars);
 	transformDerivedDeclarations(ms, source, commentRanges, derivedVars);
-	if (mode === 'typecheck') {
-		transformDefiniteAssignments(ms, source, commentRanges);
-	}
 	transformRenderBlocks(ms, source);
 	transformStyleBlocks(ms, source, commentRanges, styleBlocks, mode);
-	transformJsxAttributes(ms, source, mode);
+	transformJsxAttributes(ms, source);
 	transformHtmlDirective(ms, source);
 
 	const code = ms.toString();
@@ -587,23 +584,6 @@ function transformDerivedDeclarations(
 			const keywordEnd = derivedStart + 'derived'.length;
 			ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
 		}
-	}
-}
-
-// ── Definite assignments (typecheck only) ──────────────────────────
-
-function transformDefiniteAssignments(ms: MagicString, source: string, commentRanges: SkipRange[]): void {
-	const re = /\blet\s+(\w+)\s*:/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		if (isInComment(commentRanges, match.index)) continue;
-		const afterColon = match.index + match[0].length;
-		const semi = source.indexOf(';', afterColon);
-		if (semi === -1) continue;
-		const segment = source.slice(afterColon, semi);
-		if (segment.includes('=')) continue;
-		const nameEnd = match.index + match[0].length - 1;
-		ms.appendLeft(nameEnd, '!');
 	}
 }
 
@@ -1284,7 +1264,7 @@ function blankRange(ms: MagicString, source: string, start: number, end: number)
 
 // ── JSX attribute transforms ───────────────────────────────────────
 
-function transformJsxAttributes(ms: MagicString, source: string, mode: 'compiler' | 'typecheck'): void {
+function transformJsxAttributes(ms: MagicString, source: string): void {
 	const tagRe = /<([A-Za-z_][\w.]*)(?=[\s/>])/g;
 	let tagMatch;
 	while ((tagMatch = tagRe.exec(source)) !== null) {
@@ -1314,20 +1294,19 @@ function transformJsxAttributes(ms: MagicString, source: string, mode: 'compiler
 			}
 		}
 
-		// typecheck: wrap assignment/update expressions in arrows
-		if (mode === 'typecheck') {
-			const attrRe = /\b[a-zA-Z][\w-]*\s*=\s*\{/g;
-			attrRe.lastIndex = attrStart;
-			let attrMatch;
-			while ((attrMatch = attrRe.exec(source)) !== null && attrMatch.index < tagClose) {
-				const braceStart = source.indexOf('{', attrMatch.index + 2);
-				if (braceStart === -1 || braceStart >= tagClose) continue;
-				const braceEnd = findMatchingBrace(source, braceStart);
-				if (braceEnd === -1) continue;
-				const inner = source.slice(braceStart + 1, braceEnd).trim();
-				if (!needsWrapping(inner)) continue;
-				ms.appendLeft(braceStart + 1, '() => ');
-			}
+		// Wrap assignment/update expressions in arrows
+		// e.g. onclick={count = 0} → onclick={() => count = 0}
+		const attrRe = /\b[a-zA-Z][\w-]*\s*=\s*\{/g;
+		attrRe.lastIndex = attrStart;
+		let attrMatch;
+		while ((attrMatch = attrRe.exec(source)) !== null && attrMatch.index < tagClose) {
+			const braceStart = source.indexOf('{', attrMatch.index + 2);
+			if (braceStart === -1 || braceStart >= tagClose) continue;
+			const braceEnd = findMatchingBrace(source, braceStart);
+			if (braceEnd === -1) continue;
+			const inner = source.slice(braceStart + 1, braceEnd).trim();
+			if (!needsWrapping(inner)) continue;
+			ms.appendLeft(braceStart + 1, '() => ');
 		}
 	}
 }
@@ -1356,8 +1335,17 @@ function findJsxTagClose(source: string, start: number): number {
 function needsWrapping(expr: string): boolean {
 	if (/^(\(.*\)\s*=>|[a-zA-Z_$]\w*\s*=>|function[\s(])/.test(expr)) return false;
 	const stripped = expr.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
-	if (/\+\+|--/.test(stripped)) return true;
-	return /(?<![<>!=])=(?![=>])/.test(stripped);
+	let depth = 0;
+	for (let i = 0; i < stripped.length; i++) {
+		const ch = stripped[i];
+		if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
+		if (ch === ')' || ch === ']' || ch === '}') { depth--; continue; }
+		if (depth !== 0) continue;
+		if ((ch === '+' || ch === '-') && stripped[i + 1] === ch) return true;
+		if (ch === '=' && stripped[i + 1] === '>') break;
+		if (ch === '=' && stripped[i + 1] !== '=' && i > 0 && !'<>!='.includes(stripped[i - 1])) return true;
+	}
+	return false;
 }
 
 function hasTopLevelComma(expr: string): boolean {

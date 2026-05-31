@@ -992,12 +992,6 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 		const expr = attr.value.expression;
 		if (expr.type === 'JSXEmptyExpression') return null;
 
-		// Assignment/Update expressions: wrap in arrow function
-		// e.g. onclick={count++} → onclick: () => $.set(count, ...)
-		if (expr.type === 'AssignmentExpression' || expr.type === 'UpdateExpression') {
-			return b.prop(attrName, b.arrow([], walkNode(expr, state)));
-		}
-
 		const isReactive = expressionIsReactive(expr, state);
 
 		if (isReactive) {
