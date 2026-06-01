@@ -527,6 +527,10 @@ function transformStateDeclarations(
 				}
 				ms.appendLeft(ins, ` satisfies ${typeText} as ${typeText}`);
 			}
+		} else if (afterType > afterVar) {
+			// No initializer but has a type annotation — widen to include undefined
+			// since the variable is uninitialized until runtime (e.g. bind:this)
+			ms.appendLeft(afterType, ' | undefined');
 		}
 	}
 }

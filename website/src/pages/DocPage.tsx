@@ -5,7 +5,7 @@ import { onMount } from 'dartsx';
 export default component DocPage(slug: string) {
   derived doc = getDoc(slug);
 
-  let article: HTMLElement;
+  state article: HTMLElement;
 
   onMount(() => {
     if (!article) return;
