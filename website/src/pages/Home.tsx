@@ -10,7 +10,7 @@ const howItWorksIcon = '<svg aria-hidden="true" viewBox="0 0 32 32" fill="none">
 export default component Home() {
   const doc = getDoc('introduction');
 
-  let article: HTMLElement;
+  state article: HTMLElement;
 
   onMount(() => {
     if (!article) return;

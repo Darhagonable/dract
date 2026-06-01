@@ -3,7 +3,8 @@
  *
  * Pipeline: preprocess → oxc-transform (strip TS) → parse (OXC) → analyze → transform
  */
-import { preprocess, parse } from './phases/1-parse';
+import { preprocess } from './preprocess';
+import { parse } from './phases/1-parse';
 import { analyze } from './phases/2-analyze';
 import { transform } from './phases/3-transform';
 import { transformSync as oxcTransformSync } from 'oxc-transform';

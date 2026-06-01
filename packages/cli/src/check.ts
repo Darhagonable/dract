@@ -12,7 +12,7 @@ import * as fs from 'node:fs';
 import { proxyCreateProgram } from '@volar/typescript/lib/node/proxyCreateProgram.js';
 import { getDarTsxLanguagePlugin } from 'dartsx-typescript-plugin/language';
 import { analyzeUnusedCss } from 'dartsx-typescript-plugin/unused-css';
-import { findSuppressZones, isDarTsxFile } from 'dartsx/dartsx-to-tsx';
+import { findSuppressZones, isDarTsxFile } from 'dartsx/compiler/preprocess';
 
 // Errors always suppressed in DarTsx files — false positives from custom syntax transforms
 // (mirrors ALWAYS_SUPPRESS in the TypeScript plugin)

@@ -16,7 +16,7 @@ import type {
 // `typescript` property to LanguagePlugin
 import type { } from '@volar/typescript';
 import { forEachEmbeddedCode } from '@volar/language-core';
-import { dartsxToTsx, isDarTsxFile } from 'dartsx/dartsx-to-tsx';
+import { preprocess, isDarTsxFile } from 'dartsx/compiler/preprocess';
 import { skipBracedExpression } from './unused-css';
 import * as fs from 'fs';
 
@@ -61,7 +61,7 @@ class DarTsxVirtualCode implements VirtualCode {
 		let code: string;
 		let mapMappings: string;
 		try {
-			const result = dartsxToTsx(source);
+			const result = preprocess(source, { mode: 'typecheck' });
 			code = result.code;
 			mapMappings = result.map.mappings;
 		} catch {

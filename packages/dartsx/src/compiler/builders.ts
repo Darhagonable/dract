@@ -183,6 +183,20 @@ export function declarator(id_: AstNode, init: AstNode) {
 	return node('VariableDeclarator', { id: id_, init });
 }
 
+export function blockStmt(body: AstNode[], loc?: SourceLocation | null) {
+	return node('BlockStatement', { body }, loc);
+}
+
+export function forStmt(
+	init: AstNode | null,
+	test: AstNode | null,
+	update: AstNode | null,
+	body: AstNode,
+	loc?: SourceLocation | null,
+) {
+	return node('ForStatement', { init, test, update, body }, loc);
+}
+
 export function returnStmt(argument: AstNode | null = null, loc?: SourceLocation | null) {
 	return node('ReturnStatement', { argument }, loc);
 }
@@ -220,4 +234,46 @@ export function exportNamed(declaration: AstNode) {
 
 export function exportDefault(declaration: AstNode) {
 	return node('ExportDefaultDeclaration', { declaration });
+}
+
+/** Computed member: obj[expr] */
+export function computedMember(object: AstNode, property: AstNode) {
+	return node('MemberExpression', { object, property, computed: true, optional: false });
+}
+
+/** Static member: obj.prop */
+export function staticMember(object: AstNode, property: string) {
+	return node('MemberExpression', { object, property: id(property), computed: false, optional: false });
+}
+
+/** Conditional: test ? consequent : alternate */
+export function conditional(test: AstNode, consequent: AstNode, alternate: AstNode) {
+	return node('ConditionalExpression', { test, consequent, alternate });
+}
+
+/** Rest element: ...arg */
+export function restElement(argument: AstNode) {
+	return node('RestElement', { argument });
+}
+
+/** Object pattern: { props } */
+export function objectPattern(properties: AstNode[]) {
+	return node('ObjectPattern', { properties });
+}
+
+/** Shorthand property for destructuring patterns: { key } */
+export function shorthandProp(key: string) {
+	return node('Property', {
+		key: id(key),
+		value: id(key),
+		kind: 'init',
+		computed: false,
+		shorthand: true,
+		method: false,
+	});
+}
+
+/** Parenthesized expression: (expr) */
+export function paren(expression: AstNode) {
+	return node('ParenthesizedExpression', { expression });
 }
