@@ -75,12 +75,12 @@
 		"dartsx-typescript-plugin": "workspace:*",
 		"volar-service-css": "0.0.71",
 		"volar-service-html": "0.0.71",
-		"vscode-languageclient": "^9.0.1"
+		"vscode-languageclient": "^10.0.0"
 	},
 	"devDependencies": {
 		"@types/vscode": "^1.120.0",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.6",
-		"vitest-environment-vscode": "^0.1.2"
+		"vitest": "^4.1.9",
+		"vitest-environment-vscode": "^0.1.3"
 	}
 }

@@ -14,10 +14,10 @@
 		"dartsx": "workspace:*"
 	},
 	"devDependencies": {
-		"@types/node": "^25.9.0",
+		"@types/node": "^25.9.3",
 		"dartsx-cli": "workspace:*",
 		"dartsx-typescript-plugin": "workspace:*",
 		"dartsx-vite-plugin": "workspace:*",
-		"vite": "^8.0.13"
+		"vite": "^8.0.16"
 	}
 }
