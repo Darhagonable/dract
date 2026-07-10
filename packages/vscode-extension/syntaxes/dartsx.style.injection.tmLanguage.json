@@ -1,6 +1,6 @@
 {
 	"scopeName": "source.dartsx.style.injection",
-	"injectionSelector": "L:source.tsx -comment, L:source.ts -comment, L:source.js.jsx -comment, L:source.jsx -comment, L:source.js -comment",
+	"injectionSelector": "L:source.tsx - comment, L:source.ts - comment, L:source.js.jsx - comment, L:source.jsx - comment, L:source.js - comment",
 	"patterns": [
 		{ "include": "#style-tag" }
 	],
