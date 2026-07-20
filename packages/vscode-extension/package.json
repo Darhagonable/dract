@@ -79,6 +79,7 @@
 	},
 	"devDependencies": {
 		"@types/vscode": "^1.120.0",
+		"@vscode-tmlanguage-snapshot/vscode": "^2.0.0",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.9",
 		"vitest-environment-vscode": "^0.1.3"

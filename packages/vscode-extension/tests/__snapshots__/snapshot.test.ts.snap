@@ -1,0 +1,842 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DarTsx grammar snapshot > tokenizes Counter.tsx 1`] = `
+">export default component Counter() {
+#^^^^^^ source.tsx keyword.control.export.tsx
+#      ^ source.tsx
+#       ^^^^^^^ source.tsx keyword.control.default.tsx
+#              ^ source.tsx
+#               ^^^^^^^^^ source.tsx storage.type.component.dartsx
+#                        ^ source.tsx
+#                         ^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                                ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                                 ^ source.tsx punctuation.definition.parameters.end.tsx
+#                                  ^ source.tsx
+#                                   ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  state count = 0
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.state.dartsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#             ^ source.tsx meta.block.tsx
+#              ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#               ^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx constant.numeric.decimal.tsx
+>  derived doubled = count * 2
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^^ source.tsx meta.block.tsx storage.type.derived.dartsx
+#         ^ source.tsx meta.block.tsx
+#          ^^^^^^^ source.tsx meta.block.tsx variable.other.constant.tsx
+#                 ^ source.tsx meta.block.tsx
+#                  ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#                   ^ source.tsx meta.block.tsx
+#                    ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#                         ^ source.tsx meta.block.tsx
+#                          ^ source.tsx meta.block.tsx keyword.operator.arithmetic.tsx
+#                           ^ source.tsx meta.block.tsx
+#                            ^ source.tsx meta.block.tsx constant.numeric.decimal.tsx
+>
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <button onclick={count++}>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#             ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#              ^^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                       ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                            ^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx keyword.operator.increment.tsx
+#                              ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                               ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>        clicks: {count}
+#^^^^^^^^^^^^^^^^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                 ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                      ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+>      </button>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#        ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#              ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>doubled: {doubled}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^^^^^^^^^ source.tsx meta.block.tsx
+#                  ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                   ^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                          ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                           ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                             ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                              ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes ForLoopDemo.tsx 1`] = `
+">export component ForLoopDemo() {
+#^^^^^^ source.tsx keyword.control.export.tsx
+#      ^ source.tsx
+#       ^^^^^^^^^ source.tsx storage.type.component.dartsx
+#                ^ source.tsx
+#                 ^^^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                            ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                             ^ source.tsx punctuation.definition.parameters.end.tsx
+#                              ^ source.tsx
+#                               ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  state items = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }]
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.state.dartsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#             ^ source.tsx meta.block.tsx
+#              ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#               ^ source.tsx meta.block.tsx meta.array.literal.tsx
+#                ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.brace.square.tsx
+#                 ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                  ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx
+#                   ^^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx
+#                     ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx punctuation.separator.key-value.tsx
+#                      ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx
+#                       ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx constant.numeric.decimal.tsx
+#                        ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx punctuation.separator.comma.tsx
+#                         ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx
+#                          ^^^^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx
+#                              ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx punctuation.separator.key-value.tsx
+#                               ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx
+#                                ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                                 ^^^^^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx string.quoted.single.tsx
+#                                      ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#                                       ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx
+#                                        ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                                         ^ source.tsx meta.block.tsx meta.array.literal.tsx punctuation.separator.comma.tsx
+#                                          ^ source.tsx meta.block.tsx meta.array.literal.tsx
+#                                           ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                                            ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx
+#                                             ^^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx
+#                                               ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx punctuation.separator.key-value.tsx
+#                                                ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx
+#                                                 ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx constant.numeric.decimal.tsx
+#                                                  ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx punctuation.separator.comma.tsx
+#                                                   ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx
+#                                                    ^^^^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx
+#                                                        ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx meta.object-literal.key.tsx punctuation.separator.key-value.tsx
+#                                                         ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx
+#                                                          ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                                                           ^^^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx string.quoted.single.tsx
+#                                                              ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#                                                               ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx meta.object.member.tsx
+#                                                                ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                                                                 ^ source.tsx meta.block.tsx meta.array.literal.tsx meta.brace.square.tsx
+>
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <ul>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      {for (const item of items; key item.id; index i) (
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#       ^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.control.loop.tsx
+#          ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#            ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx storage.type.tsx
+#                 ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                  ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                       ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.operator.expression.of.tsx
+#                         ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                          ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                               ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                 ^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.other.dartsx
+#                                    ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                     ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                                         ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                                          ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                            ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                              ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.other.dartsx
+#                                                   ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                                    ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                                     ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#                                                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                                       ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+>        <li>{i}: {item.name}</li>
+#^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#        ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#         ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#            ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx meta.object.member.tsx variable.other.readwrite.tsx
+#              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#               ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                 ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                  ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx
+#                       ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx meta.object.member.tsx variable.other.readwrite.tsx
+#                           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                            ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                              ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      )}
+#^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#       ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+>    </ul>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes HoverDemo.tsx 1`] = `
+">export component HoverDemo(
+#^^^^^^ source.tsx keyword.control.export.tsx
+#      ^ source.tsx
+#       ^^^^^^^^^ source.tsx storage.type.component.dartsx
+#                ^ source.tsx
+#                 ^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                          ^ source.tsx punctuation.definition.parameters.begin.tsx
+>  label: string,
+#^^ source.tsx meta.parameters.tsx
+#  ^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#       ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#        ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#         ^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#               ^ source.tsx meta.parameters.tsx punctuation.separator.parameter.tsx
+>  bind value: number,
+#^^ source.tsx meta.parameters.tsx
+#  ^^^^ source.tsx meta.parameters.tsx storage.modifier.bind.dartsx
+#      ^ source.tsx meta.parameters.tsx
+#       ^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#            ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#             ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#              ^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                    ^ source.tsx meta.parameters.tsx punctuation.separator.parameter.tsx
+>  'data-id' as dataId: string,
+#^^ source.tsx meta.parameters.tsx
+#  ^ source.tsx meta.parameters.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#   ^^^^^^^ source.tsx meta.parameters.tsx string.quoted.single.tsx
+#          ^ source.tsx meta.parameters.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#           ^ source.tsx meta.parameters.tsx
+#            ^^ source.tsx meta.parameters.tsx keyword.control.as.dartsx
+#              ^ source.tsx meta.parameters.tsx
+#               ^^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#                     ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#                      ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                       ^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                             ^ source.tsx meta.parameters.tsx punctuation.separator.parameter.tsx
+>  bind 'aria-label' as ariaLabel: string,
+#^^ source.tsx meta.parameters.tsx
+#  ^^^^ source.tsx meta.parameters.tsx storage.modifier.bind.dartsx
+#      ^ source.tsx meta.parameters.tsx
+#       ^ source.tsx meta.parameters.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#        ^^^^^^^^^^ source.tsx meta.parameters.tsx string.quoted.single.tsx
+#                  ^ source.tsx meta.parameters.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#                   ^ source.tsx meta.parameters.tsx
+#                    ^^ source.tsx meta.parameters.tsx keyword.control.as.dartsx
+#                      ^ source.tsx meta.parameters.tsx
+#                       ^^^^^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#                                ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#                                 ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                                  ^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                                        ^ source.tsx meta.parameters.tsx punctuation.separator.parameter.tsx
+>) {
+#^ source.tsx punctuation.definition.parameters.end.tsx
+# ^ source.tsx
+#  ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  state count = 0
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.state.dartsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#             ^ source.tsx meta.block.tsx
+#              ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#               ^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx constant.numeric.decimal.tsx
+>  derived doubled = count * 2
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^^ source.tsx meta.block.tsx storage.type.derived.dartsx
+#         ^ source.tsx meta.block.tsx
+#          ^^^^^^^ source.tsx meta.block.tsx variable.other.constant.tsx
+#                 ^ source.tsx meta.block.tsx
+#                  ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#                   ^ source.tsx meta.block.tsx
+#                    ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#                         ^ source.tsx meta.block.tsx
+#                          ^ source.tsx meta.block.tsx keyword.operator.arithmetic.tsx
+#                           ^ source.tsx meta.block.tsx
+#                            ^ source.tsx meta.block.tsx constant.numeric.decimal.tsx
+>
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>{label}: {count}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#          ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#               ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                ^^ source.tsx meta.block.tsx
+#                  ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                   ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                        ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                         ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                           ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                            ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>doubled: {doubled}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^^^^^^^^^ source.tsx meta.block.tsx
+#                  ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                   ^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                          ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                           ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                             ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                              ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>value: {value}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^^^^^^^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                 ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                      ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                       ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                         ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                          ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>id: {dataId}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^^^^ source.tsx meta.block.tsx
+#             ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#              ^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                    ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                     ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>aria: {ariaLabel}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^^^^^^ source.tsx meta.block.tsx
+#               ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                ^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                         ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                          ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                            ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                             ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes ImportDemo.tsx 1`] = `
+">import { count, doubled } from './store'
+#^^^^^^ source.tsx meta.import.tsx keyword.control.import.tsx
+#      ^ source.tsx meta.import.tsx
+#       ^ source.tsx meta.import.tsx meta.block.tsx punctuation.definition.block.tsx
+#        ^ source.tsx meta.import.tsx meta.block.tsx
+#         ^^^^^ source.tsx meta.import.tsx meta.block.tsx variable.other.readwrite.alias.tsx
+#              ^ source.tsx meta.import.tsx meta.block.tsx punctuation.separator.comma.tsx
+#               ^ source.tsx meta.import.tsx meta.block.tsx
+#                ^^^^^^^ source.tsx meta.import.tsx meta.block.tsx variable.other.readwrite.alias.tsx
+#                       ^ source.tsx meta.import.tsx meta.block.tsx
+#                        ^ source.tsx meta.import.tsx meta.block.tsx punctuation.definition.block.tsx
+#                         ^ source.tsx meta.import.tsx
+#                          ^^^^ source.tsx meta.import.tsx keyword.control.from.tsx
+#                              ^ source.tsx meta.import.tsx
+#                               ^ source.tsx meta.import.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                                ^^^^^^^ source.tsx meta.import.tsx string.quoted.single.tsx
+#                                       ^ source.tsx meta.import.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+>
+>component ImportDemo() {
+#^^^^^^^^^ source.tsx storage.type.component.dartsx
+#         ^ source.tsx
+#          ^^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                    ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                     ^ source.tsx punctuation.definition.parameters.end.tsx
+#                      ^ source.tsx
+#                       ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>{count}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#          ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#               ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                  ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                   ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>{doubled}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#          ^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                 ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                  ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                    ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes PropsInferenceDemo.tsx 1`] = `
+">component Badge(title: string, count: number, active: boolean = false) {
+#^^^^^^^^^ source.tsx storage.type.component.dartsx
+#         ^ source.tsx
+#          ^^^^^ source.tsx entity.name.function.component.dartsx
+#               ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                ^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#                     ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#                      ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                       ^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                             ^ source.tsx meta.parameters.tsx punctuation.separator.parameter.tsx
+#                              ^ source.tsx meta.parameters.tsx
+#                               ^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#                                    ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#                                     ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                                      ^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                                            ^ source.tsx meta.parameters.tsx punctuation.separator.parameter.tsx
+#                                             ^ source.tsx meta.parameters.tsx
+#                                              ^^^^^^ source.tsx meta.parameters.tsx variable.parameter.tsx
+#                                                    ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#                                                     ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                                                      ^^^^^^^ source.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                                                             ^ source.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                                                              ^ source.tsx meta.parameters.tsx keyword.operator.assignment.tsx
+#                                                               ^ source.tsx meta.parameters.tsx
+#                                                                ^^^^^ source.tsx meta.parameters.tsx constant.language.boolean.false.tsx
+#                                                                     ^ source.tsx punctuation.definition.parameters.end.tsx
+#                                                                      ^ source.tsx
+#                                                                       ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <span>{title} {count} {active}</span>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#          ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#           ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                 ^ source.tsx meta.block.tsx
+#                  ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                   ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                        ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                         ^ source.tsx meta.block.tsx
+#                          ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                           ^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                 ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                                  ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                                    ^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                                        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>
+>export component PropsInferenceDemo() {
+#^^^^^^ source.tsx keyword.control.export.tsx
+#      ^ source.tsx
+#       ^^^^^^^^^ source.tsx storage.type.component.dartsx
+#                ^ source.tsx
+#                 ^^^^^^^^^^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                                   ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                                    ^ source.tsx punctuation.definition.parameters.end.tsx
+#                                     ^ source.tsx
+#                                      ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  state label = 'Users'
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.state.dartsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#             ^ source.tsx meta.block.tsx
+#              ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#               ^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                 ^^^^^ source.tsx meta.block.tsx string.quoted.single.tsx
+#                      ^ source.tsx meta.block.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+>  state total = 3
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.state.dartsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#             ^ source.tsx meta.block.tsx
+#              ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#               ^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx constant.numeric.decimal.tsx
+>
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <Badge title={label} count={total} active={true} />
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx support.class.component.js.jsx
+#            ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#             ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                  ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                   ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                    ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                          ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#                           ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                                ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                                 ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                                  ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                       ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                                        ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#                                         ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                                               ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                                                ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                                                 ^^^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx constant.language.boolean.true.tsx
+#                                                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                                                      ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#                                                       ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <Badge title={123} count={'bad'} />
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx support.class.component.js.jsx
+#            ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#             ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                  ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                   ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                    ^^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx constant.numeric.decimal.tsx
+#                       ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                        ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#                         ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                              ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                               ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                                ^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                                 ^^^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx string.quoted.single.tsx
+#                                    ^ source.tsx meta.block.tsx meta.tag.js.jsx meta.embedded.expression.js.jsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#                                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                                      ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#                                       ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes TypeError.tsx 1`] = `
+">// Intentional type error: passing string where number expected
+#^^ source.tsx comment.line.double-slash.tsx punctuation.definition.comment.tsx
+#  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.tsx comment.line.double-slash.tsx
+>export component TypeErrorDemo() {
+#^^^^^^ source.tsx keyword.control.export.tsx
+#      ^ source.tsx
+#       ^^^^^^^^^ source.tsx storage.type.component.dartsx
+#                ^ source.tsx
+#                 ^^^^^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                              ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                               ^ source.tsx punctuation.definition.parameters.end.tsx
+#                                ^ source.tsx
+#                                 ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  state count = 0
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.state.dartsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#             ^ source.tsx meta.block.tsx
+#              ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#               ^ source.tsx meta.block.tsx
+#                ^ source.tsx meta.block.tsx constant.numeric.decimal.tsx
+>
+>  function add(x: number): number {
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^^^ source.tsx meta.block.tsx meta.function.tsx storage.type.function.tsx
+#          ^ source.tsx meta.block.tsx meta.function.tsx
+#           ^^^ source.tsx meta.block.tsx meta.function.tsx meta.definition.function.tsx entity.name.function.tsx
+#              ^ source.tsx meta.block.tsx meta.function.tsx meta.parameters.tsx punctuation.definition.parameters.begin.tsx
+#               ^ source.tsx meta.block.tsx meta.function.tsx meta.parameters.tsx variable.parameter.tsx
+#                ^ source.tsx meta.block.tsx meta.function.tsx meta.parameters.tsx meta.type.annotation.tsx keyword.operator.type.annotation.tsx
+#                 ^ source.tsx meta.block.tsx meta.function.tsx meta.parameters.tsx meta.type.annotation.tsx
+#                  ^^^^^^ source.tsx meta.block.tsx meta.function.tsx meta.parameters.tsx meta.type.annotation.tsx support.type.primitive.tsx
+#                        ^ source.tsx meta.block.tsx meta.function.tsx meta.parameters.tsx punctuation.definition.parameters.end.tsx
+#                         ^ source.tsx meta.block.tsx meta.function.tsx meta.return.type.tsx keyword.operator.type.annotation.tsx
+#                          ^ source.tsx meta.block.tsx meta.function.tsx meta.return.type.tsx
+#                           ^^^^^^ source.tsx meta.block.tsx meta.function.tsx meta.return.type.tsx support.type.primitive.tsx
+#                                 ^ source.tsx meta.block.tsx meta.function.tsx meta.return.type.tsx
+#                                  ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx punctuation.definition.block.tsx
+>    return x + 1;
+#^^^^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx
+#    ^^^^^^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx keyword.control.flow.tsx
+#          ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx
+#           ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx variable.other.readwrite.tsx
+#            ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx
+#             ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx keyword.operator.arithmetic.tsx
+#              ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx
+#               ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx constant.numeric.decimal.tsx
+#                ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx punctuation.terminator.statement.tsx
+>  }
+#^^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.function.tsx meta.block.tsx punctuation.definition.block.tsx
+>
+>  const result = add("not a number");
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx storage.type.tsx
+#       ^ source.tsx meta.block.tsx
+#        ^^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
+#              ^ source.tsx meta.block.tsx
+#               ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
+#                ^ source.tsx meta.block.tsx
+#                 ^^^ source.tsx meta.block.tsx meta.function-call.tsx entity.name.function.tsx
+#                    ^ source.tsx meta.block.tsx meta.brace.round.tsx
+#                     ^ source.tsx meta.block.tsx string.quoted.double.tsx punctuation.definition.string.begin.tsx
+#                      ^^^^^^^^^^^^ source.tsx meta.block.tsx string.quoted.double.tsx
+#                                  ^ source.tsx meta.block.tsx string.quoted.double.tsx punctuation.definition.string.end.tsx
+#                                   ^ source.tsx meta.block.tsx meta.brace.round.tsx
+#                                    ^ source.tsx meta.block.tsx punctuation.terminator.statement.tsx
+>
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>{result}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#          ^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                 ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                   ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>{count}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#          ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#               ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                  ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                   ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes UnusedCss.tsx 1`] = `
+">export component UnusedCssDemo() {
+#^^^^^^ source.tsx keyword.control.export.tsx
+#      ^ source.tsx
+#       ^^^^^^^^^ source.tsx storage.type.component.dartsx
+#                ^ source.tsx
+#                 ^^^^^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                              ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                               ^ source.tsx punctuation.definition.parameters.end.tsx
+#                                ^ source.tsx
+#                                 ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p class="used">Hello</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#         ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#              ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#               ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx string.quoted.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#                      ^^^^^ source.tsx meta.block.tsx
+#                           ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                             ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                              ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>
+>  <style>
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx punctuation.definition.tag.begin.tsx
+#   ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx entity.name.tag.tsx
+#        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx punctuation.definition.tag.end.tsx
+>    .used { color: red; }
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#     ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#            ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                   ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+#                       ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>    .unused-selector { color: blue; }
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#     ^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                       ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#                             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                              ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>  </style>
+#^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#  ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#    ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>}
+#^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+>"
+`;
+
+exports[`DarTsx grammar snapshot > tokenizes store.ts 1`] = `
+">export state count = 0
+#^^^^^^ source.ts keyword.control.export.tsx
+#      ^ source.ts
+#       ^^^^^ source.ts storage.type.state.dartsx
+#            ^ source.ts
+#             ^^^^^ source.ts variable.other.readwrite.tsx
+#                  ^ source.ts
+#                   ^ source.ts keyword.operator.assignment.tsx
+#                    ^ source.ts
+#                     ^ source.ts constant.numeric.decimal.tsx
+>export derived doubled = count * 2
+#^^^^^^ source.ts keyword.control.export.tsx
+#      ^ source.ts
+#       ^^^^^^^ source.ts storage.type.derived.dartsx
+#              ^ source.ts
+#               ^^^^^^^ source.ts variable.other.constant.tsx
+#                      ^ source.ts
+#                       ^ source.ts keyword.operator.assignment.tsx
+#                        ^ source.ts
+#                         ^^^^^ source.ts variable.other.readwrite.tsx
+#                              ^ source.ts
+#                               ^ source.ts keyword.operator.arithmetic.tsx
+#                                ^ source.ts
+#                                 ^ source.ts constant.numeric.decimal.tsx
+>"
+`;
