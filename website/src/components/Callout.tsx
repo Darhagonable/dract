@@ -15,7 +15,7 @@ const styles = {
   },
 }
 
-const icons: Record<string, (props: any) => Node> = {
+const icons = {
   note: (props: any) => <Icon icon="lightbulb" {...props} />,
   warning: (props: any) => <Icon icon="warning" color="amber" {...props} />,
 }
