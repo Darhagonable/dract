@@ -3,8 +3,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"test": "pnpm run build && vitest run",
 		"build": "pnpm -r run build",
+		"test": "vitest run",
 		"check": "pnpm -r --no-bail run check"
 	},
 	"devDependencies": {
