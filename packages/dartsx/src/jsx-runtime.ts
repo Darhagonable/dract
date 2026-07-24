@@ -12,17 +12,3 @@ export namespace JSX {
 	}
 	export type IntrinsicElements = { [K in keyof SvelteHTMLElements]: SvelteHTMLElements[K] };
 }
-
-declare global {
-	namespace JSX {
-		type Element = DarTsxNode;
-		type ElementType = keyof SvelteHTMLElements | ((...args: any[]) => DarTsxNode);
-		interface ElementChildrenAttribute {
-			children: {};
-		}
-		interface IntrinsicAttributes {
-			key?: string | number | bigint;
-		}
-		type IntrinsicElements = { [K in keyof SvelteHTMLElements]: SvelteHTMLElements[K] };
-	}
-}
