@@ -58,7 +58,7 @@ export async function emit_dts(
 		outDir: output,
 		rootDir: tmp,
 		skipLibCheck: true,
-		jsx: ts.JsxEmit.ReactJSX,
+		jsx: ts.JsxEmit.Preserve,
 		jsxImportSource: 'dartsx',
 		module: ts.ModuleKind.ESNext,
 		moduleResolution: ts.ModuleResolutionKind.Bundler,
@@ -87,6 +87,8 @@ export async function emit_dts(
 				outDir: output,
 				rootDir: tmp,
 				skipLibCheck: true,
+				jsx: ts.JsxEmit.Preserve,
+				jsxImportSource: 'dartsx',
 			};
 		}
 	}

@@ -6,7 +6,7 @@
 		"moduleResolution": "bundler",
 		"jsx": "preserve",
 		"lib": ["ES2022", "DOM", "DOM.Iterable"],
-		"skipLibCheck": true,
+		"skipLibCheck": false,
 		"noEmit": true,
 		"types": ["dartsx"]
 	},
