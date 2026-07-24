@@ -927,16 +927,33 @@ exports[`DarTsx grammar snapshot > tokenizes UnusedCss.tsx 1`] = `
 #                               ^ source.tsx punctuation.definition.parameters.end.tsx
 #                                ^ source.tsx
 #                                 ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>	const accentColor = '#38BDF8';
+#^ source.tsx meta.block.tsx
+# ^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx storage.type.tsx
+#      ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#       ^^^^^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx meta.definition.variable.tsx variable.other.constant.tsx
+#                  ^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx
+#                   ^ source.tsx meta.block.tsx meta.var.expr.tsx keyword.operator.assignment.tsx
+#                    ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#                     ^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                      ^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.single.tsx
+#                             ^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#                              ^ source.tsx meta.block.tsx punctuation.terminator.statement.tsx
+>
 >  render (
 #^^ source.tsx meta.block.tsx
 #  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
 #        ^ source.tsx meta.block.tsx
 #         ^ source.tsx meta.block.tsx meta.brace.round.tsx
->    <div>
+>    <div class="card">
 #^^^^ source.tsx meta.block.tsx
 #    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
-#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#         ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#              ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#               ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx string.quoted.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
 >      <p class="used">Hello</p>
 #^^^^^^ source.tsx meta.block.tsx
 #      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
@@ -955,48 +972,107 @@ exports[`DarTsx grammar snapshot > tokenizes UnusedCss.tsx 1`] = `
 #    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
 #         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
->  )
-#^^ source.tsx meta.block.tsx
-#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
->
->  <style>
+>		<style>
 #^^ source.tsx meta.block.tsx
 #  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx punctuation.definition.tag.begin.tsx
 #   ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx entity.name.tag.tsx
 #        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx punctuation.definition.tag.end.tsx
->    .used { color: red; }
-#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
-#     ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
-#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
-#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#            ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+>			.used { color: red; }
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#    ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#           ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#                ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                  ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                       ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>			.unused-selector { color: blue; }
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#    ^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                      ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#                           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                             ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>
+>			.card {
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#    ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+>				border-radius: 8px;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
 #                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
 #                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                   ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#                    ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.px.css
 #                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
-#                       ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
->    .unused-selector { color: blue; }
-#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
-#     ^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
-#                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
-#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                       ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
-#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
-#                             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                              ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
-#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
-#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
->  </style>
+>				border: 2px solid {accentColor};
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#             ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.px.css
+#               ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.property-value.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css punctuation.section.embedded.begin.tsx
+#                       ^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css variable.other.readwrite.tsx
+#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css punctuation.section.embedded.end.tsx
+#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>				padding: 16px;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#             ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#               ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.px.css
+#                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>				transition: box-shadow 0.2s;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#              ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#               ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                ^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                           ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#                              ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.s.css
+#                               ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>				animation: cardEnter 0.3s ease-out;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#              ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#               ^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                         ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.s.css
+#                             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                              ^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.property-value.css
+#                                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>			}
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>		</style>
 #^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
 #  ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #    ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx entity.name.tag.js.jsx
 #         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+>
 >}
 #^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
 >"
