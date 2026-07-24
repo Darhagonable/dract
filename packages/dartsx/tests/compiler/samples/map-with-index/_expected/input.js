@@ -5,7 +5,7 @@ function App() {
 
 	return $.jsx("ul", {
 		children: [
-			$.for(() => $.get(items), (item, i) => $.jsx("li", { children: [i, ": ", item] }))
+			() => items.map((item, i) => $.jsx("li", { children: [i, ": ", item] }))
 		]
 	});
 }

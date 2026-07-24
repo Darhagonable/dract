@@ -999,19 +999,6 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 				continue;
 			}
 
-			// .map() → $.for()
-			if (expr.type === 'CallExpression' &&
-				expr.callee.type === 'MemberExpression' &&
-				expr.callee.property.type === 'Identifier' && expr.callee.property.name === 'map') {
-				const callback = expr.arguments[0];
-				if (callback && (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression') &&
-					callback.body && callback.body.type !== 'BlockStatement' &&
-					isJSXBody(callback.body)) {
-					result.push(transformMapToFor(expr, state));
-					continue;
-				}
-			}
-
 			// Regular expression child
 			const transformed = walkNode(expr, state);
 			const shouldThunk = expressionIsReactive(expr, state)
@@ -1491,16 +1478,6 @@ function transformLogicalAndToIf(expr: Expression, state: TransformState) {
 	return b.call('$.if', [
 		b.arrow([], walkNode(expr.left, state)),
 		b.arrow([], walkNode(unwrapParen(expr.right), state)),
-	]);
-}
-
-function transformMapToFor(expr: CallExpression, state: TransformState) {
-	if (expr.callee.type !== 'MemberExpression') return b.literal(null);
-	const collection = walkNode(expr.callee.object, state);
-	const callback = expr.arguments[0];
-	return b.call('$.for', [
-		b.arrow([], collection),
-		transformCFCallback(callback, state),
 	]);
 }
 
