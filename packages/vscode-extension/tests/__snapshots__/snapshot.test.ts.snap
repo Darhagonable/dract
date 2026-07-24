@@ -190,14 +190,15 @@ exports[`DarTsx grammar snapshot > tokenizes ForLoopDemo.tsx 1`] = `
 #        ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #         ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
 #           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
-#            ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
-#             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx meta.object.member.tsx variable.other.readwrite.tsx
-#              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#            ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.section.embedded.begin.js.jsx
+#             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.section.embedded.end.js.jsx
 #               ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
-#                 ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
-#                  ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx
-#                       ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx meta.object.member.tsx variable.other.readwrite.tsx
-#                           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.objectliteral.tsx punctuation.definition.block.tsx
+#                 ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.section.embedded.begin.js.jsx
+#                  ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                       ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.section.embedded.end.js.jsx
 #                            ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #                              ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
 #                                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
@@ -455,6 +456,194 @@ exports[`DarTsx grammar snapshot > tokenizes ImportDemo.tsx 1`] = `
 >"
 `;
 
+exports[`DarTsx grammar snapshot > tokenizes JsxBlockExpressions.tsx 1`] = `
+">component JsxBlockExpressions() {
+#^^^^^^^^^ source.tsx storage.type.component.dartsx
+#         ^ source.tsx
+#          ^^^^^^^^^^^^^^^^^^^ source.tsx entity.name.function.component.dartsx
+#                             ^ source.tsx punctuation.definition.parameters.begin.tsx
+#                              ^ source.tsx punctuation.definition.parameters.end.tsx
+#                               ^ source.tsx
+#                                ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>  const htmlContent = \`<div class="container">
+#^^ source.tsx meta.block.tsx
+#  ^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx storage.type.tsx
+#       ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#        ^^^^^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx meta.definition.variable.tsx variable.other.constant.tsx
+#                   ^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx
+#                    ^ source.tsx meta.block.tsx meta.var.expr.tsx keyword.operator.assignment.tsx
+#                     ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#                      ^ source.tsx meta.block.tsx meta.var.expr.tsx string.template.tsx punctuation.definition.string.template.begin.tsx
+#                       ^^^^^^^^^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx string.template.tsx
+>  <p>Hello World</p>
+#^^^^^^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx string.template.tsx
+></div>\`;
+#^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx string.template.tsx
+#      ^ source.tsx meta.block.tsx meta.var.expr.tsx string.template.tsx punctuation.definition.string.template.end.tsx
+#       ^ source.tsx meta.block.tsx punctuation.terminator.statement.tsx
+>
+>  render (
+#^^ source.tsx meta.block.tsx
+#  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
+#        ^ source.tsx meta.block.tsx
+#         ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>    <div>
+#^^^^ source.tsx meta.block.tsx
+#    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p>html: {htmlContent}</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#         ^^^^^^ source.tsx meta.block.tsx
+#               ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#                ^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                           ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+#                            ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                              ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                               ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      <p class="lead">i key index in of for else if switch case</p>
+#^^^^^^ source.tsx meta.block.tsx
+#      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#       ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#         ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#              ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#               ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx string.quoted.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.tsx meta.block.tsx
+#                                                               ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                                                                 ^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                                                                  ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>			{for (const feed of data.feeds; key feed.id; index i) (
+#^^^ source.tsx meta.block.tsx
+#   ^ source.tsx meta.block.tsx punctuation.section.embedded.begin.js.jsx
+#    ^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.control.loop.tsx
+#       ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#        ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#         ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx storage.type.tsx
+#              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#               ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                   ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                    ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.operator.expression.of.tsx
+#                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                       ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                            ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                 ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                   ^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.other.dartsx
+#                                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                       ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                                           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                                            ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                              ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                                ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx keyword.other.dartsx
+#                                                     ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                                       ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#                                                        ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#                                                         ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+>        <ul>
+#^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#        ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#         ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>          {for (const post of feed.posts; key post.id; index j) (
+#^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#          ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.section.embedded.begin.js.jsx
+#           ^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx keyword.control.loop.tsx
+#              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#               ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#                ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx storage.type.tsx
+#                     ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                      ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                          ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                           ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx keyword.operator.expression.of.tsx
+#                             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                              ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                                  ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                                   ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                        ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                                          ^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx keyword.other.dartsx
+#                                             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                                              ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                                                  ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                                                   ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                                     ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                                                       ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx keyword.other.dartsx
+#                                                            ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                                                             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                                              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#                                                               ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#                                                                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+>            <li>
+#^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#            ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#             ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#               ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>              <button onclick={() => selectedId = post.id}>{post.title}</button>
+#^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#               ^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx
+#                      ^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                             ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                              ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                               ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx meta.arrow.tsx meta.parameters.tsx punctuation.definition.parameters.begin.tsx
+#                                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx meta.arrow.tsx meta.parameters.tsx punctuation.definition.parameters.end.tsx
+#                                 ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx meta.arrow.tsx
+#                                  ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx meta.arrow.tsx storage.type.function.arrow.tsx
+#                                    ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx meta.arrow.tsx
+#                                     ^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                               ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx
+#                                                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx keyword.operator.assignment.tsx
+#                                                 ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx
+#                                                  ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                                                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                                                       ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                                         ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                                                          ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#                                                           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx punctuation.section.embedded.begin.js.jsx
+#                                                            ^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.object.tsx
+#                                                                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx punctuation.accessor.tsx
+#                                                                 ^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx variable.other.property.tsx
+#                                                                      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx punctuation.section.embedded.end.js.jsx
+#                                                                       ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                                                                         ^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                                                                               ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>            </li>
+#^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#            ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#              ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>          )}
+#^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx
+#          ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#           ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx punctuation.section.embedded.end.js.jsx
+>        </ul>
+#^^^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#        ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#          ^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#            ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>      )}
+#^^^^^^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx
+#      ^ source.tsx meta.block.tsx meta.embedded.expression.js.jsx meta.brace.round.tsx
+#       ^ source.tsx meta.block.tsx punctuation.section.embedded.end.js.jsx
+>    </div>
+#^^^^ source.tsx meta.block.tsx
+#    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^ source.tsx meta.block.tsx
+#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
+>}
+#^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>"
+`;
+
 exports[`DarTsx grammar snapshot > tokenizes PropsInferenceDemo.tsx 1`] = `
 ">component Badge(title: string, count: number, active: boolean = false) {
 #^^^^^^^^^ source.tsx storage.type.component.dartsx
@@ -668,18 +857,18 @@ exports[`DarTsx grammar snapshot > tokenizes TypeError.tsx 1`] = `
 >
 >  const result = add("not a number");
 #^^ source.tsx meta.block.tsx
-#  ^^^^^ source.tsx meta.block.tsx storage.type.tsx
-#       ^ source.tsx meta.block.tsx
-#        ^^^^^^ source.tsx meta.block.tsx variable.other.readwrite.tsx
-#              ^ source.tsx meta.block.tsx
-#               ^ source.tsx meta.block.tsx keyword.operator.assignment.tsx
-#                ^ source.tsx meta.block.tsx
-#                 ^^^ source.tsx meta.block.tsx meta.function-call.tsx entity.name.function.tsx
-#                    ^ source.tsx meta.block.tsx meta.brace.round.tsx
-#                     ^ source.tsx meta.block.tsx string.quoted.double.tsx punctuation.definition.string.begin.tsx
-#                      ^^^^^^^^^^^^ source.tsx meta.block.tsx string.quoted.double.tsx
-#                                  ^ source.tsx meta.block.tsx string.quoted.double.tsx punctuation.definition.string.end.tsx
-#                                   ^ source.tsx meta.block.tsx meta.brace.round.tsx
+#  ^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx storage.type.tsx
+#       ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#        ^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx meta.definition.variable.tsx variable.other.constant.tsx
+#              ^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx
+#               ^ source.tsx meta.block.tsx meta.var.expr.tsx keyword.operator.assignment.tsx
+#                ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#                 ^^^ source.tsx meta.block.tsx meta.var.expr.tsx meta.function-call.tsx entity.name.function.tsx
+#                    ^ source.tsx meta.block.tsx meta.var.expr.tsx meta.brace.round.tsx
+#                     ^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.double.tsx punctuation.definition.string.begin.tsx
+#                      ^^^^^^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.double.tsx
+#                                  ^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.double.tsx punctuation.definition.string.end.tsx
+#                                   ^ source.tsx meta.block.tsx meta.var.expr.tsx meta.brace.round.tsx
 #                                    ^ source.tsx meta.block.tsx punctuation.terminator.statement.tsx
 >
 >  render (
@@ -738,16 +927,33 @@ exports[`DarTsx grammar snapshot > tokenizes UnusedCss.tsx 1`] = `
 #                               ^ source.tsx punctuation.definition.parameters.end.tsx
 #                                ^ source.tsx
 #                                 ^ source.tsx meta.block.tsx punctuation.definition.block.tsx
+>	const accentColor = '#38BDF8';
+#^ source.tsx meta.block.tsx
+# ^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx storage.type.tsx
+#      ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#       ^^^^^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx meta.definition.variable.tsx variable.other.constant.tsx
+#                  ^ source.tsx meta.block.tsx meta.var.expr.tsx meta.var-single-variable.expr.tsx
+#                   ^ source.tsx meta.block.tsx meta.var.expr.tsx keyword.operator.assignment.tsx
+#                    ^ source.tsx meta.block.tsx meta.var.expr.tsx
+#                     ^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.single.tsx punctuation.definition.string.begin.tsx
+#                      ^^^^^^^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.single.tsx
+#                             ^ source.tsx meta.block.tsx meta.var.expr.tsx string.quoted.single.tsx punctuation.definition.string.end.tsx
+#                              ^ source.tsx meta.block.tsx punctuation.terminator.statement.tsx
+>
 >  render (
 #^^ source.tsx meta.block.tsx
 #  ^^^^^^ source.tsx meta.block.tsx keyword.control.render.dartsx
 #        ^ source.tsx meta.block.tsx
 #         ^ source.tsx meta.block.tsx meta.brace.round.tsx
->    <div>
+>    <div class="card">
 #^^^^ source.tsx meta.block.tsx
 #    ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #     ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
-#        ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#        ^ source.tsx meta.block.tsx meta.tag.js.jsx
+#         ^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#              ^ source.tsx meta.block.tsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#               ^^^^^^ source.tsx meta.block.tsx meta.tag.js.jsx string.quoted.js.jsx
+#                     ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
 >      <p class="used">Hello</p>
 #^^^^^^ source.tsx meta.block.tsx
 #      ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
@@ -766,48 +972,107 @@ exports[`DarTsx grammar snapshot > tokenizes UnusedCss.tsx 1`] = `
 #    ^^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #      ^^^ source.tsx meta.block.tsx meta.tag.js.jsx entity.name.tag.js.jsx
 #         ^ source.tsx meta.block.tsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
->  )
-#^^ source.tsx meta.block.tsx
-#  ^ source.tsx meta.block.tsx meta.brace.round.tsx
->
->  <style>
+>		<style>
 #^^ source.tsx meta.block.tsx
 #  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx punctuation.definition.tag.begin.tsx
 #   ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx entity.name.tag.tsx
 #        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx punctuation.definition.tag.end.tsx
->    .used { color: red; }
-#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
-#     ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
-#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
-#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#            ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+>			.used { color: red; }
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#    ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#           ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#                ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                  ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                       ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>			.unused-selector { color: blue; }
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#    ^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                      ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#                           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                             ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>
+>			.card {
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
+#    ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
+#        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+#         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
+>				border-radius: 8px;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
 #                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
 #                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                   ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
+#                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#                    ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.px.css
 #                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
-#                       ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                        ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
->    .unused-selector { color: blue; }
-#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css punctuation.definition.entity.css
-#     ^^^^^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.selector.css entity.other.attribute-name.class.css
-#                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
-#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.begin.bracket.curly.css
-#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                       ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
-#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
-#                             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                              ^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.color.w3c-standard-color-name.css
-#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
-#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
-#                                    ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
->  </style>
+>				border: 2px solid {accentColor};
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#          ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#             ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.px.css
+#               ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.property-value.css
+#                     ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css punctuation.section.embedded.begin.tsx
+#                       ^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css variable.other.readwrite.tsx
+#                                  ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css punctuation.section.embedded.end.tsx
+#                                   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>				padding: 16px;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#           ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#             ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#               ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.px.css
+#                 ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>				transition: box-shadow 0.2s;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#              ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#               ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#                ^^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                           ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#                              ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.s.css
+#                               ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>				animation: cardEnter 0.3s ease-out;
+#^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#    ^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-name.css support.type.property-name.css
+#             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.separator.key-value.css
+#              ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#               ^^^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                         ^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css
+#                            ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css constant.numeric.css keyword.other.unit.s.css
+#                             ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css
+#                              ^^^^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css meta.property-value.css support.constant.property-value.css
+#                                      ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.terminator.rule.css
+>			}
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css
+#   ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.property-list.css punctuation.section.property-list.end.bracket.curly.css
+>		</style>
 #^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
 #  ^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
 #    ^^^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx entity.name.tag.js.jsx
 #         ^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>  )
+#^^^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
+>
 >}
 #^ source.tsx meta.block.tsx meta.embedded.block.css.dartsx source.css
 >"
