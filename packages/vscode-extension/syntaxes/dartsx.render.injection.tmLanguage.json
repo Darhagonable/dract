@@ -1,14 +1,14 @@
 {
 	"scopeName": "source.dartsx.render.injection",
-	"injectionSelector": "L:source.js - comment, L:source.js.jsx - comment, L:source.jsx - comment, L:source.ts - comment, L:source.tsx - comment, L:meta.embedded.expression.tsx - comment, L:meta.embedded.expression.js - comment, L:meta.objectliteral.tsx - comment, L:meta.objectliteral.js - comment",
+	"injectionSelector": "L:source.js -comment -string, L:source.js.jsx -comment -string, L:source.jsx -comment -string, L:source.ts -comment -string, L:source.tsx -comment -string, L:meta.embedded.expression.tsx -comment -string, L:meta.embedded.expression.js -comment -string, L:meta.objectliteral.tsx -comment -string, L:meta.objectliteral.js -comment -string",
 	"patterns": [
 		{ "include": "#component" },
 		{ "include": "#state" },
 		{ "include": "#derived" },
 		{ "include": "#render-inline" },
 		{ "include": "#render-block" },
-		{ "include": "#jsx-control-keywords" },
-		{ "include": "#jsx-tag" }
+		{ "include": "#jsx-tag" },
+		{ "include": "#jsx-block-expression" }
 	],
 	"repository": {
 		"component": {
@@ -69,7 +69,7 @@
 		"render-inline": {
 			"begin": "\\b(render)\\s*(?=<)",
 			"beginCaptures": { "1": { "name": "keyword.control.render.dartsx" } },
-			"end": ";|$",
+			"end": ";?\\s*$",
 			"patterns": [{ "include": "#jsx" }]
 		},
 		"render-block": {
@@ -78,9 +78,18 @@
 				"1": { "name": "keyword.control.render.dartsx" },
 				"2": { "name": "meta.brace.round.tsx" }
 			},
-			"end": "^(\\s*)(\\));?\\s*$",
-			"endCaptures": { "2": { "name": "meta.brace.round.tsx" } },
+			"end": "(\\));?\\s*$",
+			"endCaptures": { "1": { "name": "meta.brace.round.tsx" } },
 			"patterns": [{ "include": "#jsx" }]
+		},
+
+		"jsx-block-expression": {
+			"begin": "\\{(?=\\s*\\b(for|if|while|switch|try|do)\\b)",
+			"beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.js.jsx" } },
+			"end": "\\}",
+			"endCaptures": { "0": { "name": "punctuation.section.embedded.end.js.jsx" } },
+			"contentName": "meta.embedded.expression.js.jsx",
+			"patterns": [{ "include": "#jsx-expression-body" }]
 		},
 
 		"jsx": {
@@ -107,16 +116,102 @@
 				{ "match": "[a-z][\\w-]*", "name": "entity.name.tag.js.jsx" }
 			]
 		},
+		"jsx-expression-body": {
+			"patterns": [
+				{ "include": "#jsx" },
+				{ "include": "#jsx-control-parens" },
+				{ "include": "#jsx-control-keywords" },
+				{ "include": "#jsx-control-body" },
+				{ "include": "source.tsx#statements" }
+			]
+		},
 		"jsx-expression": {
 			"begin": "\\{",
 			"beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.js.jsx" } },
 			"end": "\\}",
 			"endCaptures": { "0": { "name": "punctuation.section.embedded.end.js.jsx" } },
 			"contentName": "meta.embedded.expression.js.jsx",
+			"patterns": [{ "include": "#jsx-expression-body" }]
+		},
+		"jsx-control-parens": {
+			"patterns": [
+				{
+					"begin": "\\b(for|while|do)\\s*(\\()",
+					"beginCaptures": {
+						"1": { "name": "keyword.control.loop.tsx" },
+						"2": { "name": "meta.brace.round.tsx" }
+					},
+					"end": "\\)",
+					"endCaptures": { "0": { "name": "meta.brace.round.tsx" } },
+					"patterns": [
+						{ "include": "#jsx-control-keywords" },
+						{ "include": "#paren-group" },
+						{ "include": "source.tsx#statements" }
+					]
+				},
+				{
+					"begin": "\\b(if)\\s*(\\()",
+					"beginCaptures": {
+						"1": { "name": "keyword.control.conditional.tsx" },
+						"2": { "name": "meta.brace.round.tsx" }
+					},
+					"end": "\\)",
+					"endCaptures": { "0": { "name": "meta.brace.round.tsx" } },
+					"patterns": [
+						{ "include": "#jsx-control-keywords" },
+						{ "include": "#paren-group" },
+						{ "include": "source.tsx#statements" }
+					]
+				},
+				{
+					"begin": "\\b(switch)\\s*(\\()",
+					"beginCaptures": {
+						"1": { "name": "keyword.control.switch.tsx" },
+						"2": { "name": "meta.brace.round.tsx" }
+					},
+					"end": "\\)",
+					"endCaptures": { "0": { "name": "meta.brace.round.tsx" } },
+					"patterns": [
+						{ "include": "#jsx-control-keywords" },
+						{ "include": "#paren-group" },
+						{ "include": "source.tsx#statements" }
+					]
+				},
+				{
+					"begin": "\\b(catch)\\s*(\\()",
+					"beginCaptures": {
+						"1": { "name": "keyword.control.trycatch.tsx" },
+						"2": { "name": "meta.brace.round.tsx" }
+					},
+					"end": "\\)",
+					"endCaptures": { "0": { "name": "meta.brace.round.tsx" } },
+					"patterns": [
+						{ "include": "#jsx-control-keywords" },
+						{ "include": "#paren-group" },
+						{ "include": "source.tsx#statements" }
+					]
+				}
+			]
+		},
+		"jsx-control-body": {
+			"begin": "(?<=\\))\\s*(\\()",
+			"beginCaptures": { "1": { "name": "meta.brace.round.tsx" } },
+			"end": "\\)",
+			"endCaptures": { "0": { "name": "meta.brace.round.tsx" } },
 			"patterns": [
 				{ "include": "#jsx" },
+				{ "include": "source.tsx#expression" }
+			]
+		},
+		"paren-group": {
+			"begin": "\\(",
+			"beginCaptures": { "0": { "name": "meta.brace.round.tsx" } },
+			"end": "\\)",
+			"endCaptures": { "0": { "name": "meta.brace.round.tsx" } },
+			"patterns": [
 				{ "include": "#jsx-control-keywords" },
-				{ "include": "source.tsx#statements" }
+				{ "include": "#paren-group" },
+				{ "include": "source.tsx#expression" }
 			]
 		},
 		"jsx-control-keywords": {
@@ -124,7 +219,6 @@
 				{ "match": "\\b(if|else)\\b", "name": "keyword.control.conditional.tsx" },
 				{ "match": "\\b(for|while|do)\\b", "name": "keyword.control.loop.tsx" },
 				{ "match": "\\b(const|let|var)\\b", "name": "storage.type.tsx" },
-				{ "match": "\\b(of|in)\\b", "name": "keyword.operator.expression.of.tsx" },
 				{ "match": "\\b(break|continue|return)\\b", "name": "keyword.control.flow.tsx" },
 				{ "match": "\\b(switch|case|default)\\b", "name": "keyword.control.switch.tsx" },
 				{ "match": "\\b(try|catch|finally|throw)\\b", "name": "keyword.control.trycatch.tsx" },
