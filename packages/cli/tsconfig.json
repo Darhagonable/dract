@@ -5,7 +5,7 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"esModuleInterop": true,
-		"skipLibCheck": true,
+		"skipLibCheck": false,
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,

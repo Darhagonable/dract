@@ -31,7 +31,7 @@
 // Definitions: https://github.com/DefinitelyTyped/DefinitelyTyped
 // TypeScript Version: 2.8
 
-import type { Attachment } from 'svelte/attachments';
+import type { DarTsxNode } from './runtime/external/types';
 
 // Note: We also allow `null` as a valid value because Svelte treats this the same as `undefined`
 
@@ -85,7 +85,7 @@ export type FullAutoFill =
 export interface DOMAttributes<T extends EventTarget> {
 	// Implicit children prop every element has
 	// Add this here so that libraries doing `let { ...props }: HTMLButtonAttributes = $props()` don't need a separate interface
-	children?: import('svelte').Snippet;
+	children?: DarTsxNode | DarTsxNode[];
 
 	// Clipboard Events
 	oncopy?: ClipboardEventHandler<T> | undefined | null;
@@ -758,9 +758,6 @@ export interface HTMLAttributes<T extends EventTarget> extends AriaAttributes, D
 
 	// allow any data- attribute
 	[key: `data-${string}`]: any;
-
-	// allow any attachment and falsy values (by using false we prevent the usage of booleans values by themselves)
-	[key: symbol]: Attachment<T> | false | undefined | null;
 }
 
 export type HTMLAttributeAnchorTarget = '_self' | '_blank' | '_parent' | '_top' | (string & {});
@@ -1133,9 +1130,9 @@ export interface HTMLMediaAttributes<T extends HTMLMediaElement> extends HTMLAtt
 
 	readonly 'bind:readyState'?: 0 | 1 | 2 | 3 | 4 | undefined | null;
 	readonly 'bind:duration'?: number | undefined | null;
-	readonly 'bind:buffered'?: SvelteMediaTimeRange[] | undefined | null;
-	readonly 'bind:played'?: SvelteMediaTimeRange[] | undefined | null;
-	readonly 'bind:seekable'?: SvelteMediaTimeRange[] | undefined | null;
+	readonly 'bind:buffered'?: DarTsxMediaTimeRange[] | undefined | null;
+	readonly 'bind:played'?: DarTsxMediaTimeRange[] | undefined | null;
+	readonly 'bind:seekable'?: DarTsxMediaTimeRange[] | undefined | null;
 	readonly 'bind:seeking'?: boolean | undefined | null;
 	readonly 'bind:ended'?: boolean | undefined | null;
 	'bind:muted'?: boolean | undefined | null;
@@ -1360,19 +1357,19 @@ export interface HTMLVideoAttributes extends HTMLMediaAttributes<HTMLVideoElemen
 	readonly 'bind:videoHeight'?: number | undefined | null;
 }
 
-export interface SvelteMediaTimeRange {
+export interface DarTsxMediaTimeRange {
 	start: number;
 	end: number;
 }
 
-export interface SvelteDocumentAttributes extends HTMLAttributes<Document> {
+export interface DarTsxDocumentAttributes extends HTMLAttributes<Document> {
 	readonly 'bind:activeElement'?: Document['activeElement'] | undefined | null;
 	readonly 'bind:fullscreenElement'?: Document['fullscreenElement'] | undefined | null;
 	readonly 'bind:pointerLockElement'?: Document['pointerLockElement'] | undefined | null;
 	readonly 'bind:visibilityState'?: Document['visibilityState'] | undefined | null;
 }
 
-export interface SvelteWindowAttributes extends HTMLAttributes<Window> {
+export interface DarTsxWindowAttributes extends HTMLAttributes<Window> {
 	readonly 'bind:innerWidth'?: Window['innerWidth'] | undefined | null;
 	readonly 'bind:innerHeight'?: Window['innerHeight'] | undefined | null;
 	readonly 'bind:outerWidth'?: Window['outerWidth'] | undefined | null;
@@ -1732,7 +1729,7 @@ export interface HTMLWebViewAttributes extends HTMLAttributes<HTMLElement> {
 // DOM Elements
 // ----------------------------------------------------------------------
 
-export interface SvelteHTMLElements {
+export interface DarTsxHTMLElements {
 	a: HTMLAnchorAttributes;
 	abbr: HTMLAttributes<HTMLElement>;
 	address: HTMLAttributes<HTMLElement>;
