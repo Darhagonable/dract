@@ -1,0 +1,202 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html, body, #root {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.repl-layout {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	background: #1e1e1e;
+}
+
+.repl-top-bar {
+	flex-shrink: 0;
+	background: #252526;
+	border-bottom: 1px solid #333;
+}
+
+.repl-tabs {
+	display: flex;
+	align-items: center;
+	gap: 0;
+}
+
+.repl-body {
+	flex: 1;
+	display: flex;
+	flex-direction: row;
+	overflow: hidden;
+}
+
+.repl-editor-pane {
+	flex: 1;
+	min-width: 300px;
+	overflow: hidden;
+}
+
+.repl-resizer {
+	width: 4px;
+	cursor: col-resize;
+	background: #333;
+	flex-shrink: 0;
+}
+.repl-resizer:hover {
+	background: #555;
+}
+
+.repl-right-pane {
+	flex: 1;
+	min-width: 300px;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.repl-output-pane {
+	flex: 1;
+	min-height: 100px;
+	overflow: hidden;
+	border-bottom: 1px solid #333;
+}
+
+.repl-preview-pane {
+	flex: 1;
+	min-height: 100px;
+	overflow: hidden;
+}
+
+.repl-error-container {
+	flex-shrink: 0;
+	max-height: 150px;
+	overflow: auto;
+}
+
+/* File tabs */
+.file-tabs {
+	display: flex;
+	align-items: center;
+	overflow-x: auto;
+	flex: 1;
+}
+
+.file-tab {
+	background: none;
+	border: none;
+	color: #aaa;
+	padding: 6px 16px;
+	cursor: pointer;
+	font-size: 13px;
+	font-family: inherit;
+	border-right: 1px solid #333;
+	white-space: nowrap;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.file-tab:hover {
+	background: #2a2a2a;
+	color: #ddd;
+}
+.file-tab.active {
+	background: #1e1e1e;
+	color: #fff;
+	border-bottom: 2px solid #4fc3f7;
+}
+
+.file-close {
+	font-size: 16px;
+	line-height: 1;
+	padding: 0 2px;
+	border-radius: 3px;
+}
+.file-close:hover {
+	background: #555;
+	color: #fff;
+}
+
+.add-tab {
+	color: #888;
+	font-size: 18px;
+	padding: 6px 12px;
+}
+.add-tab:hover {
+	color: #fff;
+}
+
+/* Toolbar */
+.toolbar {
+	display: flex;
+	align-items: center;
+	padding: 4px 12px;
+	gap: 8px;
+	margin-left: auto;
+}
+
+.toolbar-title {
+	color: #ccc;
+	font-size: 13px;
+	font-weight: 600;
+	margin-right: 12px;
+}
+
+.toolbar-btn {
+	background: #333;
+	border: 1px solid #555;
+	color: #ccc;
+	padding: 4px 12px;
+	font-size: 12px;
+	border-radius: 3px;
+	cursor: pointer;
+	font-family: inherit;
+}
+.toolbar-btn:hover {
+	background: #444;
+	color: #fff;
+}
+.toolbar-btn.compiling {
+	opacity: 0.6;
+	cursor: wait;
+}
+
+/* Error panel */
+.error-panel {
+	background: #3a1a1a;
+	border-top: 1px solid #c44;
+	padding: 8px 16px;
+}
+
+.error-header {
+	color: #f44;
+	font-size: 13px;
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.error-message {
+	color: #f88;
+	font-size: 12px;
+	font-family: 'Consolas', 'Monaco', monospace;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+/* Source map hover decoration */
+.source-map-hover {
+	background: rgba(79, 195, 247, 0.15);
+	border-left: 3px solid #4fc3f7;
+}
+
+/* Monaco overrides */
+.monaco-editor .margin {
+	background: #1e1e1e !important;
+}

@@ -1,0 +1,23 @@
+{
+	"name": "dartsx-repl",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"check": "t sc --noEmit"
+	},
+	"dependencies": {
+		"@jridgewell/trace-mapping": "^0.3.25",
+		"dartsx": "workspace:*",
+		"lz-string": "^1.5.0",
+		"monaco-editor": "^0.52.2"
+	},
+	"devDependencies": {
+		"dartsx-vite-plugin": "workspace:*",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16",
+		"vite-plugin-monaco-editor": "^1.1.0"
+	}
+}

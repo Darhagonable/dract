@@ -1,0 +1,15 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"jsx": "preserve",
+		"jsxImportSource": "dartsx",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"declaration": false,
+		"declarationMap": false,
+		"sourceMap": false,
+		"verbatimModuleSyntax": false,
+		"types": ["dartsx"],
+		"paths": {}
+	},
+	"include": ["src"]
+}

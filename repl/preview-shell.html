@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8" />
+	<meta name="sandbox" content="allow-scripts allow-same-origin" />
+	<style>
+		html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: auto; background: #fff; color: #111; font-family: system-ui, sans-serif; }
+		#root { min-height: 100vh; }
+	</style>
+</head>
+<body>
+	<div id="root"></div>
+	<script type="module">
+		import * as dartsxExports from 'dartsx';
+		import internalClient from 'dartsx/internal/client';
+		import * as jsxRuntime from 'dartsx/jsx-runtime';
+
+		window.__dartsxExports = dartsxExports;
+		window.__dartsxInternal = internalClient;
+		window.__jsxRuntime = jsxRuntime;
+
+		const root = document.getElementById('root');
+
+		addEventListener('message', async (e) => {
+			const { type, code, css } = e.data;
+			if (type !== 'compile') return;
+
+			root.innerHTML = '';
+			document.querySelectorAll('[data-repl-style]').forEach(el => el.remove());
+
+			if (css) {
+				const styleEl = document.createElement('style');
+				styleEl.setAttribute('data-repl-style', '');
+				styleEl.textContent = css;
+				document.head.appendChild(styleEl);
+			}
+
+			if (!code) return;
+
+			try {
+				let __dartsx_default_name = null;
+				const rewritten = code
+					.replace(/import\s+([\w$]+)\s+from\s+['"]dartsx\/internal\/client['"]/g, 'const $1 = window.__dartsxInternal;')
+					.replace(/import\s*\{([^}]*)\}\s*from\s+['"]dartsx\/jsx-runtime['"]/g, 'const { $1 } = window.__jsxRuntime;')
+					.replace(/import\s*\{([^}]*)\}\s*from\s+['"]dartsx['"]/g, 'const { $1 } = window.__dartsxExports;')
+					.replace(/import\s+([^*][^;]*)\s*from\s+['"]([^'"]+)['"]/g, (match, imports, specifier) => {
+						if (specifier.startsWith('./') || specifier.startsWith('../') || specifier.startsWith('/')) {
+							return `/* import skipped: ${specifier} */`;
+						}
+						return match;
+					})
+					.replace(/export\s+default\s+function\s+(\w+)/g, (_, name) => {
+						__dartsx_default_name = name;
+						return `function ${name}`;
+					})
+					.replace(/\bexport\s+default\s+/g, '')
+					.replace(/\bexport\s+/g, '');
+
+				const fn = new Function('__dartsxInternal', '__jsxRuntime', '__dartsxExports',
+					'"use strict";\n' +
+					rewritten + '\n' +
+					'return typeof ' + (__dartsx_default_name || 'undefined') + ' !== "undefined" ? ' + (__dartsx_default_name || 'undefined') + ' : null;'
+				);
+
+				const Component = fn(internalClient, jsxRuntime, dartsxExports);
+
+				if (Component && typeof Component === 'function') {
+					dartsxExports.mount(Component, root);
+				}
+			} catch (err) {
+				root.innerHTML = `<pre style="color:red;padding:1rem;font-size:13px">${err instanceof Error ? err.message : String(err)}\n${err instanceof Error ? err.stack : ''}</pre>`;
+			}
+		});
+	</script>
+</body>
+</html>
