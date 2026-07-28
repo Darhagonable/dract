@@ -8,6 +8,7 @@
 		"declarationMap": false,
 		"sourceMap": false,
 		"verbatimModuleSyntax": false,
+		"resolveJsonModule": true,
 		"types": ["dartsx"],
 		"paths": {}
 	},

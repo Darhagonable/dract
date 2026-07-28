@@ -1,57 +1,65 @@
 import * as monaco from 'monaco-editor';
-import { dartsxMonarchLanguage } from './dartsx-language';
-import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker.js?worker';
-import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker.js?worker';
 
-;(self as any).MonacoEnvironment = {
-	getWorker(_: any, label: string) {
-		if (label === 'typescript' || label === 'javascript') {
-			return new tsWorker();
+import { initialize } from '@codingame/monaco-vscode-api/services';
+import { RegisteredFileSystemProvider, RegisteredMemoryFile, registerFileSystemOverlay } from '@codingame/monaco-vscode-files-service-override';
+import getExtensionsServiceOverride from '@codingame/monaco-vscode-extensions-service-override';
+import languagesServiceOverride from '@codingame/monaco-vscode-languages-service-override';
+
+import '@codingame/monaco-vscode-theme-defaults-default-extension';
+
+import editorWorkerUrl from '@codingame/monaco-vscode-api/workers/editor.worker?url';
+import extensionHostWorkerUrl from '@codingame/monaco-vscode-api/workers/extensionHost.worker?url';
+
+import './dartsx-extension';
+
+self.MonacoEnvironment = {
+	getWorkerUrl(_: string, label: string) {
+		if (label === 'editorWorkerService') {
+			return editorWorkerUrl;
 		}
-		return new editorWorker();
+		if (label === 'extensionHostWorkerMain') {
+			return extensionHostWorkerUrl;
+		}
 	},
-};
+	getWorkerOptions(_: string, label: string) {
+		if (label === 'extensionHostWorkerMain') {
+			return { type: 'module' as const };
+		}
+		return undefined;
+	},
+} as any;
+
+const SOURCE_URI = monaco.Uri.parse('file:///source.tsx');
+let sourceFile: RegisteredMemoryFile | undefined;
 
 export let sourceEditor: monaco.editor.IStandaloneCodeEditor;
 export let outputEditor: monaco.editor.IStandaloneCodeEditor;
 
 let sourceModel: monaco.editor.ITextModel;
 let outputModel: monaco.editor.ITextModel;
+let initialized = false;
 
-export function initEditors(container: HTMLElement, outputContainer: HTMLElement) {
-	monaco.languages.register({ id: 'dartsx' });
-	monaco.languages.setMonarchTokensProvider('dartsx', dartsxMonarchLanguage);
+export async function initEditors(container: HTMLElement, outputContainer: HTMLElement) {
+	if (!initialized) {
+		await initialize({
+			...getExtensionsServiceOverride({ enableWorkerExtensionHost: true }),
+			...languagesServiceOverride(),
+		});
 
-	monaco.languages.register({ id: 'dartsx-output' });
-	monaco.languages.setMonarchTokensProvider('dartsx-output', {
-		tokenizer: {
-			root: [
-				[/\/\/.*$/, 'comment'],
-				[/\/\*/, 'comment', '@comment'],
-				[/'.*?'/, 'string'],
-				[/".*?"/, 'string'],
-				[/`[\s\S]*?`/, 'string'],
-				[/\b(import|export|from|default|const|let|var|function|return|if|for|while|class|new|this)\b/, 'keyword'],
-				[/\b(true|false|null|undefined|NaN|Infinity)\b/, 'constant'],
-				[/\b(\d+\.?\d*)\b/, 'number'],
-				[/\$\.[a-zA-Z_]\w*/, 'function'],
-				[/[{}()\[\];,:]/, 'delimiter'],
-				[/\b[a-zA-Z_]\w*\s*(?=\()/, 'function'],
-			],
-			comment: [
-				[/[^/*]+/, 'comment'],
-				[/\*\//, 'comment', '@pop'],
-				[/[/*]/, 'comment'],
-			],
-		},
-	} as any);
+		initialized = true;
 
-	sourceModel = monaco.editor.createModel('', 'dartsx');
-	outputModel = monaco.editor.createModel('', 'dartsx-output');
+		const provider = new RegisteredFileSystemProvider(false);
+		sourceFile = new RegisteredMemoryFile(SOURCE_URI, '');
+		provider.registerFile(sourceFile);
+		registerFileSystemOverlay(1, provider);
+	}
+
+	sourceModel = monaco.editor.createModel('', 'typescript', SOURCE_URI);
+	outputModel = monaco.editor.createModel('', 'javascript');
 
 	sourceEditor = monaco.editor.create(container, {
 		model: sourceModel,
-		language: 'dartsx',
+		language: 'typescript',
 		theme: 'vs-dark',
 		fontSize: 14,
 		lineNumbers: 'on',
@@ -66,7 +74,7 @@ export function initEditors(container: HTMLElement, outputContainer: HTMLElement
 
 	outputEditor = monaco.editor.create(outputContainer, {
 		model: outputModel,
-		language: 'dartsx-output',
+		language: 'javascript',
 		theme: 'vs-dark',
 		fontSize: 14,
 		lineNumbers: 'on',
@@ -84,6 +92,7 @@ export function initEditors(container: HTMLElement, outputContainer: HTMLElement
 export function setSourceContent(content: string) {
 	if (sourceModel) {
 		sourceModel.setValue(content);
+		sourceFile?.write(new TextEncoder().encode(content)).catch(() => { });
 	}
 }
 

@@ -47,6 +47,11 @@ function bundleCompiledFiles(
 }
 
 export default defineConfig({
+	server: {
+		fs: {
+			allow: ['..'],
+		},
+	},
 	plugins: [
 		dartsx(),
 		{
@@ -111,7 +116,22 @@ export default defineConfig({
 	resolve: {
 		conditions: ['import', 'module', 'browser', 'default'],
 	},
-	optimizeDeps: {
-		include: ['monaco-editor', '@jridgewell/trace-mapping', 'lz-string'],
+		optimizeDeps: {
+		include: [
+			'@jridgewell/trace-mapping',
+			'lz-string',
+			'dartsx',
+			'dartsx/compiler',
+		],
+		exclude: [
+			'@codingame/monaco-vscode-api',
+			'@codingame/monaco-vscode-editor-api',
+			'@codingame/monaco-vscode-extension-api',
+			'@codingame/monaco-vscode-languages-service-override',
+			'@codingame/monaco-vscode-extensions-service-override',
+			'@codingame/monaco-vscode-theme-defaults-default-extension',
+			'@codingame/monaco-vscode-files-service-override',
+			'@vscode/diff',
+		],
 	},
 });

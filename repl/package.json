@@ -6,18 +6,25 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "vite build",
-		"check": "t sc --noEmit"
+		"check": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@codingame/monaco-vscode-api": "36.0.0",
+		"@codingame/monaco-vscode-extensions-service-override": "36.0.0",
+		"@codingame/monaco-vscode-files-service-override": "36.0.0",
+		"@codingame/monaco-vscode-languages-service-override": "36.0.0",
+		"@codingame/monaco-vscode-theme-defaults-default-extension": "36.0.0",
 		"@jridgewell/trace-mapping": "^0.3.25",
 		"dartsx": "workspace:*",
+		"dartsx-typescript-plugin": "workspace:*",
+		"dartsx-vscode": "workspace:*",
 		"lz-string": "^1.5.0",
-		"monaco-editor": "^0.52.2"
+		"monaco-editor": "npm:@codingame/monaco-vscode-editor-api@36.0.0",
+		"vscode": "npm:@codingame/monaco-vscode-extension-api@36.0.0"
 	},
 	"devDependencies": {
 		"dartsx-vite-plugin": "workspace:*",
 		"typescript": "^6.0.3",
-		"vite": "^8.0.16",
-		"vite-plugin-monaco-editor": "^1.1.0"
+		"vite": "^8.0.16"
 	}
 }

@@ -19,7 +19,7 @@ export default component App() {
 		setup();
 	});
 
-	function setup() {
+	async function setup() {
 		const hashFiles = loadFromHash();
 		if (hashFiles && Object.keys(hashFiles).length > 0) {
 			loadedFiles = hashFiles;
@@ -71,7 +71,7 @@ export default component App() {
 		layout.appendChild(errorContainer);
 
 		mountPreview(previewPane);
-		initEditors(editorPane, outputPane);
+		await initEditors(editorPane, outputPane);
 		setupSourceMapLinking(sourceEditor, outputEditor);
 
 		setSourceContent(loadedFiles[loadedActiveFile] || '');

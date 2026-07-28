@@ -19,7 +19,7 @@
 		}
 	},
 	"scripts": {
-		"build": "tsc --build",
+		"build": "tsdown",
 		"check": "tsc --noEmit"
 	},
 	"devDependencies": {
