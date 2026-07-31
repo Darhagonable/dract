@@ -1,5 +1,5 @@
 {
-	"name": "dartsx-vscode",
+	"name": "@dartsx/vscode-extension",
 	"displayName": "DarTsx",
 	"description": "DarTsx language support — syntax highlighting, diagnostics, completions, and more.",
 	"version": "0.0.1",
@@ -21,7 +21,7 @@
 	"contributes": {
 		"typescriptServerPlugins": [
 			{
-				"name": "dartsx-typescript-plugin",
+				"name": "@dartsx/typescript-plugin",
 				"enableForWorkspaceTypeScriptVersions": true
 			}
 		],
@@ -72,7 +72,7 @@
 	},
 	"dependencies": {
 		"@volar/language-server": "~2.4.28",
-		"dartsx-typescript-plugin": "workspace:*",
+		"@dartsx/typescript-plugin": "workspace:*",
 		"volar-service-css": "0.0.71",
 		"volar-service-html": "0.0.71",
 		"vscode-languageclient": "^10.0.0"

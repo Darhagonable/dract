@@ -1,5 +1,5 @@
 {
-	"name": "dartsx-playground",
+	"name": "@dartsx/playground",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
@@ -15,9 +15,9 @@
 	},
 	"devDependencies": {
 		"@types/node": "^25.9.3",
-		"dartsx-cli": "workspace:*",
-		"dartsx-typescript-plugin": "workspace:*",
-		"dartsx-vite-plugin": "workspace:*",
+		"@dartsx/cli": "workspace:*",
+		"@dartsx/typescript-plugin": "workspace:*",
+		"@dartsx/vite-plugin": "workspace:*",
 		"vite": "^8.0.16"
 	}
 }

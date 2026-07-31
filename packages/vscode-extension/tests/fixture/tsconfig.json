@@ -9,7 +9,7 @@
 		"skipLibCheck": true,
 		"noEmit": true,
 		"plugins": [
-			{ "name": "dartsx-typescript-plugin" }
+			{ "name": "@dartsx/typescript-plugin" }
 		]
 	},
 	"include": ["src"]

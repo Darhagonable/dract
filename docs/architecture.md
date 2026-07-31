@@ -62,7 +62,7 @@ This means:
 
 ### Vite Plugin Architecture
 
-The Vite plugin (`dartsx-vite-plugin`) is essential for cross-file reactivity:
+The Vite plugin (`@dartsx/vite-plugin`) is essential for cross-file reactivity:
 
 - **`reactiveRegistry`**: Maps module IDs → exported reactive variable names
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers

@@ -12,7 +12,7 @@
 			"@dartsx-toolkit/router": ["../toolkit/router/src/index.ts"]
 		},
 		"plugins": [
-			{ "name": "dartsx-typescript-plugin" }
+			{ "name": "@dartsx/typescript-plugin" }
 		]
 	},
 	"include": ["src"]

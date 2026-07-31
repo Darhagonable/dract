@@ -1,5 +1,5 @@
 {
-	"name": "dartsx-cli",
+	"name": "@dartsx/cli",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
@@ -26,7 +26,7 @@
 		"@volar/typescript": "~2.4.28",
 		"chokidar": "^5.0.0",
 		"dartsx": "workspace:*",
-		"dartsx-typescript-plugin": "workspace:*",
+		"@dartsx/typescript-plugin": "workspace:*",
 		"kleur": "^4.1.5"
 	},
 	"peerDependencies": {

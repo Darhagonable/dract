@@ -1,5 +1,5 @@
 import { defineProject } from 'vitest/config';
-import dartsx from 'dartsx-vite-plugin';
+import dartsx from '@dartsx/vite-plugin';
 
 export default defineProject({
 	plugins: [dartsx()],

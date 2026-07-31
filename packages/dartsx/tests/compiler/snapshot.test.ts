@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'fs';
 import { join } from 'path';
-import dartsx, { type DarTsxTransformContext } from 'dartsx-vite-plugin';
+import dartsx, { type DarTsxTransformContext } from '@dartsx/vite-plugin';
 
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;

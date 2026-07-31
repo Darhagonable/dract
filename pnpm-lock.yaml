@@ -8,12 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@dartsx/vite-plugin':
+        specifier: workspace:*
+        version: link:packages/vite-plugin
       '@types/node':
         specifier: ^25.9.3
         version: 25.9.3
-      dartsx-vite-plugin:
-        specifier: workspace:*
-        version: link:packages/vite-plugin
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1
@@ -29,6 +29,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@dartsx/typescript-plugin':
+        specifier: workspace:*
+        version: link:../typescript-plugin
       '@volar/language-core':
         specifier: ~2.4.28
         version: 2.4.28
@@ -41,9 +44,6 @@ importers:
       dartsx:
         specifier: workspace:*
         version: link:../dartsx
-      dartsx-typescript-plugin:
-        specifier: workspace:*
-        version: link:../typescript-plugin
       kleur:
         specifier: ^4.1.5
         version: 4.1.5
@@ -132,12 +132,12 @@ importers:
 
   packages/vscode-extension:
     dependencies:
+      '@dartsx/typescript-plugin':
+        specifier: workspace:*
+        version: link:../typescript-plugin
       '@volar/language-server':
         specifier: ~2.4.28
         version: 2.4.28
-      dartsx-typescript-plugin:
-        specifier: workspace:*
-        version: link:../typescript-plugin
       volar-service-css:
         specifier: 0.0.71
         version: 0.0.71(@volar/language-service@2.4.28)
@@ -176,18 +176,18 @@ importers:
         specifier: workspace:*
         version: link:../packages/dartsx
     devDependencies:
+      '@dartsx/cli':
+        specifier: workspace:*
+        version: link:../packages/cli
+      '@dartsx/typescript-plugin':
+        specifier: workspace:*
+        version: link:../packages/typescript-plugin
+      '@dartsx/vite-plugin':
+        specifier: workspace:*
+        version: link:../packages/vite-plugin
       '@types/node':
         specifier: ^25.9.3
         version: 25.9.3
-      dartsx-cli:
-        specifier: workspace:*
-        version: link:../packages/cli
-      dartsx-typescript-plugin:
-        specifier: workspace:*
-        version: link:../packages/typescript-plugin
-      dartsx-vite-plugin:
-        specifier: workspace:*
-        version: link:../packages/vite-plugin
       vite:
         specifier: ^8.0.16
         version: 8.0.16(@types/node@25.9.3)(jiti@2.7.0)
@@ -198,7 +198,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/dartsx
     devDependencies:
-      dartsx-cli:
+      '@dartsx/cli':
         specifier: workspace:*
         version: link:../../packages/cli
       typescript:
@@ -214,7 +214,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/dartsx
     devDependencies:
-      dartsx-cli:
+      '@dartsx/cli':
         specifier: workspace:*
         version: link:../../packages/cli
       typescript:
@@ -233,21 +233,21 @@ importers:
         specifier: workspace:*
         version: link:../packages/dartsx
     devDependencies:
+      '@dartsx/cli':
+        specifier: workspace:*
+        version: link:../packages/cli
+      '@dartsx/typescript-plugin':
+        specifier: workspace:*
+        version: link:../packages/typescript-plugin
+      '@dartsx/vite-plugin':
+        specifier: workspace:*
+        version: link:../packages/vite-plugin
       '@tailwindcss/typography':
         specifier: ^0.5.20
         version: 0.5.20(tailwindcss@4.3.1)
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.1(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0))
-      dartsx-cli:
-        specifier: workspace:*
-        version: link:../packages/cli
-      dartsx-typescript-plugin:
-        specifier: workspace:*
-        version: link:../packages/typescript-plugin
-      dartsx-vite-plugin:
-        specifier: workspace:*
-        version: link:../packages/vite-plugin
       marked:
         specifier: ^18.0.5
         version: 18.0.5

@@ -12,7 +12,7 @@ Create a new directory and initialize it:
 mkdir my-app && cd my-app
 npm init -y
 npm install dartsx
-npm install -D dartsx-vite-plugin vite
+npm install -D @dartsx/vite-plugin vite
 ```
 
 ## Configure Vite
@@ -21,7 +21,7 @@ Create `vite.config.ts`:
 
 ```typescript
 import { defineConfig } from 'vite';
-import dartsx from 'dartsx-vite-plugin';
+import dartsx from '@dartsx/vite-plugin';
 
 export default defineConfig({
   plugins: [dartsx()],

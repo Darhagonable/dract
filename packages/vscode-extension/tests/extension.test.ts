@@ -24,7 +24,7 @@ async function hoverAt(doc: vscode.TextDocument, line: number, col: number): Pro
 
 describe('VSCode Extension', () => {
 	it('extension activates', async () => {
-		const ext = vscode.extensions.getExtension('dartsx.dartsx-vscode');
+		const ext = vscode.extensions.getExtension('dartsx.@dartsx/vscode-extension');
 		expect(ext).toBeDefined();
 		await ext!.activate();
 		expect(ext!.isActive).toBe(true);

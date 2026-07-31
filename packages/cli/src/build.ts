@@ -52,7 +52,7 @@ export async function build(options: PackageOptions): Promise<void> {
 	// Step 3: Validate
 	const warnings = validate(options.cwd, dartsxFileNames.size > 0);
 	if (warnings.length) {
-		console.log(colors.bold().yellow('\ndartsx-cli found the following issues:'));
+		console.log(colors.bold().yellow('\n@dartsx/cli found the following issues:'));
 		for (const warning of warnings) {
 			console.log(colors.yellow(`  ⚠ ${warning}`));
 		}

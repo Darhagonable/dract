@@ -187,7 +187,7 @@ async function loadTS(): Promise<typeof import('typescript')> {
 		return (await import('typescript')).default;
 	} catch {
 		throw new Error(
-			'TypeScript is required for dartsx-cli. Install it as a dev dependency.',
+			'TypeScript is required for @dartsx/cli. Install it as a dev dependency.',
 		);
 	}
 }
