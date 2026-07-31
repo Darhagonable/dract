@@ -65,7 +65,7 @@
 		]
 	},
 	"scripts": {
-		"build": "tsc --build",
+		"build": "tsdown",
 		"check": "tsc --noEmit",
 		"test": "vitest run",
 		"package": "vsce package --no-dependencies"

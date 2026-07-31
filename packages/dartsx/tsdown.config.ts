@@ -10,5 +10,4 @@ export default defineConfig({
 		'compiler/preprocess': 'src/compiler/preprocess.ts',
 	},
 	fixedExtension: false,
-	external: ['oxc-parser', 'oxc-transform', 'postcss', 'postcss-selector-parser', 'zimmerframe', 'esrap', 'magic-string'],
 });
