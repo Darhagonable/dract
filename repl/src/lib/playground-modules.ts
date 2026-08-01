@@ -1,5 +1,5 @@
 // Turns the playground's virtual files into the module graph the sandbox
-// executes: compiles each file (octane compiler for `.tsrx`/`.tsx`, sucrase's
+// executes: compiles each file (octane compiler for `.tsx`, sucrase's
 // react-jsx transform for `.react.tsx` React-host files), rewrites import
 // specifiers with es-module-lexer's exact offsets, and topo-sorts the sibling
 // graph so modules arrive at the sandbox dependencies-first.
@@ -55,7 +55,7 @@ export function isReactHostFile(name: string): boolean {
 	return name.endsWith('.react.tsx');
 }
 
-const SIBLING_EXTENSIONS = ['', '.tsrx', '.tsx', '.react.tsx'];
+const SIBLING_EXTENSIONS = ['', '.tsx', '.react.tsx'];
 
 // Compilation is re-run on every debounced keystroke; memoize per (name,
 // source) so only the edited file recompiles.

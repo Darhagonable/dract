@@ -14,7 +14,6 @@
 		"@codemirror/state": "^6.7.1",
 		"@codemirror/view": "^6.43.6",
 		"@tsrx/core": "^0.1.56",
-		"@tsrx/prettier-plugin": "^0.3.118",
 		"devalue": "^5.8.2",
 		"es-module-lexer": "^1.7.0",
 		"esrap": "^2.3.0",

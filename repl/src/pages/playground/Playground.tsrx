@@ -1,4 +1,4 @@
-// /playground — write TSRX (or TSX) on the left, and on the right either the
+// /playground — write TSX on the left, and on the right either the
 // LIVE rendered app or the compiled output, switchable with a tab. The
 // compiled pane selects a Client, Server, Types, or Parsed artifact and shows
 // it as code or an AST (Parsed is AST-only). The Types code is the virtual TSX
@@ -12,8 +12,8 @@
 // React-host `.react.tsx` files) compiles the virtual files on a debounce, the
 // module graph executes inside a SANDBOXED IFRAME with an opaque origin (see
 // src/lib/playground.ts + playground-modules.ts + playground-sandbox.ts —
-// never in this page), and CodeMirror highlights through Shiki with the real
-// TSRX TextMate grammar (src/lib/shiki-codemirror.ts). Editors, panels, and
+// never in this page), and CodeMirror highlights through Shiki with the bundled
+// TSX grammar (src/lib/shiki-codemirror.ts). Editors, panels, and
 // the preview canvas all follow the site's light/dark theme.
 //
 // Everything editor-related boots in an effect (dynamic imports), so SSR
@@ -33,7 +33,6 @@
 import { useState, useRef, useEffect } from 'octane';
 import type { CompileDiagnostic } from 'octane/compiler';
 import type {
-	PlaygroundLang,
 	PlaygroundOutputTarget,
 	PlaygroundRuntimeTarget,
 } from '../../lib/playground.ts';
@@ -98,7 +97,6 @@ for (const example of EXAMPLES) {
 
 export function Playground() @{
 	useTitle('Octane — Playground');
-	const [lang, setLang] = useState<PlaygroundLang>('tsrx');
 	const [view, setView] = useState<'preview' | 'compiled'>('preview');
 	// Which compiler artifact the right pane shows.
 	const [compiledMode, setCompiledMode] = useState<'code' | 'ast'>('code');
@@ -115,11 +113,6 @@ export function Playground() @{
 	const [exampleId, setExampleId] = useState<string>(DEFAULT_EXAMPLE_ID);
 	const [files, setFiles] = useState<string[]>([]);
 	const [activeFile, setActiveFile] = useState('');
-	// Which language variants the current selection offers (drives the toggle).
-	const [variants, setVariants] = useState<Record<PlaygroundLang, boolean>>({
-		tsrx: true,
-		tsx: true,
-	});
 
 	const sourceHostRef = useRef<HTMLDivElement | null>(null);
 	const outputHostRef = useRef<HTMLDivElement | null>(null);
@@ -141,7 +134,6 @@ export function Playground() @{
 	// stack has loaded; the toolbar buttons (and the consent overlay's Run
 	// button) call through it.
 	const controllerRef = useRef<{
-		switchLang?: (next: PlaygroundLang) => void;
 		selectExample?: (id: string) => void;
 		selectFile?: (name: string) => void;
 		formatActive?: () => void;
@@ -258,12 +250,8 @@ export function Playground() @{
 				files: workspace.files.map((file: { name: string; source: string }) => ({ ...file })),
 			});
 
-			let currentLang: PlaygroundLang = initial?.lang ?? 'tsrx';
 			let currentExampleId: string = initial ? CUSTOM_EXAMPLE_ID : DEFAULT_EXAMPLE_ID;
-			const workspaces: Partial<Record<PlaygroundLang, Workspace>> = {
-				tsrx: cloneWorkspace(pgExamples.DEFAULT_WORKSPACES.tsrx),
-				tsx: cloneWorkspace(pgExamples.DEFAULT_WORKSPACES.tsx),
-			};
+			let workspace: Workspace = cloneWorkspace(pgExamples.DEFAULT_WORKSPACE);
 			// A hash payload is someone else's code — display + compile it, but
 			// gate EXECUTION behind the consent overlay's Run button. Two payloads
 			// carry nothing new and stay ungated: one byte-equal to the default
@@ -283,8 +271,8 @@ export function Playground() @{
 			};
 			let executionGated = false;
 			if (initial) {
-				workspaces[currentLang] = { entry: initial.entry, files: initial.files };
-				const fallback = pgExamples.DEFAULT_WORKSPACES[currentLang];
+				workspace = { entry: initial.entry, files: initial.files };
+				const fallback = pgExamples.DEFAULT_WORKSPACE;
 				const isDefault =
 					initial.files.length === 1 && initial.entry === fallback.entry &&
 						initial.files[0].name === fallback.files[0].name &&
@@ -301,28 +289,15 @@ export function Playground() @{
 					setGated(true);
 				}
 			}
-			let currentFile = workspaces[currentLang]!.entry;
+			let currentFile = workspace.entry;
 
-			const workspace = (): Workspace => workspaces[currentLang]!;
 			const fileSource = (name: string): string =>
-				workspace().files.find((file: { name: string }) => file.name === name)?.source ?? '';
-
-			// Which language variants the current selection can switch to: an
-			// example offers exactly its declared variants; “Custom” keeps both
-			// modes live (a missing side lazily starts from the default counter).
-			const variantAvailability = (): Record<PlaygroundLang, boolean> => {
-				if (currentExampleId === CUSTOM_EXAMPLE_ID) return { tsrx: true, tsx: true };
-				const example = pgExamples.getExample(currentExampleId);
-				if (!example) return { tsrx: true, tsx: true };
-				return { tsrx: example.variants.tsrx != null, tsx: example.variants.tsx != null };
-			};
+				workspace.files.find((file: { name: string }) => file.name === name)?.source ?? '';
 
 			const publishWorkspaceState = () => {
-				setLang(currentLang);
 				setExampleId(currentExampleId);
-				setFiles(workspace().files.map((file: { name: string }) => file.name));
+				setFiles(workspace.files.map((file: { name: string }) => file.name));
 				setActiveFile(currentFile);
-				setVariants(variantAvailability());
 			};
 
 			// Theme-variable canvas: the same custom properties the rest of the
@@ -597,7 +572,7 @@ export function Playground() @{
 					} else if (!entry) {
 						clearMappedPair();
 						const message = pgModules.isReactHostFile(currentFile)
-							? 'AST trace covers Octane-owned .tsrx and .tsx files. React-host files use the separate Sucrase pipeline.'
+							? 'AST trace covers Octane-owned .tsx files. React-host files use the separate Sucrase pipeline.'
 							: 'AST generation failed. Fix the source to generate a new tree.';
 						astPreview.setUnavailable(message, currentFile);
 						lastShownAst = null;
@@ -870,7 +845,7 @@ export function Playground() @{
 			const compileAndRun = async () => {
 				if (disposed) return;
 				const seq = ++compileSeq;
-				const { files: wsFiles, entry } = workspace();
+				const { files: wsFiles, entry } = workspace;
 				const total = wsFiles.reduce(
 					(sum: number, file: { source: string }) => sum + file.source.length,
 					0,
@@ -920,12 +895,12 @@ export function Playground() @{
 				window.clearTimeout(hashDebounceId);
 				hashDebounceId = window.setTimeout(() => {
 					if (executionGated) return;
-					const { files: wsFiles, entry } = workspace();
-					const encoded = encodePlaygroundHash({
-						lang: currentLang,
-						entry,
-						files: wsFiles,
-					});
+					const { files: wsFiles, entry } = workspace;
+				const encoded = encodePlaygroundHash({
+					lang: 'tsx',
+					entry,
+					files: wsFiles,
+				});
 					if (!encoded) return;
 					window.history.replaceState(null, '', '#' + encoded);
 					try {
@@ -941,17 +916,16 @@ export function Playground() @{
 			};
 
 			// One writable EditorView; each file keeps its own EditorState (undo
-			// history included), keyed per variant so mode switches round-trip.
+			// history included), keyed per file.
 			const editorStates = new Map<string, any>();
-			const stateKey = (name: string) => currentLang + ':' + name;
-			const grammarFor = (name: string) => (name.endsWith('.tsrx') ? 'tsrx' : 'tsx');
+			const stateKey = (name: string) => name;
 
 			const makeEditorState = (name: string, doc: string) => EditorState.create({
 				doc,
 				extensions: [
 					EditorState.changeFilter.of((transaction: any) => {
 						if (!transaction.docChanged) return true;
-						const others = workspace().files.reduce(
+						const others = workspace.files.reduce(
 							(sum: number, file: { name: string; source: string }) => file.name === currentFile
 								? sum
 								: sum + file.source.length,
@@ -981,7 +955,7 @@ export function Playground() @{
 					]),
 					EditorView.lineWrapping,
 					EditorState.tabSize.of(2),
-					shikiHighlight(grammarFor(name)),
+					shikiHighlight('tsx'),
 					sharedTheme,
 					mappedField,
 					crossHover('source'),
@@ -997,7 +971,7 @@ export function Playground() @{
 							lastShownAst = null;
 						}
 						const next = update.state.doc.toString();
-						const file = workspace().files.find(
+						const file = workspace.files.find(
 							(candidate: { name: string }) => candidate.name === currentFile,
 						);
 						if (file) file.source = next;
@@ -1005,7 +979,6 @@ export function Playground() @{
 						if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 							currentExampleId = CUSTOM_EXAMPLE_ID;
 							setExampleId(CUSTOM_EXAMPLE_ID);
-							setVariants(variantAvailability());
 						}
 						scheduleCompile();
 						updateHash();
@@ -1049,47 +1022,13 @@ export function Playground() @{
 				parent: outputHost,
 			});
 
-			controllerRef.current.switchLang = (next) => {
-				if (next === currentLang || disposed) return;
-				if (!variantAvailability()[next]) return;
-				editorStates.set(stateKey(currentFile), sourceView.state);
-				if (!workspaces[next]) {
-					const example =
-						currentExampleId === CUSTOM_EXAMPLE_ID ? null : pgExamples.getExample(currentExampleId);
-					const fromExample =
-						example ? pgExamples.exampleWorkspace(example, next) : null;
-					workspaces[next] = fromExample ?? cloneWorkspace(pgExamples.DEFAULT_WORKSPACES[next]);
-				}
-				currentLang = next;
-				currentFile = workspace().files.some((file: { name: string }) => file.name === currentFile)
-					? currentFile
-					: workspace().entry;
-				const existing = editorStates.get(stateKey(currentFile));
-				sourceView.setState(existing ?? makeEditorState(currentFile, fileSource(currentFile)));
-				clearMappedIn(sourceView);
-				clearMappedIn(outputView);
-				publishWorkspaceState();
-				window.clearTimeout(compileDebounceId);
-				void compileAndRun();
-				updateHash();
-			};
-
 			controllerRef.current.selectExample = (id) => {
 				if (disposed || id === CUSTOM_EXAMPLE_ID || id === currentExampleId) return;
 				const example = pgExamples.getExample(id);
 				if (!example) return;
-				const nextLang: PlaygroundLang =
-					example.variants[currentLang]
-						? currentLang
-						: example.variants.tsrx
-							? 'tsrx'
-							: 'tsx';
 				currentExampleId = id;
-				currentLang = nextLang;
-				workspaces.tsrx = undefined;
-				workspaces.tsx = undefined;
-				workspaces[nextLang] = pgExamples.exampleWorkspace(example, nextLang) ?? undefined;
-				currentFile = workspace().entry;
+				workspace = pgExamples.exampleWorkspace(example);
+				currentFile = workspace.entry;
 				editorStates.clear();
 				typesCache.clear();
 				runtimeCache.clear();
@@ -1108,7 +1047,7 @@ export function Playground() @{
 
 			controllerRef.current.selectFile = (name) => {
 				if (disposed || name === currentFile) return;
-				if (!workspace().files.some((file: { name: string }) => file.name === name)) return;
+				if (!workspace.files.some((file: { name: string }) => file.name === name)) return;
 				openFile(name);
 			};
 
@@ -1165,7 +1104,6 @@ export function Playground() @{
 
 		return () => {
 			disposed = true;
-			controllerRef.current.switchLang = undefined;
 			controllerRef.current.selectExample = undefined;
 			controllerRef.current.selectFile = undefined;
 			controllerRef.current.formatActive = undefined;
@@ -1203,26 +1141,6 @@ export function Playground() @{
 						</optgroup>
 					}
 				</select>
-				<div class="pg-seg" role="group" aria-label="Source language">
-					<button
-						type="button"
-						class={['pg-seg-btn', lang === 'tsrx' && 'active']}
-						disabled={!ready || !variants.tsrx}
-						title={variants.tsrx ? undefined : 'This example has no TSRX variant'}
-						onClick={() => controllerRef.current.switchLang?.('tsrx')}
-					>
-						TSRX
-					</button>
-					<button
-						type="button"
-						class={['pg-seg-btn', lang === 'tsx' && 'active']}
-						disabled={!ready || !variants.tsx}
-						title={variants.tsx ? undefined : 'This example has no TSX variant'}
-						onClick={() => controllerRef.current.switchLang?.('tsx')}
-					>
-						TSX
-					</button>
-				</div>
 				<button
 					type="button"
 					class="pg-format"

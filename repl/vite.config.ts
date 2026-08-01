@@ -123,21 +123,11 @@ const PREBUNDLED = [
 	'prettier/standalone',
 	'prettier/plugins/typescript',
 	'prettier/plugins/estree',
-	'@tsrx/prettier-plugin',
 	'octane > devalue',
 ];
 
 export default defineConfig({
 	plugins: [playgroundRuntime(), octane()],
-
-	resolve: {
-		// @tsrx/prettier-plugin does `import { doc } from 'prettier'` — Node
-		// prettier's entry. In the browser the equivalent surface (incl. `doc`)
-		// lives in prettier/standalone, so anchor-alias exactly the bare
-		// specifier; `prettier/standalone` and `prettier/plugins/*` pass through
-		// untouched.
-		alias: [{ find: /^prettier$/, replacement: 'prettier/standalone' }],
-	},
 
 	optimizeDeps: {
 		// The published octane is compiled ESM, but keep it raw like the

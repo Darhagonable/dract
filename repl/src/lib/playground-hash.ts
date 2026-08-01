@@ -18,7 +18,7 @@ export const PLAYGROUND_SOURCE_LIMIT_ERROR = `Source is limited to ${MAX_PLAYGRO
 
 // One optional interior `.react` segment marks React-host files (see
 // playground-modules.ts); everything else is a single-extension name.
-const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+(\.react)?\.(tsrx|tsx)$/;
+const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+(\.react)?\.tsx$/;
 
 export type PlaygroundHashPayload = {
 	lang: PlaygroundLang;
@@ -67,7 +67,7 @@ export function decodePlaygroundHash(hash: string): PlaygroundHashResult {
 		const parsed = JSON.parse(json);
 
 		if (parsed?.v === 2) {
-			if (parsed.l !== 'tsrx' && parsed.l !== 'tsx') return { ok: true, value: null };
+			if (parsed.l !== 'tsx') return { ok: true, value: null };
 			if (
 				!Array.isArray(parsed.f) ||
 				parsed.f.length < 1 ||
@@ -100,7 +100,7 @@ export function decodePlaygroundHash(hash: string): PlaygroundHashResult {
 
 		// Legacy single-file payloads (`{ s, l }`) keep working: normalize to a
 		// one-file workspace named after the shared dialect.
-		if (typeof parsed?.s !== 'string' || (parsed?.l !== 'tsrx' && parsed?.l !== 'tsx')) {
+		if (typeof parsed?.s !== 'string' || parsed?.l !== 'tsx') {
 			return { ok: true, value: null };
 		}
 		if (parsed.s.length > MAX_PLAYGROUND_SOURCE_LENGTH) {

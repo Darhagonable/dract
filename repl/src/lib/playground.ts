@@ -25,7 +25,7 @@ import type { InspectAlias, InspectSegment, InspectTemplate } from './playground
 
 export type { CompileDiagnostic };
 
-export type PlaygroundLang = 'tsrx' | 'tsx';
+export type PlaygroundLang = 'tsx';
 export type PlaygroundRuntimeTarget = 'client' | 'server';
 export type PlaygroundOutputTarget = PlaygroundRuntimeTarget | 'types' | 'source';
 
@@ -42,7 +42,7 @@ export interface CompileFailure {
 
 /**
  * Compile one playground file for the client runtime. Never throws. The
- * filename is the virtual file's real name (e.g. `Island.tsrx`) so diagnostics
+ * filename is the virtual file's real name (e.g. `Island.tsx`) so diagnostics
  * and scoped-style hashes reference it.
  */
 export function compilePlayground(
