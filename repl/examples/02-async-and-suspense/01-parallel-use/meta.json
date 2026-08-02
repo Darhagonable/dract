@@ -1,0 +1,4 @@
+{
+	"label": "Parallel use() (multi-file)",
+	"entry": "App.tsx"
+}

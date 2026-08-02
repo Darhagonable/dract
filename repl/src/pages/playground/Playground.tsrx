@@ -20,7 +20,8 @@
 // renders just the static shell and hydration stays clean. A workspace is a
 // set of virtual files with an entry; each language mode keeps its own
 // workspace — switching modes round-trips your edits. The Examples dropdown
-// loads curated workspaces (src/lib/playground-examples.ts); editing any file
+// loads curated workspaces from repl/examples/ (src/lib/playground-examples.ts);
+// the file tabs manage the file set (add/delete), and editing any file
 // flips it to “Custom”. The active workspace persists into `location.hash`
 // (debounced) so playground states are shareable links, and the Format button
 // runs client-side Prettier (src/lib/playground-format.ts).
@@ -39,6 +40,7 @@ import type {
 import {
 	decodePlaygroundHash,
 	encodePlaygroundHash,
+	MAX_PLAYGROUND_FILES,
 	MAX_PLAYGROUND_SOURCE_LENGTH,
 	PLAYGROUND_SOURCE_LIMIT_ERROR,
 } from '../../lib/playground-hash.ts';
@@ -113,6 +115,8 @@ export function Playground() @{
 	const [exampleId, setExampleId] = useState<string>(DEFAULT_EXAMPLE_ID);
 	const [files, setFiles] = useState<string[]>([]);
 	const [activeFile, setActiveFile] = useState('');
+	// Which file the preview imports and renders — marked on its tab.
+	const [entryFile, setEntryFile] = useState('');
 
 	const sourceHostRef = useRef<HTMLDivElement | null>(null);
 	const outputHostRef = useRef<HTMLDivElement | null>(null);
@@ -136,6 +140,8 @@ export function Playground() @{
 	const controllerRef = useRef<{
 		selectExample?: (id: string) => void;
 		selectFile?: (name: string) => void;
+		addFile?: () => void;
+		removeFile?: (name: string) => void;
 		formatActive?: () => void;
 		approveRun?: () => void;
 		syncOutput?: () => void;
@@ -294,11 +300,12 @@ export function Playground() @{
 			const fileSource = (name: string): string =>
 				workspace.files.find((file: { name: string }) => file.name === name)?.source ?? '';
 
-			const publishWorkspaceState = () => {
-				setExampleId(currentExampleId);
-				setFiles(workspace.files.map((file: { name: string }) => file.name));
-				setActiveFile(currentFile);
-			};
+		const publishWorkspaceState = () => {
+			setExampleId(currentExampleId);
+			setFiles(workspace.files.map((file: { name: string }) => file.name));
+			setActiveFile(currentFile);
+			setEntryFile(workspace.entry);
+		};
 
 			// Theme-variable canvas: the same custom properties the rest of the
 			// site swaps per `data-theme`, so both editors follow the ThemeToggle
@@ -1051,6 +1058,75 @@ export function Playground() @{
 				openFile(name);
 			};
 
+			// Svelte-REPL-style file management. A new file is a plain comment —
+			// valid for any file kind, so it compiles into a runnable graph while
+			// the visitor decides what it becomes.
+			const NEW_FILE_SOURCE = '// New file — replace this with your code.';
+			const nextFileName = () => {
+				const names = new Set(workspace.files.map((file: { name: string }) => file.name));
+				let index = 1;
+				let name = 'File.tsx';
+				while (names.has(name)) name = `File-${++index}.tsx`;
+				return name;
+			};
+
+			controllerRef.current.addFile = () => {
+				if (disposed || workspace.files.length >= MAX_PLAYGROUND_FILES) return;
+				const name = nextFileName();
+				workspace.files.push({ name, source: NEW_FILE_SOURCE });
+				// Any structural change means the buffer no longer matches the
+				// example (the same flip edits perform).
+				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
+					currentExampleId = CUSTOM_EXAMPLE_ID;
+					setExampleId(CUSTOM_EXAMPLE_ID);
+				}
+				openFile(name);
+				publishWorkspaceState();
+				window.clearTimeout(compileDebounceId);
+				void compileAndRun();
+				updateHash();
+			};
+
+			controllerRef.current.removeFile = (name) => {
+				if (disposed || workspace.files.length <= 1) return;
+				const index = workspace.files.findIndex((file: { name: string }) => file.name === name);
+				if (index < 0) return;
+				const wasCurrent = name === currentFile;
+				const wasEntry = name === workspace.entry;
+				// Drop the file's undo history along with the file itself.
+				editorStates.delete(stateKey(name));
+				workspace.files.splice(index, 1);
+				if (wasEntry) workspace.entry = workspace.files[0].name;
+				// Inspection caches are keyed by file name — purge the deleted one
+				// rather than churn every key. Nothing else references them.
+				typesCache.delete(name);
+				for (const key of runtimeCache.keys()) {
+					if (key.endsWith(':' + name)) runtimeCache.delete(key);
+				}
+				for (const key of reactCache.keys()) {
+					if (key.endsWith(':' + name)) reactCache.delete(key);
+				}
+				if (wasCurrent) {
+					// Fall to the file that took the tab's place, wrapping to the
+					// first when the last file was deleted.
+					const next = workspace.files[Math.min(index, workspace.files.length - 1)];
+					const existing = editorStates.get(stateKey(next.name));
+					currentFile = next.name;
+					sourceView.setState(existing ?? makeEditorState(currentFile, fileSource(currentFile)));
+					// setState fires no transaction: the old file's marks are stale.
+					clearMappedIn(sourceView);
+				}
+				clearMappedIn(outputView);
+				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
+					currentExampleId = CUSTOM_EXAMPLE_ID;
+					setExampleId(CUSTOM_EXAMPLE_ID);
+				}
+				publishWorkspaceState();
+				window.clearTimeout(compileDebounceId);
+				void compileAndRun();
+				updateHash();
+			};
+
 			controllerRef.current.formatActive = () => {
 				if (disposed) return;
 				setFormatting(true);
@@ -1106,6 +1182,8 @@ export function Playground() @{
 			disposed = true;
 			controllerRef.current.selectExample = undefined;
 			controllerRef.current.selectFile = undefined;
+			controllerRef.current.addFile = undefined;
+			controllerRef.current.removeFile = undefined;
 			controllerRef.current.formatActive = undefined;
 			controllerRef.current.approveRun = undefined;
 			controllerRef.current.syncOutput = undefined;
@@ -1196,21 +1274,40 @@ export function Playground() @{
 				aria-label="Source editor"
 			>
 				<div class="pg-panel-head">
-					@if (files.length > 1) {
-						<div class="pg-tabs" role="tablist" aria-label="Playground files">
-							@for (const name of files; key name) {
+					<div class="pg-tabs" role="tablist" aria-label="Playground files">
+						@for (const name of files; key name) {
+							<div
+								class={['pg-tab', name === activeFile && 'active']}
+								role="tab"
+								aria-selected={name === activeFile}
+							>
+								@if (name === entryFile) {
+									<span class="pg-tab-dot" title="Entry file — the preview renders this module's default export" />
+								}
 								<button
 									type="button"
-									role="tab"
-									aria-selected={name === activeFile}
-									class={['pg-tab', name === activeFile && 'active']}
+									class="pg-tab-name"
 									onClick={() => controllerRef.current.selectFile?.(name)}
 								>{name as string}</button>
-							}
-						</div>
-					} @else {
-						<span>{'Source · ' + (activeFile || '…')}</span>
-					}
+								<button
+									type="button"
+									class="pg-tab-close"
+									aria-label={'Delete ' + name}
+									title="Delete file"
+									disabled={files.length <= 1}
+									onClick={() => controllerRef.current.removeFile?.(name)}
+								>{'×'}</button>
+							</div>
+						}
+						<button
+							type="button"
+							class="pg-tab-add"
+							aria-label="Add file"
+							title={'Add a file (up to ' + MAX_PLAYGROUND_FILES + ')'}
+							disabled={!ready || files.length >= MAX_PLAYGROUND_FILES}
+							onClick={() => controllerRef.current.addFile?.()}
+						>{'+'}</button>
+					</div>
 					@if (!ready) {
 						<span class="pg-loading">Loading editor…</span>
 					}
@@ -1521,28 +1618,86 @@ export function Playground() @{
 			}
 			.pg-tabs {
 				display: flex;
+				align-items: center;
 				gap: 0.25rem;
 				flex-wrap: wrap;
 			}
 			.pg-tab {
+				display: flex;
+				align-items: center;
+				gap: 0.15rem;
+				padding: 0.15rem 0.2rem 0.15rem 0.5rem;
+				border-radius: 6px;
+				color: var(--text-secondary);
+			}
+			.pg-tab.active {
+				color: var(--accent-text);
+				background: rgba(255, 65, 90, 0.14);
+			}
+			.pg-tab-dot {
+				flex: none;
+				width: 5px;
+				height: 5px;
+				border-radius: 50%;
+				background: var(--accent-text);
+			}
+			.pg-tab-name {
 				border: none;
 				background: transparent;
-				color: var(--text-secondary);
+				color: inherit;
 				font: inherit;
 				font-size: 0.78rem;
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 				text-transform: none;
 				letter-spacing: normal;
-				padding: 0.2rem 0.6rem;
+				padding: 0.05rem 0.1rem;
+				border-radius: 4px;
+				cursor: pointer;
+			}
+			.pg-tab-name:hover {
+				color: var(--text);
+			}
+			.pg-tab.active .pg-tab-name:hover {
+				color: var(--accent-text);
+			}
+			.pg-tab-close {
+				border: none;
+				background: transparent;
+				color: var(--text-secondary);
+				font-size: 0.9rem;
+				line-height: 1;
+				padding: 0.12rem 0.3rem;
+				border-radius: 4px;
+				cursor: pointer;
+				opacity: 0.65;
+			}
+			.pg-tab-close:hover:not(:disabled) {
+				opacity: 1;
+				color: var(--danger-text);
+				background: rgba(255, 93, 114, 0.14);
+			}
+			.pg-tab-close:disabled {
+				opacity: 0.2;
+				cursor: default;
+			}
+			.pg-tab-add {
+				border: none;
+				background: transparent;
+				color: var(--text-secondary);
+				font: inherit;
+				font-size: 0.95rem;
+				line-height: 1;
+				padding: 0.12rem 0.45rem;
 				border-radius: 6px;
 				cursor: pointer;
 			}
-			.pg-tab:hover {
-				color: var(--text);
-			}
-			.pg-tab.active {
+			.pg-tab-add:hover:not(:disabled) {
 				color: var(--accent-text);
-				background: rgba(255, 65, 90, 0.14);
+				background: rgba(255, 65, 90, 0.12);
+			}
+			.pg-tab-add:disabled {
+				opacity: 0.4;
+				cursor: default;
 			}
 			.pg-loading {
 				text-transform: none;
