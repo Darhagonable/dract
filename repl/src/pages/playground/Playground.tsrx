@@ -115,6 +115,17 @@ export function Playground() @{
 	const [exampleId, setExampleId] = useState<string>(DEFAULT_EXAMPLE_ID);
 	const [files, setFiles] = useState<string[]>([]);
 	const [activeFile, setActiveFile] = useState('');
+	// Svelte-REPL-style tabs: the ACTIVE tab's name is a live inline input —
+	// this state is its value (kept in sync with the active file's name).
+	const [inputValue, setInputValue] = useState('');
+	const renameInputRef = useRef<HTMLInputElement | null>(null);
+	// The file hovered while a drag reorder is in flight (highlights the tab
+	// the dragged file will land on); the dragged file itself lives in a ref.
+	const [dragOverFile, setDragOverFile] = useState<string | null>(null);
+	const draggingFileRef = useRef<string | null>(null);
+	// A fresh tab focuses its name input; bumped by addFile. Plain tab
+	// switches never focus it.
+	const [focusInputSignal, setFocusInputSignal] = useState(0);
 	// Which file the preview imports and renders — marked on its tab.
 	const [entryFile, setEntryFile] = useState('');
 
@@ -142,6 +153,8 @@ export function Playground() @{
 		selectFile?: (name: string) => void;
 		addFile?: () => void;
 		removeFile?: (name: string) => void;
+		renameFile?: (oldName: string, nextName: string) => void;
+		moveFile?: (fromName: string, toName: string) => void;
 		formatActive?: () => void;
 		approveRun?: () => void;
 		syncOutput?: () => void;
@@ -189,6 +202,17 @@ export function Playground() @{
 			controllerRef.current.revealAst?.();
 		}
 	}, [ready, pane, view, compiledMode, outputTarget]);
+
+	// Focus the active tab's name input after addFile bumped the signal.
+	useEffect(() => {
+		if (focusInputSignal > 0) renameInputRef.current?.focus();
+	}, [focusInputSignal]);
+	// Keep the live tab-name input in sync with the active file (tab
+	// switches, example loads, deletions) — edits themselves flow the other
+	// way, through the input's own handlers.
+	useEffect(() => {
+		setInputValue(activeFile);
+	}, [activeFile]);
 
 	useEffect(() => {
 		const sourceHost = sourceHostRef.current;
@@ -1081,6 +1105,10 @@ export function Playground() @{
 					setExampleId(CUSTOM_EXAMPLE_ID);
 				}
 				openFile(name);
+				// The new tab's name input is live (Svelte-REPL-style) — focus
+				// it so the visitor can name the file right away.
+				setInputValue(name);
+				setFocusInputSignal((n) => n + 1);
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
 				void compileAndRun();
@@ -1089,14 +1117,13 @@ export function Playground() @{
 
 			controllerRef.current.removeFile = (name) => {
 				if (disposed || workspace.files.length <= 1) return;
+				if (name === workspace.entry) return;
 				const index = workspace.files.findIndex((file: { name: string }) => file.name === name);
 				if (index < 0) return;
 				const wasCurrent = name === currentFile;
-				const wasEntry = name === workspace.entry;
 				// Drop the file's undo history along with the file itself.
 				editorStates.delete(stateKey(name));
 				workspace.files.splice(index, 1);
-				if (wasEntry) workspace.entry = workspace.files[0].name;
 				// Inspection caches are keyed by file name — purge the deleted one
 				// rather than churn every key. Nothing else references them.
 				typesCache.delete(name);
@@ -1124,6 +1151,69 @@ export function Playground() @{
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
 				void compileAndRun();
+				updateHash();
+			};
+
+			controllerRef.current.renameFile = (oldName, nextName) => {
+				if (disposed || !oldName || !nextName) return;
+				const file = workspace.files.find(
+					(candidate: { name: string }) => candidate.name === oldName,
+				);
+				// The entry file is the workspace root — its name is fixed.
+				if (!file || file.name === workspace.entry) return;
+				const trimmed = nextName.trim();
+				if (!trimmed || trimmed === oldName) return;
+				// Svelte-REPL-style deconflict: keep the base name, suffix a
+				// counter before the first extension (or at the end).
+				let name = trimmed;
+				let counter = 1;
+				while (workspace.files.some((candidate: { name: string }) => candidate.name === name)) {
+					name = trimmed.replace(/(\.|$)/, `${counter++}$1`);
+				}
+				file.name = name;
+				if (currentFile === oldName) currentFile = name;
+				// The file's undo history follows it to the new key.
+				const savedState = editorStates.get(oldName);
+				if (savedState) {
+					editorStates.delete(oldName);
+					editorStates.set(name, savedState);
+				}
+				// Inspection caches are keyed by file name — drop the old key so
+				// the next compile repopulates it under the new name.
+				typesCache.delete(oldName);
+				for (const key of runtimeCache.keys()) {
+					if (key.endsWith(':' + oldName)) runtimeCache.delete(key);
+				}
+				for (const key of reactCache.keys()) {
+					if (key.endsWith(':' + oldName)) reactCache.delete(key);
+				}
+				// A rename makes the buffer non-example, like any edit.
+				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
+					currentExampleId = CUSTOM_EXAMPLE_ID;
+					setExampleId(CUSTOM_EXAMPLE_ID);
+				}
+				setInputValue(name);
+				publishWorkspaceState();
+				window.clearTimeout(compileDebounceId);
+				void compileAndRun();
+				updateHash();
+			};
+
+			// Drag-reorder: the dropped file takes the slot the dragged file
+			// was dropped on (Svelte-REPL semantics). Ordering affects nothing
+			// but the hash payload, so no compile is needed.
+			controllerRef.current.moveFile = (fromName, toName) => {
+				if (disposed || fromName === toName) return;
+				const fromIndex = workspace.files.findIndex(
+					(file: { name: string }) => file.name === fromName,
+				);
+				const toIndex = workspace.files.findIndex(
+					(file: { name: string }) => file.name === toName,
+				);
+				if (fromIndex < 0 || toIndex < 0) return;
+				const [file] = workspace.files.splice(fromIndex, 1);
+				workspace.files.splice(toIndex, 0, file);
+				publishWorkspaceState();
 				updateHash();
 			};
 
@@ -1184,6 +1274,8 @@ export function Playground() @{
 			controllerRef.current.selectFile = undefined;
 			controllerRef.current.addFile = undefined;
 			controllerRef.current.removeFile = undefined;
+			controllerRef.current.renameFile = undefined;
+			controllerRef.current.moveFile = undefined;
 			controllerRef.current.formatActive = undefined;
 			controllerRef.current.approveRun = undefined;
 			controllerRef.current.syncOutput = undefined;
@@ -1277,26 +1369,98 @@ export function Playground() @{
 					<div class="pg-tabs" role="tablist" aria-label="Playground files">
 						@for (const name of files; key name) {
 							<div
-								class={['pg-tab', name === activeFile && 'active']}
+								class={['pg-tab', name === activeFile && 'active', dragOverFile === name && 'drag-over']}
 								role="tab"
+								tabIndex={0}
 								aria-selected={name === activeFile}
+								draggable={true}
+								onClick={() => controllerRef.current.selectFile?.(name)}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										controllerRef.current.selectFile?.(name);
+									}
+								}}
+								onDragStart={(e) => {
+									draggingFileRef.current = name;
+									e.dataTransfer!.effectAllowed = 'move';
+									e.dataTransfer!.setData('text/plain', name);
+								}}
+								onDragOver={(e) => {
+									e.preventDefault();
+									setDragOverFile(name);
+								}}
+								onDragLeave={() => {
+									if (dragOverFile === name) setDragOverFile(null);
+								}}
+								onDrop={(e) => {
+									e.preventDefault();
+									const from = draggingFileRef.current;
+									draggingFileRef.current = null;
+									setDragOverFile(null);
+									if (from && from !== name) {
+										controllerRef.current.moveFile?.(from, name);
+									}
+								}}
+								onDragEnd={() => {
+									draggingFileRef.current = null;
+									setDragOverFile(null);
+								}}
 							>
 								@if (name === entryFile) {
 									<span class="pg-tab-dot" title="Entry file — the preview renders this module's default export" />
 								}
-								<button
-									type="button"
-									class="pg-tab-name"
-									onClick={() => controllerRef.current.selectFile?.(name)}
-								>{name as string}</button>
-								<button
-									type="button"
-									class="pg-tab-close"
-									aria-label={'Delete ' + name}
-									title="Delete file"
-									disabled={files.length <= 1}
-									onClick={() => controllerRef.current.removeFile?.(name)}
-								>{'×'}</button>
+								<span class="pg-tab-name">
+									<span
+										class={name === activeFile && name !== entryFile ? 'pg-tab-input-mask' : undefined}
+									>
+										{(name === activeFile && name !== entryFile ? inputValue : name) as string}
+									</span>
+									@if (name === activeFile && name !== entryFile) {
+										<input
+											ref={renameInputRef}
+											class="pg-tab-input"
+											value={inputValue}
+											spellCheck={false}
+											aria-label={'Rename ' + name}
+											onInput={(e) => setInputValue(e.currentTarget.value)}
+											onFocus={(e) => {
+												const input = e.currentTarget;
+												setTimeout(() => input.select());
+											}}
+											onBlur={() => {
+												if (inputValue === name || inputValue === '') {
+													setInputValue(name);
+													return;
+												}
+												controllerRef.current.renameFile?.(name, inputValue);
+											}}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter') {
+													e.preventDefault();
+													e.currentTarget.blur();
+												} else if (e.key === 'Escape') {
+													setInputValue(name);
+													e.currentTarget.blur();
+												}
+											}}
+										/>
+									}
+								</span>
+								@if (name === activeFile && name !== entryFile) {
+									<button
+										type="button"
+										class="pg-tab-close"
+										aria-label={'Delete ' + name}
+										title="Delete file"
+										disabled={files.length <= 1}
+										onClick={(e) => {
+											e.stopPropagation();
+											if (window.confirm('Delete ' + name + '?')) {
+												controllerRef.current.removeFile?.(name);
+											}
+										}}
+									>{'×'}</button>
+								}
 							</div>
 						}
 						<button
@@ -1623,12 +1787,20 @@ export function Playground() @{
 				flex-wrap: wrap;
 			}
 			.pg-tab {
+				position: relative;
 				display: flex;
 				align-items: center;
 				gap: 0.15rem;
-				padding: 0.15rem 0.2rem 0.15rem 0.5rem;
+				/* Right padding reserves the close button's slot so active and
+				   inactive tabs stay the same width. */
+				padding: 0.15rem 1.6rem 0.15rem 0.5rem;
 				border-radius: 6px;
 				color: var(--text-secondary);
+				cursor: pointer;
+			}
+			.pg-tab.drag-over {
+				background: var(--surface);
+				box-shadow: inset 0 0 0 1px var(--border-strong);
 			}
 			.pg-tab.active {
 				color: var(--accent-text);
@@ -1642,7 +1814,31 @@ export function Playground() @{
 				background: var(--accent-text);
 			}
 			.pg-tab-name {
+				position: relative;
+				font-size: 0.78rem;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				text-transform: none;
+				letter-spacing: normal;
+				padding: 0.05rem 0.1rem;
+				border-radius: 4px;
+			}
+			/* While the overlay input is editing, the text below it is hidden
+			   (kept in flow only to hold the tab's width). */
+			.pg-tab-input-mask {
+				visibility: hidden;
+			}
+			.pg-tab.active .pg-tab-name {
+				cursor: text;
+			}
+			/* The active tab's name is a live input, invisible over the name
+			   text below it — clicking the tab edits the name in place. */
+			.pg-tab-input {
+				position: absolute;
+				inset: 0;
+				width: 100%;
+				margin: 0;
 				border: none;
+				outline: none;
 				background: transparent;
 				color: inherit;
 				font: inherit;
@@ -1650,23 +1846,28 @@ export function Playground() @{
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 				text-transform: none;
 				letter-spacing: normal;
+				/* Matches .pg-tab-name so the input text lines up with where
+				   the masked text sits. */
 				padding: 0.05rem 0.1rem;
-				border-radius: 4px;
-				cursor: pointer;
-			}
-			.pg-tab-name:hover {
-				color: var(--text);
-			}
-			.pg-tab.active .pg-tab-name:hover {
-				color: var(--accent-text);
+				box-sizing: border-box;
+				cursor: text;
 			}
 			.pg-tab-close {
+				position: absolute;
+				right: 0.15rem;
+				top: 50%;
+				transform: translateY(-50%);
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 1.3rem;
+				height: 1.3rem;
 				border: none;
 				background: transparent;
 				color: var(--text-secondary);
 				font-size: 0.9rem;
 				line-height: 1;
-				padding: 0.12rem 0.3rem;
+				padding: 0;
 				border-radius: 4px;
 				cursor: pointer;
 				opacity: 0.65;
