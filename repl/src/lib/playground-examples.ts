@@ -1,19 +1,13 @@
 // Curated playground examples. Every example is a folder under
-// repl/examples/<NN-group>/<NN-example>/ — one real file per source, plus a
+// repl/examples/<group>/<example>/ — one real file per source, plus a
 // meta.json with `{ "label", "entry" }` (entry defaults to the first file).
-// Group folders carry their own meta.json label; their numeric prefixes order
-// the dropdown, svelte.dev-style. The tree is loaded at build time with
-// Vite's import.meta.glob, so examples are authored as plain files on disk,
-// not template literals.
+// Group folders carry their own meta.json label; the tree is loaded at build
+// time with Vite's import.meta.glob, so examples are authored as plain files
+// on disk, not template literals.
 //
-// Every example should compile warning-free through the real pipeline
-// (playground-modules.ts) — keep new examples runnable and minimal: each
-// demonstrates one API surface, not a whole app.
-//
-// File kinds are derived from the file name (see playground-modules.ts):
-// `.tsx` compiles with the octane compiler; `.react.tsx` marks a React-HOST
-// file (sucrase react-jsx transform) used by the OctaneCompat example,
-// where real react-dom from esm.sh renders the entry.
+// The examples are written in DarTsx (the language this playground will
+// compile once it moves off octane) — each demonstrates one API surface,
+// not a whole app.
 import type { PlaygroundFile } from './playground-modules.ts';
 
 export interface ExampleWorkspace {
