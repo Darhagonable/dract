@@ -167,6 +167,14 @@ export function transform(
 		},
 	});
 
+	// esrap records a source-map segment only for nodes carrying a `loc`
+	// (svelte-style line/column spans); OXC nodes carry numeric start/end
+	// spans instead and builder-created nodes default to `loc: null`, so
+	// without this pass the printed map would be empty. Built nodes with a
+	// `0,0` span (no authored origin) are left alone — nodes that kept a
+	// real span get a `loc` computed from the source line starts.
+	if (analysis.source) attachLocations(transformed, analysis.source);
+
 	const printOpts: PrintOptions = {};
 	if (analysis.source && filename) {
 		printOpts.sourceMapContent = analysis.source;
@@ -174,6 +182,48 @@ export function transform(
 	}
 	const { code, map } = print(transformed, tsx(), printOpts);
 	return { code, map, css: cssFragments.join('\n'), ast: transformed };
+}
+
+/**
+ * Attach svelte-style `loc` objects to every span-bearing AST node that
+ * lacks one, so esrap can record its position in the printed source map.
+ */
+function attachLocations(ast: AstNode, source: string): void {
+	const lineStarts = [0];
+	for (let i = 0; i < source.length; i++) {
+		if (source.charCodeAt(i) === 10) lineStarts.push(i + 1);
+	}
+	const locate = (offset: number): { line: number; column: number } => {
+		let lo = 0;
+		let hi = lineStarts.length - 1;
+		let line = 0;
+		while (lo <= hi) {
+			const mid = (lo + hi) >> 1;
+			if (lineStarts[mid] <= offset) {
+				line = mid;
+				lo = mid + 1;
+			} else {
+				hi = mid - 1;
+			}
+		}
+		return { line: line + 1, column: offset - lineStarts[line] };
+	};
+	const seen = new WeakSet<object>();
+	const visit = (value: unknown): void => {
+		if (!value || typeof value !== 'object' || seen.has(value)) return;
+		seen.add(value);
+		const record = value as Record<string, unknown>;
+		const { start, end } = record;
+		if (typeof start === 'number' && typeof end === 'number' && end > start && !record.loc) {
+			record.loc = { start: locate(start), end: locate(end) };
+		}
+		for (const key in record) {
+			if (key === 'loc') continue;
+			const child = record[key];
+			if (child && typeof child === 'object') visit(child);
+		}
+	};
+	visit(ast);
 }
 
 // ── Component transform ────────────────────────────────────────────

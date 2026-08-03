@@ -1,38 +1,52 @@
-// Playground engine — compiles TSRX/TSX in the browser with the REAL
-// `octane/compiler` (it's pure JS: @tsrx/core parser + esrap printer, no Node
-// APIs) and executes the compiled module graph for the live preview.
+// Playground engine — compiles TSRX/TS/TSX in the browser with the REAL
+// `dartsx` compiler (pure JS/WASM: oxc-parser + oxc-transform wasm bindings +
+// esrap printer, no Node APIs) and executes the compiled module graph for the
+// live preview.
 //
 // Execution model: compilation happens here (pure parsing, no authority), but
 // the compiled modules EXECUTE inside a sandboxed iframe with an opaque origin
 // (see playground-sandbox.ts) — never in the website's own page. Hash-shared
 // playground links carry arbitrary code, so the page it runs in must have no
-// same-origin storage, cookies, or DOM to steal. The parent fetches the octane
+// same-origin storage, cookies, or DOM to steal. The parent fetches the dartsx
 // runtime chunk manifest (served by the playgroundRuntime() vite plugin) and
 // hands it to the iframe, which builds blob modules on its own side of the
 // boundary. Multi-file graphs and third-party esm.sh imports are prepared by
 // playground-modules.ts.
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { compile, type CompileDiagnostic } from 'octane/compiler';
-import { compileTypesInspection } from 'octane/compiler/volar';
+import { compile } from 'dartsx/compiler';
+import { preprocess } from 'dartsx/compiler/preprocess';
+import { parseSync } from 'oxc-parser';
+import type { MappedRange } from './playground-mapping.ts';
+import { mappingFromSourceMap } from './playground-mapping.ts';
 import {
 	sandboxSrcdoc,
 	RUNTIME_MANIFEST_PATH,
 	PROTOCOL_KEY,
 	type RuntimeManifest,
 } from './playground-sandbox.ts';
-import type { InspectAlias, InspectSegment, InspectTemplate } from './playground-mapping.ts';
-
-export type { CompileDiagnostic };
 
 export type PlaygroundLang = 'tsx';
 export type PlaygroundRuntimeTarget = 'client' | 'server';
+// Which compiler artifact the compiled pane shows. Server and Types are
+// placeholders for now: DarTsx currently compiles one client runtime, and the
+// targets are kept so future emits (a server renderer, .d.ts output) land in
+// the same pane.
 export type PlaygroundOutputTarget = PlaygroundRuntimeTarget | 'types' | 'source';
 
 export interface CompileSuccess {
 	ok: true;
 	code: string;
-	warnings: CompileDiagnostic[];
+	/** The compile's final source map — output positions → authored source. */
+	map: { mappings: string | unknown[][] };
+	/** The compiled program, parsed back out of `code` for the AST pane. */
+	ast: unknown;
+	/** The authored program parsed directly (the "Parsed" target's AST). */
+	sourceAst: unknown;
+	/** Authored spans of `sourceAst`, for the mapping's verbatim passes. */
+	ranges: MappedRange[];
+	/** DarTsx currently emits no diagnostics — kept for the future pipeline. */
+	warnings: [];
 }
 
 export interface CompileFailure {
@@ -40,81 +54,43 @@ export interface CompileFailure {
 	error: string;
 }
 
+const parseProgram = (code: string): unknown => {
+	try {
+		return parseSync('x.tsx', code, { sourceType: 'module', lang: 'tsx' }).program;
+	} catch {
+		return null;
+	}
+};
+
 /**
  * Compile one playground file for the client runtime. Never throws. The
- * filename is the virtual file's real name (e.g. `Island.tsx`) so diagnostics
- * and scoped-style hashes reference it.
+ * filename is the virtual file's real name (e.g. `store.ts`) so diagnostics
+ * and source maps reference it.
  */
-export function compilePlayground(
-	source: string,
-	filename: string,
-	mode: PlaygroundRuntimeTarget = 'client',
-): CompileSuccess | CompileFailure {
+export function compilePlayground(source: string, filename: string): CompileSuccess | CompileFailure {
 	try {
-		const out = compile(source, filename, { mode });
-		return { ok: true, code: out.code, warnings: out.diagnostics };
-	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-export interface TypesSuccess {
-	ok: true;
-	/** The typed virtual TSX the language service analyses. */
-	code: string;
-	/** Position artifacts for the code pane (see playground-mapping.ts). */
-	segments: InspectSegment[];
-	/** Authored parser tree and the exact Program printed as typed virtual TSX. */
-	sourceAst: unknown;
-	generatedAst: unknown;
-}
-
-export interface RuntimeSuccess {
-	ok: true;
-	/** The emitted module — byte-identical to a non-inspect compile. */
-	code: string;
-	warnings: CompileDiagnostic[];
-	/** The final Program plus hoisted template IR, for the AST pane. */
-	ast: unknown;
-	/** Position artifacts for the code pane (see playground-mapping.ts). */
-	segments: InspectSegment[];
-	templates: InspectTemplate[];
-	aliases: InspectAlias[];
-}
-
-/**
- * Compile one file for the COMPILED PANE with inspection enabled: one compile
- * yields the emitted code, the final Program, and the position artifacts, so
- * flipping between Code and AST (or hovering for a mapping) never recompiles.
- * The preview's module graph keeps using `compilePlayground`, so a run that
- * never opens the pane still pays no inspection cost. Never throws.
- */
-export function compileRuntime(
-	source: string,
-	filename: string,
-	mode: PlaygroundRuntimeTarget,
-): RuntimeSuccess | CompileFailure {
-	try {
-		const result = compile(source, filename, { mode, inspect: true });
-		if (!result.inspect) throw new Error('Compiler inspection result is unavailable.');
-		const { ast, templates, segments, aliases } = result.inspect;
+		const out = compile(source, {
+			filename,
+			// Injected styles reach the sandbox the same way as before: the
+			// compiled module calls $.style() and the sandbox CSP allows inline
+			// style tags.
+			css: 'injected',
+		});
+		// oxc cannot parse DarTsx shorthand (`component`, `state`, `render`), so
+		// the authored AST comes from the PREPROCESSED form (valid TSX), with
+		// every span retargeted through the preprocess map into ORIGINAL source
+		// offsets — the space the compiled pane and its mappings work in.
+		const prepared = preprocess(source, { filename });
+		const sourceAst = parseProgram(prepared.code);
+		const ranges = retargetSpans(sourceAst, source, prepared.code, prepared.map);
 		return {
 			ok: true,
-			code: result.code,
-			warnings: result.diagnostics,
-			ast: {
-				program: ast,
-				// Only hoisted CLIENT templates carry IR. The server's entries are
-				// static runs — position data for the code pane, with no tree to
-				// show — so they are left out of the AST view rather than filling
-				// it with `{ name: null, ast: null }` rows.
-				templates: templates
-					.filter((template) => template.ast != null)
-					.map(({ name, ast: tree }) => ({ name, ast: tree })),
-			},
-			segments: segments as InspectSegment[],
-			aliases: (aliases ?? []) as InspectAlias[],
-			templates: templates.map(({ html, raw, origins }) => ({ html, raw, origins })),
+			code: out.js.code,
+			map: out.js.map,
+			ast: out.ast,
+			sourceAst,
+			ranges,
+			warnings: [],
 		};
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -122,30 +98,52 @@ export function compileRuntime(
 }
 
 /**
- * Generate the TYPES view of a playground file: the same typed virtual TSX the
- * IDE language service sees, not the runtime emit.
- *
- * Uses the NAVIGATION entry, not `compileToVolarMappings`. The editor's
- * mappings carry Volar capability data and are shaped for its position
- * queries; this pane wants exact authored ranges — including the END a Volar
- * mapping cannot express — and must not be able to perturb the editor to get
- * them. Same parse, same transform, same output bytes; only the position
- * artifact differs, so it is the same `segments` shape the runtime targets use.
- * Never throws.
+ * Rewrite every span of a preprocessed AST into original source offsets. The
+ * preprocess map runs generated (preprocessed) → original, so each span end is
+ * looked up through the segment containing it — segment-accurate, never
+ * guessed. Returns the same spans, for the mapping's verbatim passes. When the
+ * preprocess was a no-op (plain TSX, no map segments), the spans are already
+ * in original offsets — collected unchanged.
  */
-export function compileTypes(source: string, filename: string): TypesSuccess | CompileFailure {
-	try {
-		const out = compileTypesInspection(source, filename);
-		return {
-			ok: true,
-			code: out.code,
-			segments: out.segments as InspectSegment[],
-			sourceAst: out.sourceAst,
-			generatedAst: out.generatedAst,
-		};
-	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
-	}
+function retargetSpans(
+	value: unknown,
+	source: string,
+	preprocessed: string,
+	map: { mappings: string | unknown[][] } | null,
+): MappedRange[] {
+	const ranges: MappedRange[] = [];
+	if (!value) return ranges;
+	const mapping = preprocessed === source ? null : mappingFromSourceMap(source, preprocessed, map, { ranges: [] });
+	if (preprocessed !== source && !mapping) return ranges;
+	const seen = new WeakSet<object>();
+	const visit = (current: unknown) => {
+		if (!current || typeof current !== 'object' || seen.has(current)) return;
+		seen.add(current);
+		const record = current as Record<string, unknown>;
+		const from = record.start;
+		const to = record.end;
+		if (typeof from === 'number' && typeof to === 'number' && from < to) {
+			if (!mapping) {
+				ranges.push({ from, to });
+			} else {
+				const fromPair = mapping.pairFromGenerated(from);
+				const toPair = mapping.pairFromGenerated(Math.max(from, to - 1));
+				const a = fromPair?.source[0];
+				const b = toPair?.source[0];
+				if (a && b) {
+					record.start = a.from;
+					record.end = b.to;
+					if (a.from < b.to) ranges.push({ from: a.from, to: b.to });
+				}
+			}
+		}
+		for (const key in record) {
+			if (key === 'loc') continue;
+			visit(record[key]);
+		}
+	};
+	visit(value);
+	return ranges;
 }
 
 // ── Sandboxed execution ─────────────────────────────────────────────────────
@@ -153,7 +151,7 @@ export function compileTypes(source: string, filename: string): TypesSuccess | C
 /** The subset of a built module graph the sandbox needs to execute a run. */
 export interface RunPayload {
 	entry: string;
-	entryKind: 'octane' | 'react';
+	entryKind: 'dartsx' | 'react';
 	modules: { name: string; code: string }[];
 }
 

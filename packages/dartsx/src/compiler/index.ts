@@ -70,7 +70,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 	const filename = options.filename || 'input.tsx';
 
 	// Phase 1: Pre-process custom syntax
-	const preprocessed = preprocess(source);
+	const preprocessed = preprocess(source, { filename });
 
 	// Strip TypeScript types early using oxc-transform.
 	// This removes interfaces, type aliases, type annotations, etc. from the source

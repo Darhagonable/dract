@@ -1,5 +1,5 @@
 // Turns the playground's virtual files into the module graph the sandbox
-// executes: compiles each file (octane compiler for `.tsx`, sucrase's
+// executes: compiles each file (dartsx compiler for `.tsx`/`.ts`, sucrase's
 // react-jsx transform for `.react.tsx` React-host files), rewrites import
 // specifiers with es-module-lexer's exact offsets, and topo-sorts the sibling
 // graph so modules arrive at the sandbox dependencies-first.
@@ -8,16 +8,17 @@
 // see playground-sandbox.ts for the CSP that backs it):
 //   ./File[.ext]        → sibling file, rewritten to a `__pg_module:<name>__`
 //                         token the sandbox swaps for a blob URL
-//   octane, octane/react, react family → left bare; the sandbox import map
-//                         resolves them (octane → local runtime blobs)
-//   other octane/*      → error (not available in the playground)
+//   dartsx family       → left bare; the sandbox import map resolves them
+//                         (dartsx → local runtime blobs)
+//   react family        → left bare; the sandbox import map resolves them
+//                         to esm.sh (React-host files only)
 //   https://esm.sh/*    → allowed verbatim; any other URL → error
-//   any other bare id   → https://esm.sh/<id>?external=octane — `external`
-//                         makes esm.sh leave `import 'octane'` bare so the
+//   any other bare id   → https://esm.sh/<id>?external=dartsx — `external`
+//                         makes esm.sh leave `import 'dartsx'` bare so the
 //                         import map pins bindings to the runtime singleton
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { compilePlayground, type CompileDiagnostic } from './playground.ts';
+import { compilePlayground } from './playground.ts';
 import { moduleToken } from './playground-sandbox.ts';
 
 export interface PlaygroundFile {
@@ -28,10 +29,11 @@ export interface PlaygroundFile {
 export interface ModuleGraph {
 	ok: true;
 	entry: string;
-	entryKind: 'octane' | 'react';
+	entryKind: 'dartsx' | 'react';
 	/** Dependency order — every module precedes its importers. */
 	modules: { name: string; code: string }[];
-	warnings: { file: string; diagnostic: CompileDiagnostic }[];
+	/** DarTsx emits no diagnostics yet — always empty. */
+	warnings: { file: string; diagnostic: never }[];
 }
 
 export interface ModuleGraphFailure {
@@ -41,8 +43,10 @@ export interface ModuleGraphFailure {
 
 /** Import specifiers the sandbox import map resolves — leave them bare. */
 const IMPORT_MAP_SPECIFIERS = new Set([
-	'octane',
-	'octane/react',
+	'dartsx',
+	'dartsx/internal/client',
+	'dartsx/jsx-runtime',
+	'dartsx/jsx-dev-runtime',
 	'react',
 	'react/jsx-runtime',
 	'react/jsx-dev-runtime',
@@ -55,20 +59,19 @@ export function isReactHostFile(name: string): boolean {
 	return name.endsWith('.react.tsx');
 }
 
-const SIBLING_EXTENSIONS = ['', '.tsx', '.react.tsx'];
+const SIBLING_EXTENSIONS = ['', '.tsx', '.react.tsx', '.ts'];
 
 // Compilation is re-run on every debounced keystroke; memoize per (name,
 // source) so only the edited file recompiles.
 const compileCache = new Map<string, { source: string; result: CachedCompile }>();
-type CachedCompile =
-	{ ok: true; code: string; warnings: CompileDiagnostic[] } | { ok: false; error: string };
+type CachedCompile = { ok: true; code: string; warnings: never[] } | { ok: false; error: string };
 
 async function compileFile(file: PlaygroundFile): Promise<CachedCompile> {
 	const cached = compileCache.get(file.name);
 	if (cached && cached.source === file.source) return cached.result;
 	let result: CachedCompile;
 	if (isReactHostFile(file.name)) {
-		// React-host files bypass the octane compiler: sucrase strips types and
+		// React-host files bypass the dartsx compiler: sucrase strips types and
 		// applies the automatic react-jsx transform (no type-checking — this is
 		// a demo surface, not a toolchain).
 		try {
@@ -190,10 +193,10 @@ export async function buildModuleGraph(
 				};
 			} else if (IMPORT_MAP_SPECIFIERS.has(specifier)) {
 				// Left bare — the sandbox import map owns these.
-			} else if (specifier.startsWith('octane/')) {
+			} else if (specifier.startsWith('dartsx/')) {
 				return {
 					ok: false,
-					error: `${file.name}: "${specifier}" is not available in the playground (only "octane" and "octane/react" are).`,
+					error: `${file.name}: "${specifier}" is not available in the playground (only "dartsx" and its runtime subpaths are).`,
 				};
 			} else if (specifier.startsWith('https://esm.sh/')) {
 				// Already an esm.sh URL — allowed verbatim.
@@ -203,7 +206,7 @@ export async function buildModuleGraph(
 					error: `${file.name}: "${specifier}" — only https://esm.sh/ URLs are supported for URL imports.`,
 				};
 			} else {
-				replaceWith(`https://esm.sh/${specifier}?external=octane`);
+				replaceWith(`https://esm.sh/${specifier}?external=dartsx`);
 			}
 		}
 		rewritten.set(file.name, code);
@@ -241,7 +244,7 @@ export async function buildModuleGraph(
 	return {
 		ok: true,
 		entry,
-		entryKind: isReactHostFile(entry) ? 'react' : 'octane',
+		entryKind: isReactHostFile(entry) ? 'react' : 'dartsx',
 		modules,
 		warnings,
 	};

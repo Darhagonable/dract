@@ -17,7 +17,7 @@
 // CORS, so the runtime and user modules arrive as TEXT over postMessage and
 // become blob modules INSIDE the iframe:
 //
-//   parent → iframe  { type: 'init', manifest }  octane runtime chunk manifest
+//   parent → iframe  { type: 'init', manifest }  dartsx runtime chunk manifest
 //                                                (the entries/order/files JSON
 //                                                the vite plugin serves at
 //                                                RUNTIME_MANIFEST_PATH), once
@@ -30,22 +30,22 @@
 //   iframe → parent  { type: 'boot' }            bootstrap script is listening
 //   iframe → parent  { type: 'ready', error? }   runtime imported (or failed)
 //   iframe → parent  { type: 'result', gen, error }
-//   iframe → parent  { type: 'runtime-error', gen, error }  post-render, from
-//                                                the error boundary around the
-//                                                app; gen lets the parent drop
-//                                                late errors from a superseded
-//                                                run
+//   iframe → parent  { type: 'runtime-error', gen, error }  post-render — from
+//                                                uncaught errors in event
+//                                                handlers / effects; gen lets
+//                                                the parent drop late errors
+//                                                from a superseded run
 //
 // Import resolution inside the iframe: the bootstrap blob-ifies the runtime
 // chunks dependencies-first, then installs a SINGLE import map — as a classic
 // (non-module) script it runs before any module load, which is baseline
 // import-map behavior in every supporting browser; no late-map mutation
-// anywhere — wiring bare `octane` / `octane/react` to those blobs and the
-// react family to esm.sh (react is only fetched if something imports it).
-// User modules keep those specifiers bare; sibling-file imports arrive as
+// anywhere — wiring bare `dartsx` / `dartsx/internal/client` to those blobs
+// and the react family to esm.sh (react is only fetched if something imports
+// it). User modules keep those specifiers bare; sibling-file imports arrive as
 // `__pg_module:<name>__` tokens the bootstrap swaps for blob URLs.
 //
-// Every message carries `__octanePlayground: true` and both sides verify
+// Every message carries `__dartsxPlayground: true` and both sides verify
 // `event.source` identity, so unrelated frames can't speak the protocol.
 // `allow-forms` (+ CSP `form-action 'none'`) lets `<form action={fn}>` demos
 // fire submit events without permitting a real submission/navigation.
@@ -54,19 +54,19 @@
 export const RUNTIME_MANIFEST_PATH = '/playground-runtime.json';
 
 /** Marker every protocol message carries (both directions). */
-export const PROTOCOL_KEY = '__octanePlayground';
+export const PROTOCOL_KEY = '__dartsxPlayground';
 
 /**
  * React version pinned into the sandbox import map. Keep aligned with the
  * workspace catalog's `react: ^19.2.0` pin — every map entry uses the SAME
  * version so esm.sh dedupes react/react-dom onto one internal build (the
- * OctaneCompat host and user code must share a react singleton).
+ * React-host host and user code must share a react singleton).
  */
 export const PLAYGROUND_REACT_VERSION = '19.2.0';
 
 /** Shape of the runtime manifest built by the playgroundRuntime() vite plugin. */
 export interface RuntimeManifest {
-	entries: { octane: string; 'octane/react': string };
+	entries: { dartsx: string; 'dartsx/internal/client': string };
 	order: string[];
 	files: Record<string, string>;
 }
@@ -89,17 +89,12 @@ const errText = (e) => (e instanceof Error && e.message) || String(e);
 const toBlobUrl = (code) =>
 	URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
 
-let octane = null;
-let root = null; // { kind: 'octane' | 'react', unmount() }
+let dartsxRuntime = null;
 let generation = 0;
 let liveUrls = []; // current run's module blob URLs — kept alive so lazy
                    // dynamic import('./sibling') still resolves after render
 
 const teardown = () => {
-	try {
-		root?.unmount();
-	} catch {}
-	root = null;
 	document.getElementById('root').innerHTML = '';
 };
 
@@ -112,6 +107,12 @@ const findComponent = (mod) => {
 	return null;
 };
 
+// Errors that escape event handlers / effects surface to the parent as
+// runtime errors (there is no dartsx error boundary to catch them in-tree).
+window.addEventListener('error', (event) => {
+	post({ type: 'runtime-error', gen: generation, error: errText(event.error ?? event.message) });
+});
+
 window.addEventListener('message', async (event) => {
 	if (event.source !== window.parent) return;
 	const msg = event.data;
@@ -123,7 +124,7 @@ window.addEventListener('message', async (event) => {
 		return;
 	}
 
-	if (msg.type === 'init' && !octane && msg.manifest) {
+	if (msg.type === 'init' && !dartsxRuntime && msg.manifest) {
 		try {
 			const { entries, order, files } = msg.manifest;
 			// Blob-ify the runtime chunks dependencies-first, splicing each file's
@@ -141,8 +142,8 @@ window.addEventListener('message', async (event) => {
 			map.type = 'importmap';
 			map.textContent = JSON.stringify({
 				imports: {
-					octane: blobs[entries['octane']],
-					'octane/react': blobs[entries['octane/react']],
+					dartsx: blobs[entries['dartsx']],
+					'dartsx/internal/client': blobs[entries['dartsx/internal/client']],
 					react: esm('react@' + REACT_VERSION),
 					'react/jsx-runtime': esm('react@' + REACT_VERSION + '/jsx-runtime'),
 					'react/jsx-dev-runtime': esm('react@' + REACT_VERSION + '/jsx-dev-runtime'),
@@ -151,7 +152,7 @@ window.addEventListener('message', async (event) => {
 				},
 			});
 			document.head.appendChild(map);
-			octane = await import('octane');
+			dartsxRuntime = await import('dartsx');
 			post({ type: 'ready' });
 		} catch (e) {
 			post({ type: 'ready', error: errText(e) });
@@ -159,7 +160,7 @@ window.addEventListener('message', async (event) => {
 		return;
 	}
 
-	if (msg.type === 'run' && octane && Array.isArray(msg.modules)) {
+	if (msg.type === 'run' && dartsxRuntime && Array.isArray(msg.modules)) {
 		const gen = ++generation;
 		// Blob-ify the user module graph (arrives dependencies-first), swapping
 		// sibling-file tokens for the blob URLs created so far.
@@ -197,7 +198,7 @@ window.addEventListener('message', async (event) => {
 			post({
 				type: 'result',
 				gen: msg.gen,
-				error: 'Export a component to render — e.g. \`export default function App() @{ … }\`.',
+				error: 'Export a component to render — e.g. "export default component App() { … }".',
 			});
 			return;
 		}
@@ -205,9 +206,8 @@ window.addEventListener('message', async (event) => {
 		const rootEl = document.getElementById('root');
 		try {
 			if (msg.entryKind === 'react') {
-				// React-host entry (OctaneCompat demos): mount with the REAL
-				// react-dom from esm.sh. Errors that escape the host tree surface
-				// like the octane path's error boundary does.
+				// React-host entry (.react.tsx files): mount with the REAL
+				// react-dom from esm.sh.
 				const [React, ReactDOMClient] = await Promise.all([
 					import('react'),
 					import('react-dom/client'),
@@ -219,23 +219,9 @@ window.addEventListener('message', async (event) => {
 					onCaughtError: (error) =>
 						post({ type: 'runtime-error', gen: msg.gen, error: errText(error) }),
 				});
-				root = { kind: 'react', unmount: () => reactRoot.unmount() };
 				reactRoot.render(React.createElement(component));
 			} else {
-				const octaneRoot = octane.createRoot(rootEl);
-				root = { kind: 'octane', unmount: () => octaneRoot.unmount() };
-				octaneRoot.render(
-					octane.createElement(
-						octane.ErrorBoundary,
-						{
-							fallback: (error) => {
-								post({ type: 'runtime-error', gen: msg.gen, error: errText(error) });
-								return null;
-							},
-						},
-						octane.createElement(component),
-					),
-				);
+				dartsxRuntime.mount(component, rootEl);
 			}
 		} catch (e) {
 			teardown();
@@ -252,7 +238,7 @@ post({ type: 'boot' });
 /**
  * The full srcdoc for the preview iframe. The CSP allows exactly what the
  * bootstrap needs — inline classic script + import map + blob modules + module
- * loads from esm.sh + inline styles (octane's `injectStyle` writes `<style>`
+ * loads from esm.sh + inline styles (dartsx's `$.style` writes `<style>`
  * tags) — and nothing else: no fetch/XHR, no form submission, no plugins.
  *
  * `theme` sets the initial canvas; later flips arrive as `theme` protocol

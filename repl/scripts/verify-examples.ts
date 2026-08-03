@@ -14,7 +14,7 @@ for (const group of readdirSync(root, { withFileTypes: true }).filter((d) => d.i
 	for (const ex of readdirSync(groupDir, { withFileTypes: true }).filter((d) => d.isDirectory()).sort()) {
 		const exDir = new URL(`${ex.name}/`, groupDir);
 		const files = readdirSync(exDir)
-			.filter((name) => name.endsWith('.tsx'))
+			.filter((name) => name.endsWith('.tsx') || name.endsWith('.ts'))
 			.sort()
 			.map((name) => ({
 				name,

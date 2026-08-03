@@ -1,25 +1,25 @@
 // /playground — write TSX on the left, and on the right either the
 // LIVE rendered app or the compiled output, switchable with a tab. The
 // compiled pane selects a Client, Server, Types, or Parsed artifact and shows
-// it as code or an AST (Parsed is AST-only). The Types code is the virtual TSX
-// the IDE language service sees via `octane/compiler/volar`. Hovering or
-// selecting source reveals the corresponding AST node where the compiler has
-// a mapping; hovering a tree node highlights its source origin. In code form
-// every target maps BOTH ways — Types through the Volar token mappings,
-// Client/Server through the compiler's inspection segments and template
-// origins (see playground-mapping.ts). The
-// whole pipeline runs in the browser: `octane/compiler` (and sucrase for
-// React-host `.react.tsx` files) compiles the virtual files on a debounce, the
-// module graph executes inside a SANDBOXED IFRAME with an opaque origin (see
-// src/lib/playground.ts + playground-modules.ts + playground-sandbox.ts —
-// never in this page), and CodeMirror highlights through Shiki with the bundled
-// TSX grammar (src/lib/shiki-codemirror.ts). Editors, panels, and
-// the preview canvas all follow the site's light/dark theme.
+// it as code or an AST (Parsed is AST-only). Server and Types are kept as
+// targets for future DarTsx emits (a server renderer, .d.ts output) and show
+// a placeholder until then. Hovering or selecting source reveals the
+// corresponding AST node where the parser has a span; hovering a tree node
+// highlights its origin document. In code form the Client target maps BOTH
+// ways — through the compile's source map, widened with verified text matches
+// (see playground-mapping.ts). The
+// whole pipeline runs in the browser: the `dartsx` compiler (oxc-parser/
+// oxc-transform WASM bindings + esrap — no Node APIs) compiles the virtual
+// files on a debounce, the module graph executes inside a SANDBOXED IFRAME
+// with an opaque origin (see src/lib/playground.ts + playground-modules.ts +
+// playground-sandbox.ts — never in this page), and CodeMirror highlights
+// through Shiki with the bundled TSX grammar (src/lib/shiki-codemirror.ts).
+// Editors, panels, and the preview canvas all follow the site's light/dark
+// theme.
 //
 // Everything editor-related boots in an effect (dynamic imports), so SSR
 // renders just the static shell and hydration stays clean. A workspace is a
-// set of virtual files with an entry; each language mode keeps its own
-// workspace — switching modes round-trips your edits. The Examples dropdown
+// set of virtual files with an entry. The Examples dropdown
 // loads curated workspaces from repl/examples/ (src/lib/playground-examples.ts);
 // the file tabs manage the file set (add/delete), and editing any file
 // flips it to “Custom”. The active workspace persists into `location.hash`
@@ -32,11 +32,8 @@
 // visitor explicitly presses "Run" on the consent overlay. Your own edits from
 // the default sources auto-run as before.
 import { useState, useRef, useEffect } from 'octane';
-import type { CompileDiagnostic } from 'octane/compiler';
-import type {
-	PlaygroundOutputTarget,
-	PlaygroundRuntimeTarget,
-} from '../../lib/playground.ts';
+import type { PlaygroundOutputTarget } from '../../lib/playground.ts';
+import type { CodeMapping, MappedRange } from '../../lib/playground-mapping.ts';
 import {
 	decodePlaygroundHash,
 	encodePlaygroundHash,
@@ -58,15 +55,15 @@ const COMPILE_DEBOUNCE_MS = 250;
 const AST_TARGET_META: Record<PlaygroundOutputTarget, { label: string; notice: string }> = {
 	client: {
 		label: 'Client output AST',
-		notice: 'The final client Program and static-template IR. Tap a node to pin its highlight.',
+		notice: 'The compiled client Program, parsed back out of the emit. Tap a node to pin its highlight.',
 	},
 	server: {
 		label: 'Server output AST',
-		notice: 'The final server-rendering Program. Tap a node to pin its highlight.',
+		notice: 'No server emit yet — DarTsx compiles one client runtime for now.',
 	},
 	types: {
 		label: 'Types output AST',
-		notice: 'The exact Program printed as the typed virtual TSX. Tap a node to pin its highlight.',
+		notice: 'No types emit yet — DarTsx compiles TypeScript directly to JavaScript.',
 	},
 	source: {
 		label: 'Parsed source AST',
@@ -80,6 +77,16 @@ const OUTPUT_TARGET_LABEL: Record<PlaygroundOutputTarget, string> = {
 	types: 'Types',
 	source: 'Parsed',
 };
+
+// Server and Types are placeholders: DarTsx has no such emits yet. The
+// targets stay so a future emit lands in the same pane; the placeholder text
+// is deliberately a status line, not an error.
+const SERVER_OUTPUT_NOTE =
+	'// Server rendering is not available yet.\n' +
+	'// DarTsx compiles one client runtime; a server emit is planned.';
+const TYPES_OUTPUT_NOTE =
+	'// Type declarations are not generated yet.\n' +
+	'// DarTsx compiles TypeScript directly to JavaScript; a .d.ts emit is planned.';
 
 // sessionStorage record of the last hash THIS tab wrote (plus the example it
 // came from). A payload matching it is the visitor's own work surviving a
@@ -100,14 +107,10 @@ for (const example of EXAMPLES) {
 export function Playground() @{
 	useTitle('Octane — Playground');
 	const [view, setView] = useState<'preview' | 'compiled'>('preview');
-	// Which compiler artifact the right pane shows.
-	const [compiledMode, setCompiledMode] = useState<'code' | 'ast'>('code');
-	const [outputTarget, setOutputTarget] = useState<PlaygroundOutputTarget>('client');
 	// Mobile only: which panel is visible (desktop always shows both).
 	const [pane, setPane] = useState<'editor' | 'result'>('editor');
 	const paneRef = useRef<'editor' | 'result'>('editor');
 	const [error, setError] = useState('');
-	const [warnings, setWarnings] = useState<CompileDiagnostic[]>([]);
 	const [ready, setReady] = useState(false);
 	const [formatting, setFormatting] = useState(false);
 	// True while a hash-shared payload is loaded but not yet approved to run.
@@ -128,22 +131,22 @@ export function Playground() @{
 	const [focusInputSignal, setFocusInputSignal] = useState(0);
 	// Which file the preview imports and renders — marked on its tab.
 	const [entryFile, setEntryFile] = useState('');
+	// The compiled pane's mode: code view or AST view.
+	const [compiledMode, setCompiledMode] = useState<'code' | 'ast'>('code');
+	// The compiled pane's artifact target. Server and Types are placeholders.
+	const [outputTarget, setOutputTarget] = useState<PlaygroundOutputTarget>('client');
 
 	const sourceHostRef = useRef<HTMLDivElement | null>(null);
 	const outputHostRef = useRef<HTMLDivElement | null>(null);
 	const astHostRef = useRef<HTMLDivElement | null>(null);
 	const previewHostRef = useRef<HTMLDivElement | null>(null);
-	// The boot closure runs once, so it can't read the view/mode STATE — this
-	// ref mirrors it (updated by the same handlers that set state) for the
-	// closure's output-refresh and position-mapping paths.
-	const resultModeRef = useRef<{
-		view: 'preview' | 'compiled';
-		compiledMode: 'code' | 'ast';
-		outputTarget: PlaygroundOutputTarget;
-	}>({
+	// The boot closure runs once, so it can't read the view STATE — this ref
+	// mirrors it (updated by the same handlers that set state) for the
+	// closure's output-refresh path.
+	const resultModeRef = useRef<{ view: 'preview' | 'compiled'; mode: 'code' | 'ast'; target: PlaygroundOutputTarget }>({
 		view: 'preview',
-		compiledMode: 'code',
-		outputTarget: 'client',
+		mode: 'code',
+		target: 'client',
 	});
 	// Imperative bridge into the boot closure below — populated once the editor
 	// stack has loaded; the toolbar buttons (and the consent overlay's Run
@@ -166,33 +169,35 @@ export function Playground() @{
 		resultModeRef.current.view = next;
 		controllerRef.current.syncOutput?.();
 	};
-	const selectCompiledMode = (next: 'code' | 'ast') => {
-		if (next === 'code' && resultModeRef.current.outputTarget === 'source') {
-			setOutputTarget('client');
-			resultModeRef.current.outputTarget = 'client';
-		}
-		setCompiledMode(next);
-		resultModeRef.current.compiledMode = next;
-		controllerRef.current.syncOutput?.();
-	};
-	const selectOutputTarget = (next: PlaygroundOutputTarget) => {
-		setOutputTarget(next);
-		resultModeRef.current.outputTarget = next;
-		controllerRef.current.syncOutput?.();
-	};
 	const openMobilePreview = () => {
 		selectView('preview');
 		paneRef.current = 'result';
 		setPane('result');
 	};
-	// Mobile's third pane is the compiled view. It opens on CODE, the same
-	// default the desktop switch has — the AST is a mode you choose, not what
-	// "Inspect" means.
+	// Mobile's third pane is the compiled view, showing the client emit of
+	// the active file.
 	const openMobileCompiled = () => {
 		setView('compiled');
 		paneRef.current = 'result';
 		setPane('result');
 		resultModeRef.current.view = 'compiled';
+		controllerRef.current.syncOutput?.();
+	};
+	// Parsed is an AST-only target — leaving AST mode returns to the client
+	// emit, the mode's natural default.
+	const selectCompiledMode = (mode: 'code' | 'ast') => {
+		if (mode === 'code' && outputTarget === 'source') {
+			setOutputTarget('client');
+			resultModeRef.current.target = 'client';
+		}
+		setCompiledMode(mode);
+		resultModeRef.current.mode = mode;
+		controllerRef.current.syncOutput?.();
+	};
+	// Switching targets re-renders the compiled pane with the new artifact.
+	const selectOutputTarget = (target: PlaygroundOutputTarget) => {
+		setOutputTarget(target);
+		resultModeRef.current.target = target;
 		controllerRef.current.syncOutput?.();
 	};
 	// Reveal only after the mobile result panel has committed as visible;
@@ -237,20 +242,18 @@ export function Playground() @{
 		if (initialDiagnostic) setError(initialDiagnostic);
 
 		(async () => {
-			let stateMod: any, commandsMod: any, viewMod: any, shikiMod: any, pg: any, pgModules: any;
-			let pgMapping: any, pgAst: any;
+			let stateMod: any, commandsMod: any, viewMod: any, shikiMod: any, pg: any, pgModules: any, pgAst: any, pgMapping: any;
 			try {
-				[stateMod, commandsMod, viewMod, shikiMod, pg, pgModules, pgMapping, pgAst] =
-					await Promise.all([
-						import('@codemirror/state'),
-						import('@codemirror/commands'),
-						import('@codemirror/view'),
-						import('../../lib/shiki-codemirror.ts'),
-						import('../../lib/playground.ts'),
-						import('../../lib/playground-modules.ts'),
-						import('../../lib/playground-mapping.ts'),
-						import('../../lib/playground-ast.ts'),
-					]);
+				[stateMod, commandsMod, viewMod, shikiMod, pg, pgModules, pgAst, pgMapping] = await Promise.all([
+					import('@codemirror/state'),
+					import('@codemirror/commands'),
+					import('@codemirror/view'),
+					import('../../lib/shiki-codemirror.ts'),
+					import('../../lib/playground.ts'),
+					import('../../lib/playground-modules.ts'),
+					import('../../lib/playground-ast.ts'),
+					import('../../lib/playground-mapping.ts'),
+				]);
 			} catch (bootError) {
 				// A load failure after unmount (e.g. a test env torn down mid-import)
 				// must not become an unhandled rejection; while mounted, surface it.
@@ -369,282 +372,95 @@ export function Playground() @{
 				view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } });
 			};
 
-			// One compile per (file, target) feeds BOTH the Code and the AST form,
-			// plus the position mapping between the two editors:
-			//   types           one Volar pass → typed TSX, token mappings, and the
-			//                   authored + generated Programs
-			//   client/server   one INSPECT compile → the emitted module, the final
-			//                   Program with its template IR, and the position
-			//                   artifacts (see playground-mapping.ts)
-			// Flipping Code↔AST, or hovering for a mapping, never recompiles. The
-			// preview's module graph compiles WITHOUT inspection, so a session that
-			// never opens this pane pays nothing for any of it.
-			type BaseEntry = {
+			// One compile per (file, target) feeds the compiled pane. The preview's
+			// module graph compiles WITHOUT per-file inspection, so a session that
+			// never opens this pane pays nothing for it.
+			type CodeEntry = {
 				source: string;
 				code: string;
-				/** Lazily built on first lookup; `undefined` = not built yet. */
-				mapping: any;
+				/** Parsed ASTs for the AST pane: [authored source, compiled output]. */
+				asts: [unknown, unknown];
+				/** Authored ranges of the source AST — the mapping's verbatim passes. */
+				ranges: MappedRange[];
+				/** The compile's source map (output → authored) for code mappings. */
+				map: { mappings: string | unknown[][] } | null;
+				/** Lazy per-target mapping (see buildMapping). */
+				mapping?: CodeMapping | null;
 				error: string | null;
 			};
-			type TypesEntry =
-				BaseEntry & {
-					kind: 'types';
-					segments: any;
-					asts: [unknown, unknown] | null;
-				};
-			type RuntimeEntry =
-				BaseEntry & {
-					kind: 'runtime';
-					ast: unknown;
-					segments: any;
-					templates: any;
-					aliases: any;
-				};
-			type ReactEntry = BaseEntry & { kind: 'react' };
-			type CodeEntry = TypesEntry | RuntimeEntry | ReactEntry;
-			type AstEntry = {
-				source: string;
-				ast: unknown;
-				label: string;
-				notice: string;
-			};
-			const typesCache = new Map<string, TypesEntry>();
-			// Track the last graph-level error so pane-only updates (target, mode)
-			// don't wipe it when per-file inspection succeeds.
+			const runtimeCache = new Map<string, CodeEntry>();
+			// "Parsed" shows the authored document — its own cache so the
+			// identity test in showOutput sees the same object per source.
+			const sourceEntryCache = new Map<string, CodeEntry>();
+			// Track the last graph-level error so pane-only updates don't wipe it
+			// when per-file compilation succeeds.
 			let lastGraphError = '';
-			const runtimeCache = new Map<string, RuntimeEntry>();
-			const reactCache = new Map<string, ReactEntry>();
-			const runtimeKey = (name: string, target: PlaygroundRuntimeTarget) => target + ':' + name;
 
-			const typesEntry = (name: string): TypesEntry => {
+			const runtimeEntry = (name: string): CodeEntry => {
 				const source = fileSource(name);
-				const cached = typesCache.get(name);
+				const cached = runtimeCache.get(name);
 				if (cached && cached.source === source) return cached;
-				let entry: TypesEntry;
+				let entry: CodeEntry;
 				if (pgModules.isReactHostFile(name)) {
-					entry = {
-						kind: 'types',
-						source,
-						// React-host source already is the typed TSX document.
-						code: source,
-						segments: null,
-						mapping: pgMapping.identityMapping(source.length),
-						asts: null,
-						error: null,
-					};
+					const compiled = pgModules.peekCompiledFile({ name, source });
+					entry = compiled
+						? compiled.ok
+							? { source, code: compiled.code, asts: [null, null], ranges: [], map: null, error: null }
+							: {
+									source,
+									code: '// Compiled output failed:\n// ' + compiled.error,
+									asts: [null, null],
+									ranges: [],
+									map: null,
+									error: compiled.error,
+								}
+						// A missed cache hit here means the graph hasn't compiled
+						// since the file was edited — but the placeholder cannot
+						// outlive the compile that replaces it.
+						: {
+								source,
+								code: '// Compiled output appears after the next compile.',
+								asts: [null, null],
+								ranges: [],
+								map: null,
+								error: null,
+							};
 				} else {
-					const result = pg.compileTypes(source, name);
+					const result = pg.compilePlayground(source, name);
 					entry = result.ok
 						? {
-								kind: 'types',
 								source,
 								code: result.code,
-								segments: result.segments,
-								mapping: undefined,
-								asts: [result.sourceAst, result.generatedAst],
+								asts: [result.sourceAst, result.ast],
+								ranges: result.ranges,
+								map: result.map,
 								error: null,
 							}
 						: {
-								kind: 'types',
 								source,
-								code: '// Types generation failed:\n// ' + result.error,
-								segments: null,
-								mapping: null,
-								asts: null,
+								code: '// Compilation failed:\n// ' + result.error,
+								asts: [null, null],
+								ranges: [],
+								map: null,
 								error: result.error,
 							};
 				}
-				typesCache.set(name, entry);
+				runtimeCache.set(name, entry);
 				return entry;
-			};
-			const runtimeEntry = (name: string, target: PlaygroundRuntimeTarget): RuntimeEntry => {
-				const source = fileSource(name);
-				const key = runtimeKey(name, target);
-				const cached = runtimeCache.get(key);
-				if (cached && cached.source === source) return cached;
-				const result = pg.compileRuntime(source, name, target);
-				const entry: RuntimeEntry =
-					result.ok
-						? {
-								kind: 'runtime',
-								source,
-								code: result.code,
-								ast: result.ast,
-								segments: result.segments,
-								templates: result.templates,
-								aliases: result.aliases,
-								mapping: undefined,
-								error: null,
-							}
-						: {
-								kind: 'runtime',
-								source,
-								code: `// ${OUTPUT_TARGET_LABEL[target]} generation failed:\n// ${result.error}`,
-								ast: null,
-								segments: null,
-								templates: null,
-								aliases: null,
-								mapping: null,
-								error: result.error,
-							};
-				runtimeCache.set(key, entry);
-				return entry;
-			};
-			// `.react.tsx` is Sucrase's pipeline, not the octane compiler's — the
-			// module graph already compiled it, so the pane reuses that result
-			// rather than handing React source to a compiler that would reject it.
-			const REACT_HOST_NO_SERVER =
-				'// React-host files render through the React DOM host.\n' +
-				'// The playground has no Octane server output for them.';
-			const reactEntry = (name: string, target: PlaygroundRuntimeTarget): ReactEntry => {
-				const source = fileSource(name);
-				if (target === 'server') {
-					return {
-						kind: 'react',
-						source,
-						code: REACT_HOST_NO_SERVER,
-						mapping: null,
-						error: null,
-					};
-				}
-				const key = runtimeKey(name, target);
-				const cached = reactCache.get(key);
-				if (cached && cached.source === source) return cached;
-				const compiled = pgModules.peekCompiledFile({ name, source });
-				// A miss means this source has not reached the module graph yet; the
-				// debounced compile that follows re-runs showOutput. Never cached, so
-				// the placeholder cannot outlive the compile that replaces it.
-				if (!compiled) {
-					return {
-						kind: 'react',
-						source,
-						code: '// Compiled output appears after the next compile.',
-						mapping: null,
-						error: null,
-					};
-				}
-				const entry: ReactEntry =
-					compiled.ok
-						? { kind: 'react', source, code: compiled.code, mapping: null, error: null }
-						: {
-								kind: 'react',
-								source,
-								code: `// ${OUTPUT_TARGET_LABEL[target]} generation failed:\n// ${compiled.error}`,
-								mapping: null,
-								error: compiled.error,
-							};
-				reactCache.set(key, entry);
-				return entry;
-			};
-			const codeEntry = (name: string, target: PlaygroundOutputTarget): CodeEntry => {
-				if (target === 'types') return typesEntry(name);
-				// "Parsed" is an AST-only artifact; its code form is the client emit.
-				const runtimeTarget: PlaygroundRuntimeTarget =
-					target === 'source' ? 'client' : target;
-				return pgModules.isReactHostFile(name)
-					? reactEntry(name, runtimeTarget)
-					: runtimeEntry(name, runtimeTarget);
-			};
-			type AstEntryResult = { entry: AstEntry | null; error: string | null };
-			const astEntry = (name: string): AstEntryResult => {
-				if (pgModules.isReactHostFile(name)) return { entry: null, error: null };
-				const source = fileSource(name);
-				const target = resultModeRef.current.outputTarget;
-				const meta = AST_TARGET_META[target];
-				if (target === 'source' || target === 'types') {
-					const types = typesEntry(name);
-					if (!types.asts) {
-						return {
-							entry: null,
-							error: types.error ? `AST generation failed: ${types.error}` : null,
-						};
-					}
-					return {
-						entry: {
-							source,
-							ast: types.asts[target === 'source' ? 0 : 1],
-							...meta,
-						},
-						error: null,
-					};
-				}
-				const runtime = runtimeEntry(name, target);
-				return runtime.error
-					? { entry: null, error: `AST generation failed: ${runtime.error}` }
-					: { entry: { source, ast: runtime.ast, ...meta }, error: null };
 			};
 
-			// The exact string the output editor currently displays. The output
-			// view is read-only and written ONLY here, so this makes both the
-			// refresh no-op check and activeMapping's staleness check a string
-			// reference compare instead of an O(doc) toString per call.
 			const OUTPUT_PLACEHOLDER = '// Compiled output appears here.';
-			let lastShownOutput = OUTPUT_PLACEHOLDER;
-			// The entry that produced `lastShownOutput` — the mapping owner for
-			// whatever the output editor currently displays, so per-cursor lookups
-			// never re-derive which pipeline/target the pane is on.
-			let lastShownCode: CodeEntry | null = null;
-			let lastShownAst: AstEntry | null = null;
-			const showOutput = (): string | null => {
-				// The compiled pane is not visible: skip entirely — no types
-				// generation, no doc replacement, and (the dominant cost) no Shiki
-				// re-tokenize of the output document. syncOutput re-runs this when
-				// the pane is revealed, so it refreshes exactly once, on demand.
-				if (resultModeRef.current.view !== 'compiled') return null;
-				if (resultModeRef.current.compiledMode === 'ast') {
-					const { entry, error } = astEntry(currentFile);
-					if (entry && entry.ast !== lastShownAst?.ast) {
-						clearMappedPair();
-						astPreview.setAst(entry.ast, currentFile, {
-							label: entry.label,
-							notice: entry.notice,
-						});
-						lastShownAst = entry;
-					} else if (!entry) {
-						clearMappedPair();
-						const message = pgModules.isReactHostFile(currentFile)
-							? 'AST trace covers Octane-owned .tsx files. React-host files use the separate Sucrase pipeline.'
-							: 'AST generation failed. Fix the source to generate a new tree.';
-						astPreview.setUnavailable(message, currentFile);
-						lastShownAst = null;
-					}
-					// Preserve a graph-level error when per-file inspection succeeds.
-					setError(error || lastGraphError);
-					return error;
-				}
-				const output = codeEntry(currentFile, resultModeRef.current.outputTarget);
-				const code = output.code;
-				// AST and code highlights describe different artifacts, so a switch
-				// between them clears the pair even when the cached Types document
-				// needs no replacement.
-				//
-				// A refresh that lands on the SAME artifact must leave marks alone.
-				// This runs from compileAndRun AFTER its awaited buildModuleGraph, so
-				// the initial compile completes a few hundred ms after the pane is
-				// interactive — long enough for a pointer to be resting on a mapped
-				// keyword. Clearing unconditionally wiped that highlight while the
-				// pointer never moved, and mousemove is the only thing that restores
-				// it, so the mark stayed gone until the reader jiggled the mouse.
-				// Identity is the conservative test: entries are cached per (file,
-				// target, source), and any miss yields a fresh object that falls back
-				// to clearing.
-				const sameArtifact = output === lastShownCode && code === lastShownOutput;
-				if (!sameArtifact) {
-					clearMappedPair();
-					astPreview.clear();
-				}
-				// Preserve a graph-level error when switching output artifacts.
-				setError(output.error || lastGraphError);
-				lastShownCode = output;
-				if (typeof code !== 'string' || code === lastShownOutput) return output.error;
-				replaceDoc(outputView, code);
-				lastShownOutput = code;
-				// The output half of the pair changed — source marks were computed
-				// against the previous artifact (the output field self-cleared via
-				// its own doc change just now).
-				clearMappedIn(sourceView);
-				return output.error;
-			};
+
+			// Server/Types have no emit yet — the code pane shows a status line
+			// and there is nothing to inspect. The AST pane gets an empty tree.
+			const placeholderEntry = (code: string): CodeEntry => ({
+				source: '',
+				code,
+				asts: [null, null],
+				ranges: [],
+				map: null,
+				error: null,
+			});
 
 			// ── Source ↔ output position mapping ─────────────────────────────
 			// Placing the cursor in one editor highlights and reveals the mapped
@@ -691,53 +507,47 @@ export function Playground() @{
 				return same && index === ranges.length;
 			};
 
-			// Per-cursor lookups only consult the visible cached artifact. Immutable
-			// AST nodes and template origins both retain authored source offsets.
-			const activeAstEntry = (): AstEntry | null => {
-				if (
-					resultModeRef.current.view !== 'compiled' || resultModeRef.current.compiledMode !== 'ast'
-				) return null;
-				return lastShownAst?.source === fileSource(currentFile) ? lastShownAst : null;
-			};
-			// Built once per (entry, artifact) and cached on the entry itself, so a
+			// The exact string the output editor currently displays. The output
+			// view is read-only and written ONLY here, so this makes both the
+			// refresh no-op check and activeMapping's staleness check a string
+			// reference compare instead of an O(doc) toString per call.
+			let lastShownOutput = OUTPUT_PLACEHOLDER;
+			// The entry + target that produced the current document — the
+			// mapping owner for whatever the output editor displays, so per-cursor
+			// lookups never re-derive which pipeline/target the pane is on.
+			let lastShownEntry: { entry: CodeEntry; target: PlaygroundOutputTarget } | null = null;
+			// The AST currently shown, with the source it was built from.
+			let lastShownAst: { ast: unknown; source: string } | null = null;
+
+			// Built once per (entry, target) and cached on the entry, so a
 			// mousemove stream costs one property read.
-			const buildMapping = (entry: CodeEntry) => {
-				if (entry.kind === 'runtime') {
-					return pgMapping.mappingFromInspection(
-						entry.source,
-						entry.code,
-						entry.segments,
-						entry.templates,
-						entry.aliases,
-					);
-				}
-				// Types uses the SAME artifact as the runtime targets now — the
-				// type-only print's map, widened with authored ends. The verbatim
-				// pass still applies: the printer emits one segment per TOKEN, and
-				// this print copies whole JSX text runs through untokenized.
-				if (entry.kind !== 'types' || !entry.asts) return null;
-				return pgMapping.mappingFromInspection(
-					entry.source,
-					entry.code,
-					entry.segments,
-					null,
-					null,
-					{
-						ranges: pgAst.collectAuthoredRanges(entry.asts[1]),
-						reprint: true,
-					},
-				);
+			const buildMapping = (entry: CodeEntry, target: PlaygroundOutputTarget) => {
+				if (target === 'source') return pgMapping.identityMapping(entry.code.length);
+				if (target !== 'client' || !entry.map) return null;
+				return pgMapping.mappingFromSourceMap(entry.source, entry.code, entry.map, {
+					ranges: entry.ranges,
+				});
 			};
 			const activeMapping = () => {
 				if (
-					resultModeRef.current.view !== 'compiled' || resultModeRef.current.compiledMode !== 'code'
+					resultModeRef.current.view !== 'compiled' || resultModeRef.current.mode !== 'code'
 				) return null;
-				const entry = lastShownCode;
+				const shown = lastShownEntry;
 				if (
-					!entry || entry.source !== fileSource(currentFile) || entry.code !== lastShownOutput
+					!shown || shown.entry.source !== fileSource(currentFile) ||
+						shown.entry.code !== lastShownOutput
 				) return null;
-				if (entry.mapping === undefined) entry.mapping = buildMapping(entry);
-				return entry.mapping;
+				const mapping = buildMapping(shown.entry, shown.target);
+				if (mapping) shown.entry.mapping = mapping;
+				return mapping;
+			};
+			// Per-cursor lookups only consult the visible cached artifact. The AST
+			// retains authored source offsets, so `source` is the staleness test.
+			const activeAstEntry = (): { ast: unknown } | null => {
+				if (
+					resultModeRef.current.view !== 'compiled' || resultModeRef.current.mode !== 'ast'
+				) return null;
+				return lastShownAst?.source === fileSource(currentFile) ? lastShownAst : null;
 			};
 
 			const revealRanges = (
@@ -811,7 +621,7 @@ export function Playground() @{
 				revealRanges(outputView, pair.output, scrollSide === 'output');
 			};
 			const revealAstRange = (range: { from: number; to: number } | null, scroll: boolean) => {
-				if (resultModeRef.current.compiledMode !== 'ast') return;
+				if (resultModeRef.current.mode !== 'ast') return;
 				if (!range || !activeAstEntry()) {
 					clearMappedPair();
 					return;
@@ -833,7 +643,7 @@ export function Playground() @{
 				if (!update.transactions.some((tr: any) => tr.isUserEvent('select'))) return;
 				if (resultModeRef.current.view !== 'compiled') return;
 				const offset = update.state.selection.main.head;
-				if (resultModeRef.current.compiledMode === 'ast' && side === 'source') {
+				if (resultModeRef.current.mode === 'ast' && side === 'source') {
 					if (activeAstEntry()) astPreview.reveal(offset, true);
 					return;
 				}
@@ -849,7 +659,7 @@ export function Playground() @{
 				mousemove(event: MouseEvent, view: any) {
 					if (resultModeRef.current.view !== 'compiled') return;
 					const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
-					if (resultModeRef.current.compiledMode === 'ast' && side === 'source') {
+					if (resultModeRef.current.mode === 'ast' && side === 'source') {
 						if (offset == null || !activeAstEntry()) clearMappedPair();
 						else astPreview.reveal(offset, false);
 						return;
@@ -872,6 +682,124 @@ export function Playground() @{
 				},
 			});
 
+			const astEntry = (): { ast: unknown; source: string; label: string; notice: string; error: string | null } | null => {
+				const target = resultModeRef.current.target;
+				if (target === 'server' || target === 'types') return null;
+				const meta = AST_TARGET_META[target];
+				const entry = runtimeEntry(currentFile);
+				if (entry.error) return { ast: null, source: entry.source, label: meta.label, notice: meta.notice, error: entry.error };
+				return {
+					ast: entry.asts[target === 'source' ? 0 : 1],
+					source: entry.source,
+					label: meta.label,
+					notice: meta.notice,
+					error: null,
+				};
+			};
+
+			// The output document per target. The source target shows the
+			// authored document with an identity mapping so interactions still
+			// work; server/types are placeholders with no mapping at all.
+			const targetEntry = (target: PlaygroundOutputTarget): CodeEntry => {
+				switch (target) {
+					case 'server':
+						return placeholderEntry(SERVER_OUTPUT_NOTE);
+					case 'types':
+						return placeholderEntry(TYPES_OUTPUT_NOTE);
+					case 'source': {
+						const source = fileSource(currentFile);
+						const cached = sourceEntryCache.get(currentFile);
+						if (cached && cached.source === source) return cached;
+						const entry: CodeEntry = {
+							source,
+							code: source,
+							asts: [null, null],
+							ranges: [],
+							map: null,
+							error: null,
+						};
+						sourceEntryCache.set(currentFile, entry);
+						return entry;
+					}
+					default:
+						return runtimeEntry(currentFile);
+				}
+			};
+
+			const showOutput = (): string | null => {
+				// The compiled pane is not visible: skip entirely — no types
+				// generation, no doc replacement, and (the dominant cost) no Shiki
+				// re-tokenize of the output document. syncOutput re-runs this when
+				// the pane is revealed, so it refreshes exactly once, on demand.
+				if (resultModeRef.current.view !== 'compiled') return null;
+				if (resultModeRef.current.mode === 'ast') {
+					const target = resultModeRef.current.target;
+					const meta = AST_TARGET_META[target];
+					const entry = astEntry();
+					if (!entry) {
+						// Server/Types have no emit yet — nothing to inspect.
+						clearMappedPair();
+						astPreview.setUnavailable(meta.notice, currentFile);
+						lastShownAst = null;
+						return null;
+					}
+					if (entry.ast) {
+						if (entry.ast !== lastShownAst?.ast) {
+							clearMappedPair();
+							astPreview.setAst(entry.ast, currentFile, {
+								label: entry.label,
+								notice: entry.notice,
+							});
+							lastShownAst = { ast: entry.ast, source: entry.source };
+						}
+					} else {
+						clearMappedPair();
+						const message = pgModules.isReactHostFile(currentFile)
+							? 'AST trace covers Octane-owned .tsx files. React-host files use the separate Sucrase pipeline.'
+							: 'AST generation failed. Fix the source to generate a new tree.';
+						astPreview.setUnavailable(message, currentFile);
+						lastShownAst = null;
+					}
+					// Preserve a graph-level error when per-file inspection succeeds.
+					setError(entry.error || lastGraphError);
+					return entry.error;
+				}
+				const target = resultModeRef.current.target;
+				const output = targetEntry(target);
+				const code = output.code;
+				// AST and code highlights describe different artifacts, so a switch
+				// between them clears the pair even when the cached document
+				// needs no replacement.
+				//
+				// A refresh that lands on the SAME artifact must leave marks alone.
+				// This runs from compileAndRun AFTER its awaited buildModuleGraph, so
+				// the initial compile completes a few hundred ms after the pane is
+				// interactive — long enough for a pointer to be resting on a mapped
+				// keyword. Clearing unconditionally wiped that highlight while the
+				// pointer never moved, and mousemove is the only thing that restores
+				// it, so the mark stayed gone until the reader jiggled the mouse.
+				// Identity is the conservative test: entries are cached per (file,
+				// target, source), and any miss yields a fresh object that falls back
+				// to clearing.
+				const sameArtifact = output === lastShownEntry?.entry && code === lastShownOutput;
+				if (!sameArtifact) {
+					clearMappedPair();
+					astPreview.clear();
+				}
+				// Preserve a graph-level error when switching output artifacts.
+				setError(output.error || lastGraphError);
+				lastShownEntry = { entry: output, target };
+				if (typeof code !== 'string' || code === lastShownOutput) return output.error;
+				replaceDoc(outputView, code);
+				lastShownOutput = code;
+				// The output half of the pair changed — source marks were computed
+				// against the previous artifact (the output field self-cleared via
+				// its own doc change just now).
+				clearMappedIn(sourceView);
+				return output.error;
+			};
+
+
 			let compileSeq = 0;
 			const compileAndRun = async () => {
 				if (disposed) return;
@@ -882,27 +810,22 @@ export function Playground() @{
 					0,
 				);
 				if (total > MAX_PLAYGROUND_SOURCE_LENGTH) {
-					setWarnings([]);
 					setError(PLAYGROUND_SOURCE_LIMIT_ERROR);
 					return;
 				}
 				const graph = await pgModules.buildModuleGraph(wsFiles, entry);
 				if (disposed || seq !== compileSeq) return;
-				// Compiler artifacts describe the active source file, independently of
-				// whether another workspace file prevents the runnable module graph
-				// from compiling. Refresh inspection before handling graph failure.
-				const inspectionError = showOutput();
+				// The compiled pane describes the active source file, independently
+				// of whether another workspace file prevents the runnable module
+				// graph from compiling. Refresh it before handling graph failure.
+				const outputError = showOutput();
 				if (!graph.ok) {
 					lastGraphError = graph.error;
-					setWarnings([]);
 					setError(graph.error);
 					return;
 				}
 				lastGraphError = '';
-				setWarnings(
-					graph.warnings.map((warning: { diagnostic: CompileDiagnostic }) => warning.diagnostic),
-				);
-				setError(inspectionError || '');
+				setError(outputError || '');
 				// While a shared payload is gated, everything except EXECUTION
 				// happens — the visitor can inspect source and compiled output.
 				if (executionGated) return;
@@ -997,7 +920,7 @@ export function Playground() @{
 						// shown in the output (this field self-clears; a failed
 						// recompile would otherwise leave the output's marks forever).
 						clearMappedIn(outputView);
-						if (resultModeRef.current.compiledMode === 'ast') {
+						if (resultModeRef.current.mode === 'ast') {
 							astPreview.setUnavailable('Waiting for the next successful compile…', currentFile);
 							lastShownAst = null;
 						}
@@ -1061,11 +984,12 @@ export function Playground() @{
 				workspace = pgExamples.exampleWorkspace(example);
 				currentFile = workspace.entry;
 				editorStates.clear();
-				typesCache.clear();
 				runtimeCache.clear();
-				reactCache.clear();
-				lastShownCode = null;
+				sourceEntryCache.clear();
+				lastShownEntry = null;
+				lastShownAst = null;
 				sourceView.setState(makeEditorState(currentFile, fileSource(currentFile)));
+				clearMappedIn(sourceView);
 				clearMappedIn(outputView);
 				// Picking an example is the visitor's own action — never gated.
 				executionGated = false;
@@ -1124,15 +1048,10 @@ export function Playground() @{
 				// Drop the file's undo history along with the file itself.
 				editorStates.delete(stateKey(name));
 				workspace.files.splice(index, 1);
-				// Inspection caches are keyed by file name — purge the deleted one
+				// The compile cache is keyed by file name — purge the deleted one
 				// rather than churn every key. Nothing else references them.
-				typesCache.delete(name);
-				for (const key of runtimeCache.keys()) {
-					if (key.endsWith(':' + name)) runtimeCache.delete(key);
-				}
-				for (const key of reactCache.keys()) {
-					if (key.endsWith(':' + name)) reactCache.delete(key);
-				}
+				runtimeCache.delete(name);
+				sourceEntryCache.delete(name);
 				if (wasCurrent) {
 					// Fall to the file that took the tab's place, wrapping to the
 					// first when the last file was deleted.
@@ -1144,6 +1063,8 @@ export function Playground() @{
 					clearMappedIn(sourceView);
 				}
 				clearMappedIn(outputView);
+				lastShownEntry = null;
+				lastShownAst = null;
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 					currentExampleId = CUSTOM_EXAMPLE_ID;
 					setExampleId(CUSTOM_EXAMPLE_ID);
@@ -1178,20 +1099,19 @@ export function Playground() @{
 					editorStates.delete(oldName);
 					editorStates.set(name, savedState);
 				}
-				// Inspection caches are keyed by file name — drop the old key so
+				// The compile cache is keyed by file name — drop the old key so
 				// the next compile repopulates it under the new name.
-				typesCache.delete(oldName);
-				for (const key of runtimeCache.keys()) {
-					if (key.endsWith(':' + oldName)) runtimeCache.delete(key);
-				}
-				for (const key of reactCache.keys()) {
-					if (key.endsWith(':' + oldName)) reactCache.delete(key);
-				}
+				runtimeCache.delete(oldName);
+				sourceEntryCache.delete(oldName);
 				// A rename makes the buffer non-example, like any edit.
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 					currentExampleId = CUSTOM_EXAMPLE_ID;
 					setExampleId(CUSTOM_EXAMPLE_ID);
 				}
+				clearMappedIn(sourceView);
+				clearMappedIn(outputView);
+				lastShownEntry = null;
+				lastShownAst = null;
 				setInputValue(name);
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
@@ -1339,25 +1259,6 @@ export function Playground() @{
 
 		@if (error) {
 			<div class="pg-error" role="alert">{error}</div>
-		}
-		@if (warnings.length > 0) {
-			<section class="pg-warnings" aria-label="Compiler warnings" aria-live="polite">
-				<strong>
-					{warnings.length === 1 ? 'Compiler warning' : 'Compiler warnings'}
-				</strong>
-				<ul>
-					@for (const warning of warnings; key warning.filename + ':' + warning.code + ':' +
-						warning.start.offset) {
-						<li>
-							<code>{warning.code}</code>
-							<span>{warning.message}</span>
-							<span class="pg-warning-location">
-								{warning.filename + ':' + warning.start.line + ':' + (warning.start.column + 1)}
-							</span>
-						</li>
-					}
-				</ul>
-			</section>
 		}
 
 		<div class={['pg-grid', ready && 'ready']}>
@@ -1713,32 +1614,6 @@ export function Playground() @{
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 				white-space: pre-wrap;
 			}
-			.pg-warnings {
-				display: flex;
-				align-items: baseline;
-				gap: 0.75rem;
-				padding: 0.6rem 1rem;
-				border-top: 1px solid rgba(245, 183, 65, 0.4);
-				background: rgba(245, 183, 65, 0.1);
-				color: var(--callout-important);
-				font-size: 0.82rem;
-			}
-			.pg-warnings ul {
-				display: grid;
-				gap: 0.25rem;
-				margin: 0;
-				padding: 0;
-				list-style: none;
-			}
-			.pg-warnings li {
-				display: flex;
-				gap: 0.55rem;
-				flex-wrap: wrap;
-			}
-			.pg-warnings code,
-			.pg-warning-location {
-				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-			}
 			.pg-warning-location {
 				color: var(--text-secondary);
 			}
@@ -1768,9 +1643,6 @@ export function Playground() @{
 				align-items: center;
 				justify-content: space-between;
 				gap: 1rem;
-				/* Both heads reserve the height the COMPILED head needs — its output
-				   select and Code/AST switch are taller than the source head's line
-				   of text — so switching Preview↔Compiled never resizes the row. */
 				min-height: 2.7rem;
 				padding: 0.45rem 0.9rem;
 				border-bottom: 1px solid var(--border);
@@ -1925,16 +1797,14 @@ export function Playground() @{
 				min-height: 0;
 				flex-direction: column;
 			}
-			.pg-output.hidden {
+			.pg-output.hidden,
+			.pg-ast-host.hidden {
 				display: none;
 			}
 			.pg-ast-host {
 				flex: 1;
 				min-height: 0;
 				overflow: hidden;
-			}
-			.pg-ast-host.hidden {
-				display: none;
 			}
 			.pg-ast-host :global(.pg-ast-shell) {
 				display: flex;

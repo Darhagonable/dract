@@ -1,21 +1,25 @@
 import { defineConfig, type Plugin } from 'vite';
 import { createRequire } from 'node:module';
 import { build as esbuildBuild } from 'esbuild';
+// The site shell is an octane app (`.tsrx` routes) — this plugin compiles
+// those files for the dev server and the production build.
 import { octane } from 'octane/compiler/vite';
 
 // The playground executes user code in a sandboxed iframe with an OPAQUE
 // origin (src/lib/playground-sandbox.ts). That iframe can't import the site's
-// bundled octane (blob URLs are origin-bound and cross-origin module fetches
+// bundled dartsx (blob URLs are origin-bound and cross-origin module fetches
 // need CORS), so the parent hands it the runtime as TEXT and the iframe turns
 // it into blob modules on its own side of the boundary.
 //
 // The runtime ships as a JSON MANIFEST of esbuild code-split chunks rather
-// than one file: `octane` and `octane/react` are separate entries sharing the
-// octane core through common chunks (bundling `octane/react` standalone would
-// duplicate the core — two runtimes, broken hook/context singletons). React
-// itself stays EXTERNAL: the sandbox's import map resolves the react family to
-// esm.sh, so react is only ever fetched when user code actually imports
-// `octane/react` — pure-octane sessions never touch the network.
+// than one file: `dartsx` (the external runtime the examples import —
+// effect/mount/context etc.) and `dartsx/internal/client` (what compiled
+// modules import as `$`) are separate entries sharing the dartsx core through
+// common chunks (bundling either standalone would duplicate the core — two
+// runtimes, broken signal/context singletons). React itself stays EXTERNAL:
+// the sandbox's import map resolves the react family to esm.sh, so react is
+// only ever fetched when user code actually imports it (React-host `.react.tsx`
+// entries) — pure-dartsx sessions never touch the network.
 function playgroundRuntime(): Plugin {
 	const MANIFEST_PATH = '/playground-runtime.json'; // = RUNTIME_MANIFEST_PATH in playground-sandbox.ts
 
@@ -23,8 +27,8 @@ function playgroundRuntime(): Plugin {
 		const require = createRequire(import.meta.url);
 		const out = await esbuildBuild({
 			entryPoints: {
-				octane: require.resolve('octane'),
-				'octane-react': require.resolve('octane/react'),
+				dartsx: require.resolve('dartsx'),
+				'dartsx-internal-client': require.resolve('dartsx/internal/client'),
 			},
 			bundle: true,
 			splitting: true,
@@ -78,18 +82,18 @@ function playgroundRuntime(): Plugin {
 		for (const name of deps.keys()) visit(name, []);
 
 		return JSON.stringify({
-			entries: { octane: 'octane.mjs', 'octane/react': 'octane-react.mjs' },
+			entries: { dartsx: 'dartsx.mjs', 'dartsx/internal/client': 'dartsx-internal-client.mjs' },
 			order,
 			files,
 		});
 	}
 
 	return {
-		name: 'octane-playground-runtime',
+		name: 'dartsx-playground-runtime',
 		configureServer(server) {
 			server.middlewares.use(MANIFEST_PATH, (_req, res, next) => {
 				// Rebuilt per request — esbuild bundles the runtime in ~15ms, and
-				// this way dev never serves a stale runtime after octane edits.
+				// this way dev never serves a stale runtime after dartsx edits.
 				bundle().then((code) => {
 					res.setHeader('Content-Type', 'application/json; charset=utf-8');
 					res.end(code);
@@ -108,14 +112,13 @@ function playgroundRuntime(): Plugin {
 }
 
 // Dependencies the scanner cannot reach (the playground's dynamic imports and
-// the octane compiler's transitive deps — 'octane' itself is excluded below)
+// the dartsx compiler's transitive deps — dartsx itself is excluded below)
 // are pre-declared so no optimize pass runs mid-session.
 const PREBUNDLED = [
 	'@codemirror/commands',
 	'@codemirror/state',
 	'@codemirror/view',
 	'shiki',
-	'@tsrx/core',
 	'esrap',
 	'esrap/languages/tsx',
 	'es-module-lexer',
@@ -123,17 +126,25 @@ const PREBUNDLED = [
 	'prettier/standalone',
 	'prettier/plugins/typescript',
 	'prettier/plugins/estree',
-	'octane > devalue',
 ];
 
 export default defineConfig({
 	plugins: [playgroundRuntime(), octane()],
 
 	optimizeDeps: {
-		// The published octane is compiled ESM, but keep it raw like the
-		// compiler plugin does for source checkouts — module-identity-sensitive
-		// for the runtime chunks the playground sandbox bundles.
-		exclude: ['octane'],
+		// The dartsx compiler resolves oxc-parser/oxc-transform through their
+		// browser fields to WASM bindings (fetched .wasm assets + a worker), so
+		// those packages — and the bindings themselves — must reach the browser
+		// raw instead of being esbuild-prebundled. dartsx is excluded with them
+		// so the whole compiler graph keeps its browser resolution.
+		exclude: [
+			'dartsx',
+			'oxc-parser',
+			'oxc-transform',
+			'@oxc-parser/binding-wasm32-wasi',
+			'@oxc-transform/binding-wasm32-wasi',
+			'@napi-rs/wasm-runtime',
+		],
 		include: PREBUNDLED,
 	},
 

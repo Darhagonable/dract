@@ -1,28 +1,36 @@
 // Source ↔ generated position mapping for the playground's code pane.
-// Compiler ASTs retain authored origins directly (a generated node's
-// `start`/`end` are AUTHORED offsets, never offsets into the printed code), so
-// the code pane cannot map through them and needs the compiler's own
-// position artifacts instead. There is one per output target:
 //
-//   types           `compileTypesInspection().segments` — the type-only print's
-//                   map, widened the same way. NOT the editor's Volar mappings:
-//                   those carry capability data and drive hover/diagnostics, so
-//                   this pane must not be able to perturb them.
-//   client/server   `compile({ inspect: true }).inspect.segments` — the module
-//                   print's map segments widened with the authored source END
-//                   a standard source map cannot carry, plus
-//                   `inspect.templates[].origins` for spans baked into hoisted
-//                   static template HTML (tag names, attributes, text).
+// DarTsx compiles to a different program than the source, so the code pane
+// maps through the compiler's own source map — the final remapped artifact
+// (output positions → authored positions) — rather than through AST spans,
+// which only make sense inside the single document they index.
+//
+// A source-map segment is a POINT (output column ↔ source line/column), not a
+// span, so this module synthesizes spans and answers queries over them:
+//
+//   - each segment's generated span runs to the next segment on its line (the
+//     line end for the last one), and its authored span runs to the next
+//     segment's source position when that stays in the same file and moves
+//     forward — otherwise it widens to the end of the authored line, the
+//     "authored end a standard source map cannot carry" the segments get;
+//   - the compiler's printer records a segment pair per node it prints, so
+//     nodes it could not attribute (synthesized lowerings, rewritten JSX)
+//     produce no segments of their own and their output text falls inside a
+//     neighbouring segment's span.
 //
 // Queries select the narrowest range containing the hovered/cursor offset.
-// This matters for Volar's nested mappings: a JSX expression maps as one
-// range while its identifiers map as smaller ranges. Positions between those
-// identifiers must fall back to the containing expression instead of becoming
-// spuriously unmapped. A match returns EVERY range mapped from the selected
-// source range because one expression can appear in several output locations.
+// A match returns EVERY range mapped from the selected source range because
+// one expression can appear in several output locations.
+//
+// Forwards (source→generated) only pairs that are true by construction
+// answer: a generated token whose text REPRODUCES the authored text, or a
+// range the verbatim passes verified as a unique exact text match. Everything
+// else answers only backwards, so a highlight, when shown, is always right.
 //
 // Pure string/offset math — no CodeMirror or DOM imports, so tests can run
 // it directly and the editor wiring stays in the page component.
+
+import { decode } from '@jridgewell/sourcemap-codec';
 
 export interface MappedRange {
 	from: number;
@@ -47,8 +55,9 @@ interface Segment {
 	srcLen: number;
 	genLen: number;
 	/**
-	 * Is this pair an EXACT correspondence the compiler asserted, rather than an
-	 * attribution inferred from a source-map position? See `createMapping`.
+	 * Is this pair an EXACT correspondence (a verified text match or a
+	 * compiler-asserted one), rather than an attribution inferred from a
+	 * source-map position? See `createMapping`.
 	 */
 	exact: boolean;
 }
@@ -95,7 +104,7 @@ interface MappingTexts {
  * The two directions are not symmetric, because the artifacts are not.
  *
  * Backwards (generated→source) every segment is usable: a generated position
- * has one origin, and even a wide one ("somewhere in this component") is an
+ * has one origin, and even a wide one ("somewhere in this line") is an
  * honest answer.
  *
  * Forwards it is not. A fat segment's authored range is resolved as "the
@@ -104,22 +113,21 @@ interface MappingTexts {
  * comes back carrying that WHOLE declaration's range. Answering from those
  * would light up everything the declaration emitted — `const`, the parameter
  * list, the hoisted stylesheet a `<style>` block became — for a hover anywhere
- * inside it. Worse, a region with NO finer data inside it (all of SSR's static
- * markup, which records no origins) looks indistinguishable from a real
- * mapping, so no size or containment heuristic separates them.
+ * inside it. Worse, a region with NO finer data inside it looks
+ * indistinguishable from a real mapping, so no size or containment heuristic
+ * separates them.
  *
  * So the forward index takes only pairs that are true by construction:
  *
- *   - `exact` segments — Volar token pairs, template origins, and the verbatim
- *     pass, each a correspondence the compiler (or a verified content match)
- *     asserted rather than inferred;
+ *   - `exact` segments — verified text matches from the verbatim passes, each
+ *     a correspondence asserted rather than inferred;
  *   - fat segments whose generated text REPRODUCES the authored text, which is
  *     verifiable here and is what an identifier, a literal or a preserved
  *     expression looks like.
  *
  * Everything else answers only backwards. The cost is silence where the
- * compiler has no origin data (SSR static markup, closing tags); the benefit is
- * that a highlight, when shown, is always right.
+ * compiler has no origin data (synthesized lowerings); the benefit is that a
+ * highlight, when shown, is always right.
  */
 function createMapping(
 	segments: Segment[],
@@ -134,22 +142,22 @@ function createMapping(
 				texts.generated.slice(segment.gen, segment.gen + segment.genLen));
 	// Which segments may answer a source→generated lookup?
 	//
-	// In a runtime EMIT — a different program from the source — a segment the
-	// printer could not place precisely carries its whole enclosing declaration,
-	// and answering from those scatters marks across unrelated tokens. Only
-	// pairs true by construction qualify: compiler-asserted ones, or ones whose
-	// generated text reproduces the authored text.
+	// A compiled EMIT is a different program from the source, so a segment the
+	// printer could not place precisely carries its whole enclosing
+	// declaration, and answering from those scatters marks across unrelated
+	// tokens. Only pairs true by construction qualify: compiler-asserted ones
+	// (the verbatim passes), or ones whose generated text reproduces the
+	// authored text.
 	//
-	// A REPRINT (the type-only output) is the same program printed again, so a
-	// segment's authored end is a real node range and its generated span is that
-	// node's own image even when the two differ in length: `class="hint"` is
-	// emitted as `class="hint hash"`. Those must answer, or attribute values
+	// A REPRINT is the same program printed again, so a segment's authored end
+	// is a real node range and its generated span is that node's own image even
+	// when the two differ in length. Those must answer, or attribute values
 	// stop resolving. The one thing that still cannot is a segment covering a
-	// whole CONSTRUCT — the `@{ … }` body, the component function — which would
-	// otherwise win at every position no finer segment covers and highlight the
-	// entire component. A segment containing another's source range is exactly
-	// that, unless it reproduces its authored text (a preserved expression,
-	// which legitimately answers for the punctuation inside it).
+	// whole CONSTRUCT, which would otherwise win at every position no finer
+	// segment covers and highlight the entire component. A segment containing
+	// another's source range is exactly that, unless it reproduces its authored
+	// text (a preserved expression, which legitimately answers for the
+	// punctuation inside it).
 	const leafOrReproducing = reprint ? notContainingAnother(segments, reproduces) : null;
 	const bySrc = segments
 		.filter((segment) =>
@@ -269,359 +277,204 @@ const FORWARD_RANGE_LIMIT = 8;
 
 const WHITESPACE = /\s/;
 
+/** Line-start offsets of a document — binary-searchable for line/column math. */
+function lineStartsOf(doc: string): number[] {
+	const starts = [0];
+	for (let i = 0; i < doc.length; i++) {
+		if (doc.charCodeAt(i) === 10) starts.push(i + 1);
+	}
+	return starts;
+}
+
 /**
- * Close the token map's gaps for the type-only print, which reproduces the
- * authored program almost verbatim.
+ * Build a mapping from the source map a compile emitted — output positions
+ * mapped all the way back to the authored `source` (not an intermediate
+ * preprocessed document).
  *
- * The printer emits one map segment per TOKEN, so anything it copies through
- * WITHOUT tokenizing has no mapping at all — raw JSX text being the visible
- * case (`Hello` in `<p>Hello</p>` highlights nothing in either direction).
- * Rather than enumerate the node types that behave that way, this takes EVERY
- * authored range in the generated Program and keeps the ones that can be
- * placed unambiguously:
- *
- *   - a range a token mapping already covers exactly is left alone (the
- *     compiler's own answer always wins);
- *   - the remainder must appear, exactly once and verbatim, inside the window
- *     the surrounding token mappings bracket.
- *
- * Everything else — reordered, re-indented, rewritten, or merely repeated
- * within its window — is ignored, so a wrong highlight is never invented. That
- * is why the ranges come from the GENERATED Program: a node the transform
- * dropped is never even a candidate.
- *
- * Mutates `segments`, which is always the freshly built list.
+ * `verbatim` may carry the authored source's OWN AST ranges (see
+ * `playground-ast.ts` `collectAuthoredRanges`): synthesized lowerings and
+ * rewritten JSX produce no map segments of their own, and their output text
+ * lands inside a neighbour segment's span, so the segment pairs alone would
+ * leave identifiers, literals and JSX text unmapped in the forward direction.
+ * The verbatim passes rescue them by verified text matches — a range inside a
+ * segment's authored span whose text appears once in that segment's generated
+ * span, or (globally) exactly once in the whole document. A wrong highlight is
+ * never invented: only unique, in-window matches qualify.
  */
-function appendVerbatimSegments(
+export function mappingFromSourceMap(
+	source: string,
+	generated: string,
+	map: { mappings?: string | unknown[][] } | null | undefined,
+	verbatim?: { ranges: readonly MappedRange[] } | null,
+): CodeMapping | null {
+	if (!map || typeof map.mappings !== 'string' || map.mappings.length === 0) return null;
+	let decoded: ReturnType<typeof decode>;
+	try {
+		decoded = decode(map.mappings);
+	} catch {
+		return null;
+	}
+	const srcStarts = lineStartsOf(source);
+	const genStarts = lineStartsOf(generated);
+	const segments: Segment[] = [];
+	for (let line = 0; line < decoded.length; line++) {
+		const segs = decoded[line];
+		if (segs.length === 0) continue;
+		const genLineStart = genStarts[line];
+		if (genLineStart === undefined) continue;
+		const genLineEnd = line + 1 < genStarts.length ? genStarts[line + 1] : generated.length;
+		for (let i = 0; i < segs.length; i++) {
+			const seg = segs[i];
+			// [genCol, srcIdx, srcLine, srcCol] — only the authored file maps.
+			const srcIdx = seg[1];
+			const srcLine = seg[2];
+			const srcCol = seg[3];
+			if (srcIdx === undefined || srcLine === undefined || srcCol === undefined) continue;
+			if (srcIdx !== 0) continue;
+			const srcStart = srcStarts[srcLine] + srcCol;
+			if (!Number.isSafeInteger(srcStart)) continue;
+			const genFrom = genLineStart + seg[0];
+			if (genFrom >= genLineEnd) continue;
+			const genTo = i + 1 < segs.length ? genLineStart + segs[i + 1][0] : genLineEnd;
+			// Authored span: to the next segment's source position when it stays
+			// in the authored file and moves forward, else widen to the line end —
+			// the authored end a source map cannot carry.
+			let srcTo = -1;
+			const next = segs[i + 1];
+			if (next && next.length >= 4 && next[1] === 0) {
+				const nextLine = next[2];
+				const nextCol = next[3];
+				if (nextLine !== undefined && nextCol !== undefined) {
+					const nextPos = srcStarts[nextLine] + nextCol;
+					if (nextPos > srcStart) srcTo = nextPos;
+				}
+			}
+			if (srcTo <= srcStart) {
+				const lineEnd = srcStarts[srcLine + 1] ?? source.length;
+				if (lineEnd > srcStart) srcTo = lineEnd;
+			}
+			if (srcTo <= srcStart) continue;
+			let genEnd = Math.min(genTo, generated.length);
+			while (genEnd > genFrom && WHITESPACE.test(generated[genEnd - 1])) genEnd--;
+			if (genEnd <= genFrom) continue;
+			segments.push({
+				src: srcStart,
+				gen: genFrom,
+				srcLen: srcTo - srcStart,
+				genLen: genEnd - genFrom,
+				exact: false,
+			});
+		}
+	}
+	if (segments.length === 0) return null;
+	if (verbatim && verbatim.ranges.length > 0) {
+		appendWindowedVerbatimSegments(segments, source, generated, verbatim.ranges);
+		appendUniqueVerbatimSegments(segments, source, generated, verbatim.ranges);
+	}
+	return createMapping(segments, { source, generated }, false);
+}
+
+/**
+ * Rescue authored ranges inside a segment's authored span: a range whose text
+ * appears exactly once inside that segment's GENERATED span (which is the
+ * printed text the printer attributed to the span) is a verified
+ * correspondence, so it may answer source→generated lookups.
+ *
+ * `segments` is the freshly built list — this mutates it, and the spans are
+ * scanned in order so each range is claimed by the FIRST segment whose
+ * authored span contains it.
+ */
+function appendWindowedVerbatimSegments(
 	segments: Segment[],
 	source: string,
 	generated: string,
 	ranges: readonly MappedRange[],
 ): void {
-	if (segments.length === 0) return;
+	const byFrom = [...ranges]
+		.filter((range: MappedRange) => range.to > range.from)
+		.sort((a: MappedRange, b: MappedRange) => a.from - b.from || a.to - b.to);
 	const mapped = new Set<string>();
 	for (const segment of segments) mapped.add(segment.src + ':' + segment.srcLen);
 
-	// Bracketed by the IMMEDIATE neighbours in source order, not by a running
-	// maximum: the print reorders whole regions (a component's static JSX is
-	// hoisted above the function that returns it), so an earlier authored token
-	// is routinely emitted LATER. Neighbours keep the window local; when the
-	// reordering falls between the two neighbours themselves the window inverts
-	// and the span is simply left unmapped.
-	const bySrc = [...segments].sort((a, b) => a.src - b.src);
-
-	for (const range of ranges) {
-		let from = range.from;
-		let to = Math.min(range.to, source.length);
-		// Whitespace-insensitive at the edges: a JSX text run's authored range
-		// includes the newline and indentation around it.
-		while (from < to && WHITESPACE.test(source[from])) from++;
-		while (to > from && WHITESPACE.test(source[to - 1])) to--;
-		if (to <= from || mapped.has(from + ':' + (to - from))) continue;
-		const content = source.slice(from, to);
-
+	for (const segment of segments) {
+		const srcEnd = segment.src + segment.srcLen;
+		const genEnd = segment.gen + segment.genLen;
 		let lo = 0;
-		let hi = bySrc.length;
+		let hi = byFrom.length;
 		while (lo < hi) {
 			const mid = (lo + hi) >> 1;
-			if (bySrc[mid].src < from) lo = mid + 1;
+			if (byFrom[mid].from < segment.src) lo = mid + 1;
 			else hi = mid;
 		}
-		const previous = lo > 0 ? bySrc[lo - 1] : null;
-		const windowStart = previous ? previous.gen + previous.genLen : 0;
-		let windowEnd = generated.length;
-		for (let i = lo; i < bySrc.length; i++) {
-			if (bySrc[i].src >= to) {
-				windowEnd = bySrc[i].gen;
-				break;
-			}
-		}
-		if (windowEnd - windowStart < content.length) continue;
-
-		const at = generated.indexOf(content, windowStart);
-		if (at < 0 || at + content.length > windowEnd) continue;
-		const again = generated.indexOf(content, at + 1);
-		if (again >= 0 && again + content.length <= windowEnd) continue; // ambiguous
-		segments.push({
-			src: from,
-			gen: at,
-			srcLen: content.length,
-			genLen: content.length,
-			exact: true,
-		});
-	}
-}
-
-/** One `inspect.segments` entry — see `compile({ inspect: true })`. */
-export interface InspectSegment {
-	genLine: number;
-	genCol: number;
-	genEndCol: number | null;
-	srcStart: number;
-	srcEnd: number | null;
-	/**
-	 * Did the compiler ASSERT this pair rather than infer it from a map
-	 * position? Set for the handful of lowerings it can name exactly — an
-	 * `onClick`'s slot key, the block helper an `@if`/`@for` becomes.
-	 */
-	exact?: boolean;
-}
-
-/** One `inspect.templates[].origins` entry: an HTML span and its authored range. */
-export interface InspectTemplateOrigin {
-	start: number;
-	end: number;
-	srcStart: number;
-	srcEnd: number;
-	/** `tag-open` | `tag-close` | `attr-name` | `attr-value` | `text` — every kind maps alike. */
-	kind?: string;
-}
-
-/**
- * An authored range that emits nothing of its own but means the same thing as
- * one that does — a component's closing tag against its opening name. The
- * compiler records the pair; the alias borrows the target's generated ranges.
- */
-export interface InspectAlias {
-	srcStart: number;
-	srcEnd: number;
-	ofStart: number;
-}
-
-export interface InspectTemplate {
-	/** The LOGICAL html the origins index into. */
-	html: string;
-	/**
-	 * The bytes the generated document contains for this template, when the
-	 * compiler can say so — the SSR emit bakes each run into a template-literal
-	 * quasi and reports it verbatim. Absent for a hoisted client template, whose
-	 * html is embedded as a quoted string literal and located by re-escaping.
-	 */
-	raw?: string;
-	origins: readonly InspectTemplateOrigin[];
-}
-
-/**
- * Resolve every template's origins into the generated document.
- *
- * Verbatim runs (`raw`) are matched by occurrence: SSR emits static markup in
- * document order and the compiler records it in authored order, so the k-th
- * `</li>` in the output is the k-th `</li>` in the source. Identical runs are
- * therefore told apart — two `<button>` elements get their own spans — and a
- * group whose counts disagree is skipped rather than guessed at.
- */
-function appendAllTemplateSegments(
-	segments: Segment[],
-	source: string | null,
-	generated: string,
-	templates: readonly InspectTemplate[],
-): void {
-	/** Verbatim runs, grouped by their exact bytes. */
-	const verbatim = new Map<string, InspectTemplate[]>();
-	for (const template of templates) {
-		if (typeof template.raw !== 'string' || template.raw.length === 0) {
-			appendTemplateSegments(segments, source, generated, template);
-			continue;
-		}
-		const group = verbatim.get(template.raw);
-		if (group) group.push(template);
-		else verbatim.set(template.raw, [template]);
-	}
-
-	for (const [raw, group] of verbatim) {
-		const occurrences: number[] = [];
-		for (let at = generated.indexOf(raw); at >= 0; at = generated.indexOf(raw, at + raw.length)) {
-			occurrences.push(at);
-		}
-		if (occurrences.length !== group.length) continue;
-		const ordered = [...group].sort((a, b) => firstOrigin(a) - firstOrigin(b));
-		for (let i = 0; i < ordered.length; i++) {
-			appendVerbatimTemplateSegments(segments, ordered[i], occurrences[i]);
-		}
-	}
-}
-
-const firstOrigin = (template: InspectTemplate): number => {
-	let earliest = Infinity;
-	for (const origin of template.origins) earliest = Math.min(earliest, origin.srcStart);
-	return earliest;
-};
-
-/** Offsets index the run itself, so they need only the run's position added. */
-function appendVerbatimTemplateSegments(
-	segments: Segment[],
-	template: InspectTemplate,
-	at: number,
-): void {
-	for (const origin of template.origins) {
-		const { start, end, srcStart, srcEnd } = origin;
-		if (!(start >= 0 && end > start && end <= template.html.length && srcEnd > srcStart)) continue;
-		segments.push({
-			src: srcStart,
-			gen: at + start,
-			srcLen: srcEnd - srcStart,
-			genLen: end - start,
-			exact: true,
-		});
-	}
-}
-
-/**
- * Build a mapping for a runtime (client/server) compile from the inspection
- * artifacts of the SAME compile that produced `generated`.
- *
- * Fat segments are `(generated line, column)` anchored; the generated end is
- * the next segment's column on that line (the line end on the last one), so
- * ranges are contiguous and trailing whitespace is trimmed off for a tidy
- * highlight. Segments with no authored end (structural punctuation the printer
- * emits between nodes) carry no source range and are dropped.
- *
- * Template origins add the second dimension: spans inside a hoisted template's
- * HTML — tag names, static attributes and, notably, static TEXT — resolved
- * into the string literal the module print embedded that HTML as.
- *
- * `source` is the authored document the compile consumed. It is optional only
- * so a fixture can exercise the offset math alone; supply it wherever the real
- * answer matters, since it is what tells an emission of the authored text apart
- * from a runtime helper that merely happens to be the same length.
- */
-export function mappingFromInspection(
-	source: string | null,
-	generated: string,
-	inspectSegments: readonly InspectSegment[] | null | undefined,
-	templates?: readonly InspectTemplate[] | null,
-	aliases?: readonly InspectAlias[] | null,
-	verbatim?: { ranges: readonly MappedRange[]; reprint?: boolean } | null,
-): CodeMapping | null {
-	if (!Array.isArray(inspectSegments)) return null;
-	const lineStarts = [0];
-	for (let i = 0; i < generated.length; i++) {
-		if (generated.charCodeAt(i) === 10) lineStarts.push(i + 1);
-	}
-	const lineEnd = (line: number) =>
-		line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : generated.length;
-
-	const segments: Segment[] = [];
-	for (const segment of inspectSegments) {
-		const { genLine, genCol, genEndCol, srcStart, srcEnd } = segment;
-		if (typeof srcEnd !== 'number' || typeof srcStart !== 'number' || srcEnd <= srcStart) continue;
-		const lineStart = lineStarts[genLine];
-		if (lineStart === undefined) continue;
-		const from = lineStart + genCol;
-		let end = Math.min(
-			typeof genEndCol === 'number' ? lineStart + genEndCol : lineEnd(genLine),
-			generated.length,
-		);
-		while (end > from && WHITESPACE.test(generated[end - 1])) end--;
-		if (end <= from) continue;
-		segments.push({
-			src: srcStart,
-			gen: from,
-			srcLen: srcEnd - srcStart,
-			genLen: end - from,
-			exact: segment.exact === true,
-		});
-	}
-
-	if (Array.isArray(templates)) appendAllTemplateSegments(segments, source, generated, templates);
-	if (Array.isArray(aliases)) appendAliasSegments(segments, aliases);
-	if (verbatim && source !== null && verbatim.ranges.length > 0) {
-		appendVerbatimSegments(segments, source, generated, verbatim.ranges);
-	}
-	return createMapping(
-		segments,
-		source === null ? null : { source, generated },
-		verbatim?.reprint === true,
-	);
-}
-
-/**
- * Lend each alias the generated ranges its target already claims — with the
- * target's own provenance, not an asserted one. A target position can carry
- * several segments (an `injectStyle(hash, css)` call claims three), and only
- * the ones the forward filter would accept for the target should answer for
- * the alias, or the alias resolves to strictly more than the thing it aliases.
- */
-function appendAliasSegments(segments: Segment[], aliases: readonly InspectAlias[]): void {
-	const byTarget = new Map<number, Segment[]>();
-	for (const segment of segments) {
-		const group = byTarget.get(segment.src);
-		if (group) group.push(segment);
-		else byTarget.set(segment.src, [segment]);
-	}
-	for (const alias of aliases) {
-		const target = byTarget.get(alias.ofStart);
-		if (!target || alias.srcEnd <= alias.srcStart) continue;
-		for (const segment of target) {
+		for (let i = lo; i < byFrom.length && byFrom[i].from < srcEnd; i++) {
+			const range = byFrom[i];
+			if (range.to > srcEnd) continue;
+			const key = range.from + ':' + (range.to - range.from);
+			if (mapped.has(key)) continue;
+			let from = range.from;
+			let to = Math.min(range.to, source.length);
+			// Whitespace-insensitive at the edges: a JSX text run's range
+			// includes the newline and indentation around it.
+			while (from < to && WHITESPACE.test(source[from])) from++;
+			while (to > from && WHITESPACE.test(source[to - 1])) to--;
+			if (to <= from) continue;
+			const content = source.slice(from, to);
+			let at = generated.indexOf(content, segment.gen);
+			if (at < 0 || at + content.length > genEnd) continue;
+			const again = generated.indexOf(content, at + 1);
+			if (again >= 0 && again + content.length <= genEnd) continue; // ambiguous
+			mapped.add(key);
 			segments.push({
-				src: alias.srcStart,
-				gen: segment.gen,
-				srcLen: alias.srcEnd - alias.srcStart,
-				genLen: segment.genLen,
-				exact: segment.exact,
+				src: from,
+				gen: at,
+				srcLen: to - from,
+				genLen: content.length,
+				exact: true,
 			});
 		}
 	}
 }
 
 /**
- * Resolve a template's origins into the printed string literal. The recorded
- * offsets index the LOGICAL html, so they are re-based through the literal's
- * escaping; a template whose literal cannot be located (or whose escaping does
- * not round-trip, e.g. astral characters) contributes nothing rather than
- * guessing at shifted offsets.
+ * Rescue authored ranges NO segment covers — rewritten JSX text, attribute
+ * names, whole exports — when their text appears EXACTLY ONCE in the whole
+ * generated document. Uniqueness is the verification: a repeated token cannot
+ * be placed, and one that appears once is, by construction, the generated
+ * image of this authored range.
  */
-function appendTemplateSegments(
+function appendUniqueVerbatimSegments(
 	segments: Segment[],
-	source: string | null,
+	source: string,
 	generated: string,
-	template: InspectTemplate,
+	ranges: readonly MappedRange[],
 ): void {
-	const { html, origins } = template;
-	if (typeof html !== 'string' || html.length === 0 || !Array.isArray(origins)) return;
-	const literal = JSON.stringify(html);
-	const at = generated.indexOf(literal);
-	if (at < 0) return;
-
-	// Logical html offset → offset inside the literal's body.
-	const escaped = new Int32Array(html.length + 1);
-	let total = 0;
-	for (let i = 0; i < html.length; i++) {
-		escaped[i] = total;
-		total += JSON.stringify(html[i]).length - 2;
-	}
-	escaped[html.length] = total;
-	if (total !== literal.length - 2) return;
-
-	const body = at + 1;
-	for (const origin of origins) {
-		const { start, end, srcStart, srcEnd } = origin;
-		if (!(start >= 0 && end > start && end <= html.length && srcEnd > srcStart)) continue;
-		// Corroboration. Attributes the compiler INJECTS have no authored
-		// counterpart to point at, and are recorded against the whole opening
-		// tag — so a hover on `onClick` would light up the scoped-style `class`
-		// the compiler added. An origin wider in source than in HTML has to be
-		// found in the text it claims; a span the compiler WIDENED (an authored
-		// `class="demo"` merged into `demo tsrx-…`) is corroborated by being
-		// wider, not narrower.
-		if (
-			source !== null &&
-			srcEnd - srcStart > end - start &&
-			!source.slice(srcStart, srcEnd).includes(html.slice(start, end))
-		) {
-			continue;
-		}
+	const mapped = new Set<string>();
+	for (const segment of segments) mapped.add(segment.src + ':' + segment.srcLen);
+	for (const range of ranges) {
+		if (range.to <= range.from || range.to - range.from > 256) continue;
+		const key = range.from + ':' + (range.to - range.from);
+		if (mapped.has(key)) continue;
+		let from = range.from;
+		let to = Math.min(range.to, source.length);
+		while (from < to && WHITESPACE.test(source[from])) from++;
+		while (to > from && WHITESPACE.test(source[to - 1])) to--;
+		if (to <= from) continue;
+		const content = source.slice(from, to);
+		const at = generated.indexOf(content);
+		if (at < 0) continue;
+		if (generated.indexOf(content, at + 1) >= 0) continue; // ambiguous
+		mapped.add(key);
 		segments.push({
-			src: srcStart,
-			gen: body + escaped[start],
-			srcLen: srcEnd - srcStart,
-			genLen: escaped[end] - escaped[start],
+			src: from,
+			gen: at,
+			srcLen: to - from,
+			genLen: content.length,
 			exact: true,
 		});
 	}
 }
 
-/** React-host TSX is already the typed document, so its mapping is identity. */
+/** React-host TSX is already the compiled document, so its mapping is identity. */
 export function identityMapping(length: number): CodeMapping | null {
 	if (!Number.isSafeInteger(length) || length <= 0) return null;
 	const pair = (offset: number): MappedPair | null => {
