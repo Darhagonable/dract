@@ -177,7 +177,7 @@ Walks the OXC AST and produces an IR (Intermediate Representation) for each comp
 - **`reactiveVars`**: Collects all names that are reactive (state + derived + bind props + cross-file imports)
 - **`walkCallSites`**: Walks the entire AST to detect calls like `myFunc(reactiveVar)`. When a reactive variable is passed as an argument, the function's parameter at that position is recorded as reactive
 - **`reactiveCallTargets`**: Maps function names → sets of reactive parameter indices. This tells the transformer which call arguments must NOT be unwrapped with `$.get()` (because the callee expects a signal)
-- **`reactiveCalls`**: Records cross-file reactive call info (specifier → function → indices) so the Vite plugin can recompile target modules
+- **`reactiveCalls`**: Records cross-file reactive call info (specifier → function → indices) so the ProjectCompiler can recompile target modules
 
 ### Phase 4 — Transform
 
@@ -272,19 +272,19 @@ const d = $.derived(() => double(count));  // count passed as signal
 
 Notice: at the call site, `count` stays as `count` (no `$.get()`), because the call analysis added it to `reactiveCallTargets`, which creates an exclusion zone. The signal object is passed directly to the function.
 
-### Cross-file functions (via Vite plugin)
+### Cross-file functions (via ProjectCompiler)
 
-When a signal is passed to an _imported_ function, the compiler can't recompile the target in the same compilation pass. Instead, the **Vite plugin** coordinates:
+When a signal is passed to an _imported_ function, the compiler can't recompile the target in the same compilation pass. Instead, the **ProjectCompiler** coordinates:
 
 1. **Caller compiles**: The compiler detects `watchCount(count)` passes a signal at position 0. It records this in `reactiveCalls`: `{ './utils': { watchCount: [0] } }`.
 
-2. **Plugin stores**: The Vite plugin resolves `'./utils'` to an absolute path, and stores the contribution: `reactiveCallContributions[callerId][targetId] = { watchCount: [0] }`.
+2. **Project resolves and stores**: The project resolves `'./utils'` to a module id (through `loadFile` when the adapter knows it), and stores the contribution: caller id → target id → `{ watchCount: [0] }`.
 
-3. **Plugin aggregates**: It rebuilds the aggregated `reactiveCallRegistry` for the target module by merging all callers' contributions.
+3. **Project aggregates**: It rebuilds the merged `reactiveCallImports` for the target module by merging all callers' contributions.
 
-4. **Plugin invalidates**: If the registry changed, it invalidates the target module in Vite's module graph, triggering a recompile.
+4. **Project invalidates**: If the merged registry changed, it recompiles the target module and returns it in `changed`.
 
-5. **Target recompiles**: When `utils.ts` is recompiled, the plugin passes `reactiveCallImports: { watchCount: [0] }` to the compiler. The analyzer sees this and treats `watchCount`'s parameter 0 as reactive, adding it to `reactiveCallTargets`.
+5. **Target recompiles**: The target is compiled with `reactiveCallImports: { watchCount: [0] }`. The analyzer sees this and treats `watchCount`'s parameter 0 as reactive, adding it to `reactiveCallTargets`.
 
 6. **Argument wrapping**: At the call site in the caller, `reactiveCallTargets` ensures the argument at position 0 is in an exclusion zone (no `$.get()`) and, if it's a member expression on a proxy, wraps it in `$.derived()`.
 
@@ -297,14 +297,14 @@ Exported `state` and `derived` variables are also tracked:
 export state count = 0;   // → reactiveExports: ['count']
 ```
 
-The Vite plugin stores `reactiveRegistry[resolvedId] = ['count']`. When another module imports `count`:
+The project stores `reactiveExports[storeId] = ['count']`. When another module imports `count`:
 
 ```tsx
 // App.tsx
 import { count } from './store';
 ```
 
-The plugin passes `reactiveImports: { './store': ['count'] }` to the compiler. The analyzer adds `count` to `moduleReactiveVars`, so reads become `$.get(count)` and writes become `$.set(count, val)`.
+The project passes `reactiveImports: { './store': ['count'] }` to the compiler. The analyzer adds `count` to `moduleReactiveVars`, so reads become `$.get(count)` and writes become `$.set(count, val)`.
 
 ### Positional union
 

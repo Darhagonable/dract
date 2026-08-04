@@ -57,8 +57,6 @@ export interface ModuleGraphFailure {
 const project = new ProjectCompiler({
 	css: 'injected',
 });
-/** Latest output map, keyed by file name (kept from the last successful call). */
-let outputs: Record<string, ModuleOutput> = {};
 /** File names the project knows about, for removeFile diffs. */
 const projectFiles = new Set<string>();
 /** Last compile error per file — `updateFile` throws; errors surface per file. */
@@ -71,20 +69,14 @@ function ensureCompiled(files: PlaygroundFile[]): void {
 		project.removeFile(name);
 		projectFiles.delete(name);
 		compileErrors.delete(name);
-		const next = { ...outputs };
-		delete next[name];
-		outputs = next;
 	}
 	for (const file of files) {
 		if (isReactHostFile(file.name)) continue;
 		projectFiles.add(file.name);
 		try {
-			outputs = project.updateFile(file.name, file.source).outputs;
+			project.updateFile(file.name, file.source);
 			compileErrors.delete(file.name);
 		} catch (error) {
-			const next = { ...outputs };
-			delete next[file.name];
-			outputs = next;
 			compileErrors.set(file.name, error instanceof Error ? error.message : String(error));
 		}
 	}
@@ -92,7 +84,7 @@ function ensureCompiled(files: PlaygroundFile[]): void {
 
 /** The project's output for one file, or null when it has none (never compiles). */
 export function getModuleOutput(name: string): ModuleOutput | null {
-	return outputs[name] ?? null;
+	return project.output(name);
 }
 
 /** The last compile error for one file, or null when it compiled or was never tried. */

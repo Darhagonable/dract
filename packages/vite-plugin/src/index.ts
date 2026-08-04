@@ -86,7 +86,7 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 			// DarTsx file imports them and reactive-call propagation needs them).
 			if (!isTsx && !isTs && !isJsx && !isJs) return;
 
-			if (!isTsx && !isJsx && !project.hasFile(id) && !isDarTsxSource(code)) return;
+			if (!isTsx && !isJsx && !project.output(id) && !isDarTsxSource(code)) return;
 
 			let update;
 			try {
@@ -95,20 +95,22 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				this.error(e.message);
 			}
 
-			const output = update!.outputs[id];
+			const output = project.output(id);
 			if (!output) return;
 
 			// Neighbors the project recompiled (importers, callees) must be
 			// re-requested so Vite picks up their new output.
-			const env = this.environment;
-			if (env && typeof env === 'object' && 'moduleGraph' in env) {
-				const mg = env.moduleGraph;
-				if (mg && typeof mg === 'object' && 'getModuleById' in mg && typeof mg.getModuleById === 'function') {
-					for (const otherId of update!.changed) {
-						if (otherId === id) continue;
-						const mod = mg.getModuleById(otherId);
-						if (mod && 'invalidateModule' in mg && typeof mg.invalidateModule === 'function') {
-							mg.invalidateModule(mod);
+			if (update) {
+				const env = this.environment;
+				if (env && typeof env === 'object' && 'moduleGraph' in env) {
+					const mg = env.moduleGraph;
+					if (mg && typeof mg === 'object' && 'getModuleById' in mg && typeof mg.getModuleById === 'function') {
+						for (const otherId of update.changed) {
+							if (otherId === id) continue;
+							const mod = mg.getModuleById(otherId);
+							if (mod && 'invalidateModule' in mg && typeof mg.invalidateModule === 'function') {
+								mg.invalidateModule(mod);
+							}
 						}
 					}
 				}

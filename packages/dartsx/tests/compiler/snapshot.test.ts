@@ -53,11 +53,11 @@ function compileMultiFile(dir: string, files: string[]): Map<string, string> {
 	for (const filename of files) {
 		project.addFile(filename, readFileSync(join(dir, filename), 'utf-8'));
 	}
-	const { outputs } = project.compileAll();
+	const outputs = project.compileAll();
 
 	const result = new Map<string, string>();
 	for (const filename of files) {
-		const output = outputs[filename];
+		const output = outputs.get(filename);
 		if (output) result.set(filename.replace(/\.[^.]+$/, '.js'), output.js.code);
 	}
 	return result;

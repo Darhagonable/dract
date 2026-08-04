@@ -20,8 +20,9 @@
  *
  * Incremental semantics:
  *
- *   - `updateFile(id, source)` with an unchanged source is a no-op; the output
- *     map is returned but no file is recompiled.
+ *   - `updateFile(id, source)` with an unchanged source is a no-op; no file is
+ *     recompiled. Unknown ids are accepted (a fresh file simply joins the
+ *     project) — callers never need to ask whether a file exists first.
  *   - Editing a file's BODY recompiles that file alone: reactive exports and
  *     call contributions are source-structure facts, and while they are
  *     unchanged no importer or callee is invalidated.
@@ -75,9 +76,9 @@ export interface ModuleOutput {
 export interface ProjectUpdate {
 	/** Ids whose output was (re)compiled by this call. */
 	changed: string[];
-	/** Every module's current output, keyed by id. */
-	outputs: Record<string, ModuleOutput>;
 }
+// Outputs are read back per id through `output(id)` — callers keep their own
+// map of what they serve, so an update never copies the whole output set.
 
 export interface ProjectCompilerOptions {
 	/**
@@ -161,8 +162,9 @@ export class ProjectCompiler {
 		this.loadFile = options.loadFile ?? (() => null);
 	}
 
-	hasFile(id: string): boolean {
-		return this.files.has(id);
+	/** The current output for one id, or null when the project has none. */
+	output(id: string): ModuleOutput | null {
+		return this.files.get(id)?.output ?? null;
 	}
 
 	/** Add (or replace) a file's source without compiling. Idempotent. */
@@ -211,22 +213,31 @@ export class ProjectCompiler {
 		}
 	}
 
-	/** Compile every file that has no output yet (or whose source changed via addFile). */
-	compileAll(): ProjectUpdate {
+	/**
+	 * Compile every file that has no output yet (or whose source changed via
+	 * addFile) and return the project's full output map — the bulk-operation
+	 * counterpart to `updateFile`/`output`, for callers that compile a whole
+	 * project at once (tests, build steps).
+	 */
+	compileAll(): Map<string, ModuleOutput> {
 		const changed: string[] = [];
 		for (const [id, record] of this.files) {
 			if (!record.output) this.enqueue(id);
 		}
 		this.runQueue(changed);
-		return { changed, outputs: this.outputs() };
+		const result = new Map<string, ModuleOutput>();
+		for (const [id, record] of this.files) {
+			if (record.output) result.set(id, record.output);
+		}
+		return result;
 	}
 
 	/**
 	 * Update one file's source and recompile whatever the change invalidates.
-	 * Returns the ids recompiled by this call and every module's output.
-	 * Throws the compiler's error when the file fails to compile — the caller
-	 * is expected to surface it (and may re-update the same source later,
-	 * which re-runs the compile as long as no output was produced).
+	 * Returns the ids recompiled by this call. Throws the compiler's error when
+	 * the file fails to compile — the caller is expected to surface it (and may
+	 * re-update the same source later, which re-runs the compile as long as no
+	 * output was produced).
 	 */
 	updateFile(id: string, source: string): ProjectUpdate {
 		const changed: string[] = [];
@@ -236,12 +247,12 @@ export class ProjectCompiler {
 			// to its neighbours changed, so no file is invalidated. (A file
 			// whose INPUTS changed under it is recompiled by the caller's
 			// cascade instead.)
-			return { changed: [], outputs: this.outputs() };
+			return { changed };
 		}
 		this.addFile(id, source);
 		this.enqueue(id);
 		this.runQueue(changed);
-		return { changed, outputs: this.outputs() };
+		return { changed };
 	}
 
 	/**
@@ -251,7 +262,7 @@ export class ProjectCompiler {
 	 */
 	removeFile(id: string): ProjectUpdate {
 		const record = this.files.get(id);
-		if (!record) return { changed: [], outputs: this.outputs() };
+		if (!record) return { changed: [] };
 		this.files.delete(id);
 		const affected = new Set<string>();
 		// Importers lose their reactive exports source.
@@ -285,7 +296,7 @@ export class ProjectCompiler {
 		const changed: string[] = [];
 		for (const fileId of affected) this.enqueue(fileId);
 		this.runQueue(changed);
-		return { changed, outputs: this.outputs() };
+		return { changed };
 	}
 
 	// ── Internal machinery ──────────────────────────────────────────────────
@@ -300,14 +311,6 @@ export class ProjectCompiler {
 		reactiveCallImports: Record<string, number[]> | null,
 	): string {
 		return JSON.stringify([reactiveImports ?? null, reactiveCallImports ?? null]);
-	}
-
-	private outputs(): Record<string, ModuleOutput> {
-		const result: Record<string, ModuleOutput> = {};
-		for (const [id, record] of this.files) {
-			if (record.output) result[id] = record.output;
-		}
-		return result;
 	}
 
 	private enqueue(id: string): void {
