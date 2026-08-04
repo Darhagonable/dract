@@ -30,12 +30,27 @@
  *     `reactiveImports`); a changed contribution recompiles the affected
  *     target (with updated `reactiveCallImports`).
  *
+ * Each update runs in two phases:
+ *
+ *   1. ANALYZE — the worklist resolves imports and re-analyzes queued files
+ *      against the current graph, reconciling metadata as it goes (reactive
+ *      exports, contributions, reverse edges). No code is generated.
+ *   2. GENERATE — with the queue drained, every analysis is final (its inputs
+ *      can no longer change). Each file whose output is missing or was
+ *      produced under different inputs is transformed exactly once, with the
+ *      exact inputs its output should be generated under.
+ *
+ * Separating the phases keeps the graph's decisions on cheap analysis
+ * metadata: a file whose inputs change twice inside one call is analyzed
+ * twice but generated once, and a file whose inputs round-trip back to a
+ * state it already generated output for is not regenerated at all.
+ *
  * A single update recompiles each (file, input-state) pair at most once; the
  * worklist re-queues a file when its inputs changed under it, which is how the
  * loadFile-discovered and recompiled files converge to a consistent graph in
  * one call.
  */
-import { compile, type CompileResult } from './index';
+import { analyzeSource, generateOutput, type CompileAnalysis } from './index';
 import type { SourceMap } from '@jridgewell/remapping';
 
 export interface ModuleOutput {
@@ -139,6 +154,12 @@ interface FileRecord {
 	resolvedTargets: Map<string, string | null>;
 	/** The resolved targets of the last compile (for reverse-edge diffs). */
 	lastTargets: string[];
+	/** The analysis awaiting codegen — live only between the two phases. */
+	analysis: CompileAnalysis | null;
+	/** The inputs state under which `analysis` was produced. */
+	analysisKey: string | null;
+	/** The inputs state under which `output` was produced. */
+	outputKey: string | null;
 }
 
 export class ProjectCompiler {
@@ -177,6 +198,9 @@ export class ProjectCompiler {
 			existing.importSpecifiers = extractImportSpecifiers(source);
 			existing.resolvedTargets = new Map();
 			existing.lastTargets = [];
+			existing.analysis = null;
+			existing.analysisKey = null;
+			existing.outputKey = null;
 		} else {
 			this.files.set(id, {
 				id,
@@ -185,6 +209,9 @@ export class ProjectCompiler {
 				importSpecifiers: extractImportSpecifiers(source),
 				resolvedTargets: new Map(),
 				lastTargets: [],
+				analysis: null,
+				analysisKey: null,
+				outputKey: null,
 			});
 		}
 		// A file that could not be resolved before (its target wasn't in the
@@ -213,18 +240,12 @@ export class ProjectCompiler {
 		}
 	}
 
-	/**
-	 * Compile every file that has no output yet (or whose source changed via
-	 * addFile) and return the project's full output map — the bulk-operation
-	 * counterpart to `updateFile`/`output`, for callers that compile a whole
-	 * project at once (tests, build steps).
-	 */
+	/** Compile every file that has no output yet (or whose source changed via addFile). */
 	compileAll(): Map<string, ModuleOutput> {
-		const changed: string[] = [];
 		for (const [id, record] of this.files) {
 			if (!record.output) this.enqueue(id);
 		}
-		this.runQueue(changed);
+		this.run();
 		const result = new Map<string, ModuleOutput>();
 		for (const [id, record] of this.files) {
 			if (record.output) result.set(id, record.output);
@@ -251,7 +272,7 @@ export class ProjectCompiler {
 		}
 		this.addFile(id, source);
 		this.enqueue(id);
-		this.runQueue(changed);
+		this.run(changed);
 		return { changed };
 	}
 
@@ -295,15 +316,15 @@ export class ProjectCompiler {
 		// Recompile the affected files against the reduced graph.
 		const changed: string[] = [];
 		for (const fileId of affected) this.enqueue(fileId);
-		this.runQueue(changed);
+		this.run(changed);
 		return { changed };
 	}
 
 	// ── Internal machinery ──────────────────────────────────────────────────
 
 	private queue: string[] = [];
-	/** (id, input-state) pairs already compiled this call — the convergence guard. */
-	private compiledPairs = new Set<string>();
+	/** (id, input-state) pairs already analyzed this call — the convergence guard. */
+	private analyzedPairs = new Set<string>();
 	private queuedIds = new Set<string>();
 
 	private inputsKey(
@@ -342,8 +363,24 @@ export class ProjectCompiler {
 		return this.resolveExternal(specifier, importerId);
 	}
 
-	private runQueue(changed: string[]): void {
-		this.compiledPairs = new Set();
+	/**
+	 * The two phases of an update: stabilize the graph on analysis metadata,
+	 * then generate code for exactly the files whose output is due.
+	 */
+	private run(changed: string[] = []): void {
+		this.runAnalysis();
+		this.generateOutputs(changed);
+	}
+
+	/**
+	 * Phase A — analyze. Drains the worklist: resolve imports, derive each
+	 * file's inputs from the CURRENT graph state, and analyze it (parse +
+	 * metadata). The result reconciles into the graph, which may enqueue
+	 * further files (importers of changed exports, targets of changed
+	 * contributions) until the graph converges. No code is generated here.
+	 */
+	private runAnalysis(): void {
+		this.analyzedPairs = new Set();
 		this.queuedIds = new Set();
 		while (this.queue.length > 0) {
 			const id = this.queue.shift()!;
@@ -383,54 +420,84 @@ export class ProjectCompiler {
 				Object.keys(reactiveImports).length > 0 ? reactiveImports : null,
 				reactiveCallImports,
 			);
-			// Already compiled with exactly these inputs in this call — nothing
+			// Already analyzed with exactly these inputs in this call — nothing
 			// new can come out of it.
-			if (this.compiledPairs.has(id + '\u0000' + key)) continue;
-			this.compiledPairs.add(id + '\u0000' + key);
+			if (this.analyzedPairs.has(id + '\u0000' + key)) continue;
+			this.analyzedPairs.add(id + '\u0000' + key);
 
-			// 3. Compile.
-			const result = compile(record.source, {
+			// 3. Analyze — parse + metadata only; codegen is deferred so the
+			// graph can converge before any output is produced.
+			const analysis = analyzeSource(record.source, {
 				filename: id,
-				css: this.css,
 				reactiveImports: Object.keys(reactiveImports).length > 0 ? reactiveImports : undefined,
 				reactiveCallImports: reactiveCallImports ?? undefined,
 			});
+			record.analysis = analysis;
+			record.analysisKey = key;
 
 			// 4. Reconcile the graph and propagate invalidation.
-			this.reconcile(record, result, changed);
+			this.reconcile(record, analysis);
 		}
 	}
 
-	private reconcile(record: FileRecord, result: CompileResult, changed: string[]): void {
+	/**
+	 * Phase B — generate. With the queue drained, every analysis is final (its
+	 * inputs can no longer change), so each file is transformed at most once
+	 * per call, under the exact inputs its output should be generated with. A
+	 * file whose inputs round-tripped to a state it already generated output
+	 * for is skipped entirely. Analyses are transient — they are dropped once
+	 * codegen is done.
+	 */
+	private generateOutputs(changed: string[]): void {
+		for (const [id, record] of this.files) {
+			const analysis = record.analysis;
+			if (!analysis) continue;
+			// The current output is still valid when it was produced under the
+			// same inputs the final analysis was — generation is a pure
+			// function of (source, inputs), and a changed source always
+			// nulls the output via addFile.
+			if (record.output && record.outputKey === record.analysisKey) continue;
+
+			const result = generateOutput(analysis, this.css);
+			const output: ModuleOutput = {
+				id,
+				js: {
+					code: result.js.code,
+					map: result.js.map,
+				},
+				css: {
+					code: result.css.code,
+					map: result.css.map,
+				},
+				metadata: {
+					reactiveExports: analysis.reactiveExports,
+					reactiveCalls: analysis.reactiveCalls,
+					importSpecifiers: analysis.importSpecifiers,
+				},
+				ast: result.ast,
+				imports: [...record.resolvedTargets.values()].filter((t): t is string => t !== null),
+			};
+			record.output = output;
+			record.outputKey = record.analysisKey;
+			changed.push(id);
+		}
+		// Analyses are only needed until codegen — drop them all.
+		for (const [, record] of this.files) {
+			record.analysis = null;
+			record.analysisKey = null;
+		}
+	}
+
+	private reconcile(record: FileRecord, analysis: CompileAnalysis): void {
 		const id = record.id;
 
-		// Output + cached metadata.
-		const output: ModuleOutput = {
-			id,
-			js: {
-				code: result.js.code,
-				map: result.js.map,
-			},
-			css: {
-				code: result.css.code,
-				map: result.css.map,
-			},
-			metadata: {
-				reactiveExports: result.metadata.reactiveExports,
-				reactiveCalls: result.metadata.reactiveCalls,
-				importSpecifiers: result.metadata.importSpecifiers,
-			},
-			ast: result.ast,
-			imports: [...record.resolvedTargets.values()].filter((t): t is string => t !== null),
-		};
-		record.output = output;
-		record.importSpecifiers = result.metadata.importSpecifiers;
-		changed.push(id);
+		// Cached import specifiers (re-lexing avoided on resolution).
+		record.importSpecifiers = analysis.importSpecifiers;
 
 		// Reactive exports: publish, and recompile importers on change.
 		const exportsChanged =
-			JSON.stringify(this.reactiveExports.get(id) ?? []) !== JSON.stringify(result.metadata.reactiveExports);
-		this.reactiveExports.set(id, result.metadata.reactiveExports);
+			JSON.stringify(this.reactiveExports.get(id) ?? []) !== JSON.stringify(analysis.reactiveExports);
+		this.reactiveExports.set(id, analysis.reactiveExports);
 		if (exportsChanged) {
 			for (const caller of this.reverseImports.get(id) ?? []) this.enqueue(caller);
 		}
@@ -458,7 +525,7 @@ export class ProjectCompiler {
 		const affectedTargets = new Set<string>();
 		if (previous) for (const target of previous.keys()) affectedTargets.add(target);
 		const newContribs = new Map<string, Record<string, number[]>>();
-		for (const [specifier, fns] of Object.entries(result.metadata.reactiveCalls)) {
+		for (const [specifier, fns] of Object.entries(analysis.reactiveCalls)) {
 			const target = record.resolvedTargets.get(specifier) ?? null;
 			if (target === null) continue;
 			newContribs.set(target, fns);

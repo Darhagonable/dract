@@ -2,12 +2,21 @@
  * DarTsx Compiler
  *
  * Pipeline: preprocess → oxc-transform (strip TS) → parse (OXC) → analyze → transform
+ *
+ * The pipeline is split into two entry points so the ProjectCompiler can
+ * stabilize the cross-file graph on analysis metadata ALONE and only then run
+ * code generation:
+ *
+ *   analyzeSource(source, options) → CompileAnalysis   (parse + analyze)
+ *   generateOutput(analysis, css)  → CompileResult     (transform + print)
+ *
+ * `compile()` is the convenience single-pass form of both.
  */
-import { preprocess } from './phases/1-preprocess';
+import { preprocess, type PreprocessResult } from './phases/1-preprocess';
 import { parse } from './phases/2-parse';
-import { analyze } from './phases/3-analyze';
+import { analyze as analyzeAst, type AnalysisResult } from './phases/3-analyze';
 import { transform } from './phases/4-transform';
-import { transformSync as oxcTransformSync } from 'oxc-transform';
+import { transformSync as oxcTransformSync, type SourceMap as OxcSourceMap } from 'oxc-transform';
 import remapping, { type SourceMap } from '@jridgewell/remapping';
 import { ProjectCompiler, type ModuleOutput, type ProjectCompilerOptions, type ProjectUpdate } from './project';
 
@@ -68,9 +77,40 @@ export interface CompileOptions {
 }
 
 /**
- * Compile a DarTsx source file into JavaScript.
+ * A module that has been parsed and analyzed but not yet generated — the
+ * unit the project layer reconciles its graph on. Code generation (`generate`)
+ * is deliberately deferred: the graph only consumes the metadata fields, so
+ * the project can decide which modules truly need new output before paying for
+ * the zimmerframe walk + esrap print.
  */
-export function compile(source: string, options: CompileOptions = {}): CompileResult {
+export interface CompileAnalysis {
+	/** Filename (used for error messages, source maps, CSS scoping). */
+	filename: string;
+	/** Original source text. */
+	source: string;
+	/** Analyzer result: AST, scope tree, binding metadata (codegen input). */
+	result: AnalysisResult;
+	/** Preprocessor result (component metadata, spans, source map). */
+	preprocessed: PreprocessResult;
+	/** OXC TS-strip source map — chained into codegen's remap (esrap → strip → preprocess). */
+	strippedMap: OxcSourceMap | null;
+	/** Reactive exports this module provides to its importers. */
+	reactiveExports: string[];
+	/**
+	 * Cross-file reactive function calls detected at call sites.
+	 * Maps import specifier → { exportedName → reactive param indices }.
+	 */
+	reactiveCalls: Record<string, Record<string, number[]>>;
+	/** Import specifiers found in this module. */
+	importSpecifiers: string[];
+}
+
+/**
+ * Phase 1 of the split pipeline: preprocess custom syntax, strip TypeScript,
+ * parse, and analyze — producing the metadata the project graph runs on and
+ * the analysis the transform walks. No code is generated.
+ */
+export function analyzeSource(source: string, options: CompileOptions = {}): CompileAnalysis {
 	const filename = options.filename || 'input.tsx';
 
 	// Phase 1: Pre-process custom syntax
@@ -90,7 +130,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 	}
 
 	// Phase 3: Analyze — walk AST, build scope tree + metadata
-	const analysis = analyze(
+	const result = analyzeAst(
 		parseResult.program,
 		stripped.code,
 		preprocessed,
@@ -98,13 +138,39 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 		options.reactiveCallImports,
 	);
 
-	// Phase 4: Transform — walk AST with zimmerframe, print with esrap
-	const result = transform(analysis, filename, options.css);
+	return {
+		filename,
+		source,
+		result,
+		preprocessed,
+		strippedMap: stripped.map ?? null,
+		reactiveExports: result.reactiveExports,
+		reactiveCalls: result.reactiveCalls,
+		importSpecifiers: result.importSpecifiers,
+	};
+}
+
+/**
+ * Phase 4 of the split pipeline: walk the analysis with zimmerframe, print with
+ * esrap, and chain the source maps. The analysis is consumed — its AST is
+ * rewritten in place.
+ */
+export function generateOutput(
+	analysis: CompileAnalysis,
+	css: 'injected' | 'external' = 'injected',
+): CompileResult {
+	const { filename } = analysis;
+
+	// Phase 4: Transform — walk AST with zimmerframe, print with esrap.
+	// The printed map is in stripped coordinates, so the remap chain runs
+	// [esrap map, oxc-strip map, preprocess map] to land on the authored
+	// source.
+	const result = transform(analysis.result, filename, css);
 
 	return {
 		js: {
 			code: result.code,
-			map: remapping([result.map, stripped.map, preprocessed.map], () => null),
+			map: remapping([result.map, analysis.strippedMap, analysis.preprocessed.map], () => null),
 		},
 		css: {
 			code: result.css,
@@ -117,4 +183,12 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 		},
 		ast: result.ast,
 	};
+}
+
+/**
+ * Compile a DarTsx source file into JavaScript — the single-pass convenience
+ * form of `analyzeSource` + `generateOutput`.
+ */
+export function compile(source: string, options: CompileOptions = {}): CompileResult {
+	return generateOutput(analyzeSource(source, options), options.css ?? 'injected');
 }

@@ -77,6 +77,13 @@ Incremental semantics:
 - A changed reactive export set recompiles every importer (with updated `reactiveImports`); a changed contribution recompiles the affected target (with updated `reactiveCallImports`).
 - A single update recompiles each (file, input-state) pair at most once — the worklist re-queues a file when its inputs changed under it, converging to a consistent graph in one call.
 
+Each update runs in **two phases**:
+
+1. **Analyze** — the worklist re-analyzes queued files (parse + metadata) against the current graph and reconciles it, propagating invalidation. No code is generated.
+2. **Generate** — with the queue drained, every analysis is final; each file whose output is missing or was produced under different inputs is transformed exactly once.
+
+Separating the phases means the graph's decisions run on cheap analysis metadata: a file whose inputs change twice inside one call is analyzed twice but generated once, and a file whose inputs round-trip back to a state it already generated output for is not regenerated at all.
+
 ### Vite Plugin Architecture
 
 The Vite plugin (`@dartsx/vite-plugin`) is now a thin adapter over the ProjectCompiler — it implements none of the language semantics itself:
