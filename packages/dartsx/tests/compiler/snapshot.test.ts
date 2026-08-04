@@ -2,7 +2,7 @@
  * Snapshot test runner for the DarTsx compiler.
  *
  * Each subdirectory under `samples/` is a test case containing one or more
- * `.ts`/`.tsx` source files. Every test is driven through the real Vite plugin
+ * `.ts`/`.tsx` source files. Every test is driven through the ProjectCompiler
  * with cross-module tracking. Outputs land in `_expected/<name>.js`.
  *
  * Run `UPDATE_SNAPSHOTS=true pnpm test` to regenerate `_expected/`.
@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'fs';
 import { join } from 'path';
-import dartsx, { type DarTsxTransformContext } from '@dartsx/vite-plugin';
+import { ProjectCompiler } from '../../src/compiler/index';
 
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;
@@ -47,40 +47,20 @@ function assertOutputs(dir: string, outputs: Map<string, string>) {
 	}
 }
 
-/** Drive the real Vite plugin across multiple files with cross-module tracking. */
-async function compileMultiFile(dir: string, files: string[]): Promise<Map<string, string>> {
-	const plugin = dartsx();
-	const filePaths = new Map(files.map(f => [f, join(dir, f)]));
-
-	const ctx: DarTsxTransformContext = {
-		async resolve(specifier: string) {
-			if (!specifier.startsWith('./')) return null;
-			const base = specifier.slice(2);
-			for (const [name, abs] of filePaths) {
-				if (base === name || base === name.replace(/\.[^.]+$/, '')) return { id: abs };
-			}
-			return null;
-		},
-		error(msg: string) { throw new Error(msg); },
-		environment: null,
-	};
-
-	const outputs = new Map<string, string>();
-
-	// Two passes: first builds the registry, second picks up cross-file info
-	for (let pass = 0; pass < 2; pass++) {
-		for (const filename of files) {
-			const abs = filePaths.get(filename)!;
-			const result = await plugin.transform.call(ctx, readFileSync(abs, 'utf-8'), abs);
-			if (result && typeof result === 'object' && 'code' in result) {
-				outputs.set(filename.replace(/\.[^.]+$/, '.js'), result.code);
-			} else if (pass === 0) {
-				outputs.set(filename.replace(/\.[^.]+$/, '.js'), readFileSync(abs, 'utf-8'));
-			}
-		}
+/** Drive the ProjectCompiler across multiple files with cross-module tracking. */
+function compileMultiFile(dir: string, files: string[]): Map<string, string> {
+	const project = new ProjectCompiler();
+	for (const filename of files) {
+		project.addFile(filename, readFileSync(join(dir, filename), 'utf-8'));
 	}
+	const { outputs } = project.compileAll();
 
-	return outputs;
+	const result = new Map<string, string>();
+	for (const filename of files) {
+		const output = outputs[filename];
+		if (output) result.set(filename.replace(/\.[^.]+$/, '.js'), output.js.code);
+	}
+	return result;
 }
 
 describe('compiler snapshots', () => {
@@ -91,8 +71,8 @@ describe('compiler snapshots', () => {
 			.sort();
 		if (files.length === 0) continue;
 
-		it(name, async () => {
-			const outputs = await compileMultiFile(dir, files);
+		it(name, () => {
+			const outputs = compileMultiFile(dir, files);
 			assertOutputs(dir, outputs);
 		});
 	}

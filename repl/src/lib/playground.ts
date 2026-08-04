@@ -1,11 +1,11 @@
-// Playground engine — compiles TSRX/TS/TSX in the browser with the REAL
-// `dartsx` compiler (pure JS/WASM: oxc-parser + oxc-transform wasm bindings +
-// esrap printer, no Node APIs) and executes the compiled module graph for the
-// live preview.
+// Playground engine — compiles and executes TSRX/TS/TSX in the browser.
 //
-// Execution model: compilation happens here (pure parsing, no authority), but
-// the compiled modules EXECUTE inside a sandboxed iframe with an opaque origin
-// (see playground-sandbox.ts) — never in the website's own page. Hash-shared
+// Compilation now happens through the ProjectCompiler (see playground-modules.ts):
+// it owns the cross-file graph, so imported state stays a signal across module
+// boundaries, and it is pure JS/WASM (oxc-parser + oxc-transform wasm bindings
+// + esrap printer, no Node APIs). This module keeps the EXECUTION side: the
+// compiled modules RUN inside a sandboxed iframe with an opaque origin (see
+// playground-sandbox.ts) — never in the website's own page. Hash-shared
 // playground links carry arbitrary code, so the page it runs in must have no
 // same-origin storage, cookies, or DOM to steal. The parent fetches the dartsx
 // runtime chunk manifest (served by the playgroundRuntime() vite plugin) and
@@ -14,11 +14,6 @@
 // playground-modules.ts.
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { compile } from 'dartsx/compiler';
-import { preprocess } from 'dartsx/compiler/preprocess';
-import { parseSync } from 'oxc-parser';
-import type { MappedRange } from './playground-mapping.ts';
-import { mappingFromSourceMap } from './playground-mapping.ts';
 import {
 	sandboxSrcdoc,
 	RUNTIME_MANIFEST_PATH,
@@ -33,118 +28,6 @@ export type PlaygroundRuntimeTarget = 'client' | 'server';
 // targets are kept so future emits (a server renderer, .d.ts output) land in
 // the same pane.
 export type PlaygroundOutputTarget = PlaygroundRuntimeTarget | 'types' | 'source';
-
-export interface CompileSuccess {
-	ok: true;
-	code: string;
-	/** The compile's final source map — output positions → authored source. */
-	map: { mappings: string | unknown[][] };
-	/** The compiled program, parsed back out of `code` for the AST pane. */
-	ast: unknown;
-	/** The authored program parsed directly (the "Parsed" target's AST). */
-	sourceAst: unknown;
-	/** Authored spans of `sourceAst`, for the mapping's verbatim passes. */
-	ranges: MappedRange[];
-	/** DarTsx currently emits no diagnostics — kept for the future pipeline. */
-	warnings: [];
-}
-
-export interface CompileFailure {
-	ok: false;
-	error: string;
-}
-
-const parseProgram = (code: string): unknown => {
-	try {
-		return parseSync('x.tsx', code, { sourceType: 'module', lang: 'tsx' }).program;
-	} catch {
-		return null;
-	}
-};
-
-/**
- * Compile one playground file for the client runtime. Never throws. The
- * filename is the virtual file's real name (e.g. `store.ts`) so diagnostics
- * and source maps reference it.
- */
-export function compilePlayground(source: string, filename: string): CompileSuccess | CompileFailure {
-	try {
-		const out = compile(source, {
-			filename,
-			// Injected styles reach the sandbox the same way as before: the
-			// compiled module calls $.style() and the sandbox CSP allows inline
-			// style tags.
-			css: 'injected',
-		});
-		// oxc cannot parse DarTsx shorthand (`component`, `state`, `render`), so
-		// the authored AST comes from the PREPROCESSED form (valid TSX), with
-		// every span retargeted through the preprocess map into ORIGINAL source
-		// offsets — the space the compiled pane and its mappings work in.
-		const prepared = preprocess(source, { filename });
-		const sourceAst = parseProgram(prepared.code);
-		const ranges = retargetSpans(sourceAst, source, prepared.code, prepared.map);
-		return {
-			ok: true,
-			code: out.js.code,
-			map: out.js.map,
-			ast: out.ast,
-			sourceAst,
-			ranges,
-			warnings: [],
-		};
-	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-/**
- * Rewrite every span of a preprocessed AST into original source offsets. The
- * preprocess map runs generated (preprocessed) → original, so each span end is
- * looked up through the segment containing it — segment-accurate, never
- * guessed. Returns the same spans, for the mapping's verbatim passes. When the
- * preprocess was a no-op (plain TSX, no map segments), the spans are already
- * in original offsets — collected unchanged.
- */
-function retargetSpans(
-	value: unknown,
-	source: string,
-	preprocessed: string,
-	map: { mappings: string | unknown[][] } | null,
-): MappedRange[] {
-	const ranges: MappedRange[] = [];
-	if (!value) return ranges;
-	const mapping = preprocessed === source ? null : mappingFromSourceMap(source, preprocessed, map, { ranges: [] });
-	if (preprocessed !== source && !mapping) return ranges;
-	const seen = new WeakSet<object>();
-	const visit = (current: unknown) => {
-		if (!current || typeof current !== 'object' || seen.has(current)) return;
-		seen.add(current);
-		const record = current as Record<string, unknown>;
-		const from = record.start;
-		const to = record.end;
-		if (typeof from === 'number' && typeof to === 'number' && from < to) {
-			if (!mapping) {
-				ranges.push({ from, to });
-			} else {
-				const fromPair = mapping.pairFromGenerated(from);
-				const toPair = mapping.pairFromGenerated(Math.max(from, to - 1));
-				const a = fromPair?.source[0];
-				const b = toPair?.source[0];
-				if (a && b) {
-					record.start = a.from;
-					record.end = b.to;
-					if (a.from < b.to) ranges.push({ from: a.from, to: b.to });
-				}
-			}
-		}
-		for (const key in record) {
-			if (key === 'loc') continue;
-			visit(record[key]);
-		}
-	};
-	visit(value);
-	return ranges;
-}
 
 // ── Sandboxed execution ─────────────────────────────────────────────────────
 

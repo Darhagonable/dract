@@ -1,8 +1,15 @@
 // Turns the playground's virtual files into the module graph the sandbox
-// executes: compiles each file (dartsx compiler for `.tsx`/`.ts`, sucrase's
+// executes: compiles each file (the ProjectCompiler for `.tsx`/`.ts`, sucrase's
 // react-jsx transform for `.react.tsx` React-host files), rewrites import
 // specifiers with es-module-lexer's exact offsets, and topo-sorts the sibling
 // graph so modules arrive at the sandbox dependencies-first.
+//
+// The ProjectCompiler instance lives at module scope: it OWNS the cross-file
+// graph (reactive exports, call contributions, incremental invalidation), so
+// the preview — unlike a per-file compile — gets genuinely reactive imported
+// state, and each edit recompiles exactly what it invalidates. It is pure
+// JS/WASM (oxc-parser + oxc-transform wasm bindings + esrap printer, no Node
+// APIs), so it runs in the browser exactly as it does in the Vite plugin.
 //
 // Specifier policy (the parent-side half of the sandbox security boundary —
 // see playground-sandbox.ts for the CSP that backs it):
@@ -18,7 +25,7 @@
 //                         import map pins bindings to the runtime singleton
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { compilePlayground } from './playground.ts';
+import { ProjectCompiler, type ModuleOutput } from 'dartsx/compiler';
 import { moduleToken } from './playground-sandbox.ts';
 
 export interface PlaygroundFile {
@@ -41,6 +48,58 @@ export interface ModuleGraphFailure {
 	error: string;
 }
 
+// ── Project compiler ───────────────────────────────────────────────────────
+// The ProjectCompiler is the single source of truth for every `.tsx`/`.ts`
+// file: it recompiles incrementally (an edit invalidates exactly the files
+// whose inputs it changes) and hands each module's output — code, source map,
+// metadata, and the printed program for the AST pane — to both the graph
+// builder and the pane.
+const project = new ProjectCompiler({
+	css: 'injected',
+});
+/** Latest output map, keyed by file name (kept from the last successful call). */
+let outputs: Record<string, ModuleOutput> = {};
+/** File names the project knows about, for removeFile diffs. */
+const projectFiles = new Set<string>();
+/** Last compile error per file — `updateFile` throws; errors surface per file. */
+const compileErrors = new Map<string, string>();
+
+/** Bring the project up to date with the workspace's `.tsx`/`.ts` files. */
+function ensureCompiled(files: PlaygroundFile[]): void {
+	for (const name of projectFiles) {
+		if (files.some((f) => f.name === name)) continue;
+		project.removeFile(name);
+		projectFiles.delete(name);
+		compileErrors.delete(name);
+		const next = { ...outputs };
+		delete next[name];
+		outputs = next;
+	}
+	for (const file of files) {
+		if (isReactHostFile(file.name)) continue;
+		projectFiles.add(file.name);
+		try {
+			outputs = project.updateFile(file.name, file.source).outputs;
+			compileErrors.delete(file.name);
+		} catch (error) {
+			const next = { ...outputs };
+			delete next[file.name];
+			outputs = next;
+			compileErrors.set(file.name, error instanceof Error ? error.message : String(error));
+		}
+	}
+}
+
+/** The project's output for one file, or null when it has none (never compiles). */
+export function getModuleOutput(name: string): ModuleOutput | null {
+	return outputs[name] ?? null;
+}
+
+/** The last compile error for one file, or null when it compiled or was never tried. */
+export function compileError(name: string): string | null {
+	return compileErrors.get(name) ?? null;
+}
+
 /** Import specifiers the sandbox import map resolves — leave them bare. */
 const IMPORT_MAP_SPECIFIERS = new Set([
 	'dartsx',
@@ -61,51 +120,46 @@ export function isReactHostFile(name: string): boolean {
 
 const SIBLING_EXTENSIONS = ['', '.tsx', '.react.tsx', '.ts'];
 
-// Compilation is re-run on every debounced keystroke; memoize per (name,
-// source) so only the edited file recompiles.
-const compileCache = new Map<string, { source: string; result: CachedCompile }>();
+// React-host files bypass the ProjectCompiler: sucrase strips types and
+// applies the automatic react-jsx transform (no type-checking — this is a
+// demo surface, not a toolchain). Memoized per (name, source) since it has no
+// incremental layer of its own.
+const sucraseCache = new Map<string, { source: string; result: CachedCompile }>();
 type CachedCompile = { ok: true; code: string; warnings: never[] } | { ok: false; error: string };
 
-async function compileFile(file: PlaygroundFile): Promise<CachedCompile> {
-	const cached = compileCache.get(file.name);
+async function compileReactHostFile(file: PlaygroundFile): Promise<CachedCompile> {
+	const cached = sucraseCache.get(file.name);
 	if (cached && cached.source === file.source) return cached.result;
 	let result: CachedCompile;
-	if (isReactHostFile(file.name)) {
-		// React-host files bypass the dartsx compiler: sucrase strips types and
-		// applies the automatic react-jsx transform (no type-checking — this is
-		// a demo surface, not a toolchain).
-		try {
-			const { transform } = await import('sucrase');
-			const out = transform(file.source, {
-				transforms: ['typescript', 'jsx'],
-				jsxRuntime: 'automatic',
-				jsxImportSource: 'react',
-				production: true,
-			});
-			result = { ok: true, code: out.code, warnings: [] };
-		} catch (error) {
-			result = {
-				ok: false,
-				error: `${file.name}: ${error instanceof Error ? error.message : String(error)}`,
-			};
-		}
-	} else {
-		result = compilePlayground(file.source, file.name);
+	try {
+		const { transform } = await import('sucrase');
+		const out = transform(file.source, {
+			transforms: ['typescript', 'jsx'],
+			jsxRuntime: 'automatic',
+			jsxImportSource: 'react',
+			production: true,
+		});
+		result = { ok: true, code: out.code, warnings: [] };
+	} catch (error) {
+		result = {
+			ok: false,
+			error: `${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+		};
 	}
-	compileCache.set(file.name, { source: file.source, result });
+	sucraseCache.set(file.name, { source: file.source, result });
 	return result;
 }
 
 /**
- * The memoized compile for one file, if the graph already produced it for this
- * exact source. The compiled-output pane uses it to show `.react.tsx` files —
- * the octane compiler cannot compile them at all (they are Sucrase's), and
- * recompiling them a second time just for the pane would duplicate the work
- * `buildModuleGraph` has already done. Never compiles; a miss means the next
- * graph build fills it.
+ * The memoized compile for one React-host file, if the graph already produced
+ * it for this exact source. The compiled-output pane uses it to show
+ * `.react.tsx` files — the ProjectCompiler cannot compile them at all (they
+ * are Sucrase's), and recompiling them a second time just for the pane would
+ * duplicate the work `buildModuleGraph` has already done. Never compiles; a
+ * miss means the next graph build fills it.
  */
 export function peekCompiledFile(file: PlaygroundFile): CachedCompile | null {
-	const cached = compileCache.get(file.name);
+	const cached = sucraseCache.get(file.name);
 	return cached && cached.source === file.source ? cached.result : null;
 }
 
@@ -116,6 +170,72 @@ function resolveSibling(specifier: string, names: Set<string>): string | null {
 		if (names.has(base + ext)) return base + ext;
 	}
 	return null;
+}
+
+/** Rewrite one compiled module's specifiers and record its sibling deps. */
+function rewriteAndRecord(
+	name: string,
+	code: string,
+	names: Set<string>,
+	rewritten: Map<string, string>,
+	siblingDeps: Map<string, string[]>,
+	parse: typeof import('es-module-lexer').parse,
+): void {
+	let imports;
+	try {
+		[imports] = parse(code, name);
+	} catch (error) {
+		throw new Error(
+			`${name}: could not parse compiled output for imports (${
+				error instanceof Error ? error.message : String(error)
+			})`,
+		);
+	}
+
+	// Rewrite specifiers back-to-front so earlier offsets stay valid.
+	const deps: string[] = [];
+	for (let i = imports.length - 1; i >= 0; i--) {
+		const record = imports[i];
+		// `n` is the decoded specifier for static and simple dynamic imports;
+		// undefined for computed dynamic imports like import(someVar) — those
+		// resolve at runtime where the sandbox CSP is the backstop.
+		const specifier = record.n;
+		if (specifier === undefined || record.s < 0) continue;
+		// Static import spans exclude the quotes; dynamic import spans (d > -1)
+		// include them — requote when splicing a dynamic specifier.
+		const dynamic = record.d > -1;
+		const replaceWith = (value: string) => {
+			const spliced = dynamic ? JSON.stringify(value) : value;
+			code = code.slice(0, record.s) + spliced + code.slice(record.e);
+		};
+
+		if (specifier.startsWith('./')) {
+			const resolved = resolveSibling(specifier, names);
+			if (!resolved) {
+				throw new Error(`${name}: "${specifier}" does not match any playground file.`);
+			}
+			if (!deps.includes(resolved)) deps.push(resolved);
+			replaceWith(moduleToken(resolved));
+		} else if (specifier.startsWith('../') || specifier.startsWith('/')) {
+			throw new Error(`${name}: "${specifier}" — only sibling "./File" imports are supported.`);
+		} else if (IMPORT_MAP_SPECIFIERS.has(specifier)) {
+			// Left bare — the sandbox import map owns these.
+		} else if (specifier.startsWith('dartsx/')) {
+			throw new Error(
+				`${name}: "${specifier}" is not available in the playground (only "dartsx" and its runtime subpaths are).`,
+			);
+		} else if (specifier.startsWith('https://esm.sh/')) {
+			// Already an esm.sh URL — allowed verbatim.
+		} else if (/^(https?:)?\/\//.test(specifier) || specifier.includes(':')) {
+			throw new Error(
+				`${name}: "${specifier}" — only https://esm.sh/ URLs are supported for URL imports.`,
+			);
+		} else {
+			replaceWith(`https://esm.sh/${specifier}?external=dartsx`);
+		}
+	}
+	rewritten.set(name, code);
+	siblingDeps.set(name, deps);
 }
 
 /**
@@ -134,6 +254,8 @@ export async function buildModuleGraph(
 		return { ok: false, error: 'Playground file names must be unique.' };
 	}
 
+	ensureCompiled(files);
+
 	const { init, parse } = await import('es-module-lexer');
 	await init;
 
@@ -142,75 +264,25 @@ export async function buildModuleGraph(
 	const warnings: ModuleGraph['warnings'] = [];
 
 	for (const file of files) {
-		const out = await compileFile(file);
-		if (!out.ok) return { ok: false, error: out.error };
-		for (const diagnostic of out.warnings) warnings.push({ file: file.name, diagnostic });
-
-		let imports;
 		try {
-			[imports] = parse(out.code, file.name);
-		} catch (error) {
-			return {
-				ok: false,
-				error: `${file.name}: could not parse compiled output for imports (${
-					error instanceof Error ? error.message : String(error)
-				})`,
-			};
-		}
-
-		// Rewrite specifiers back-to-front so earlier offsets stay valid.
-		let code = out.code;
-		const deps: string[] = [];
-		for (let i = imports.length - 1; i >= 0; i--) {
-			const record = imports[i];
-			// `n` is the decoded specifier for static and simple dynamic imports;
-			// undefined for computed dynamic imports like import(someVar) — those
-			// resolve at runtime where the sandbox CSP is the backstop.
-			const specifier = record.n;
-			if (specifier === undefined || record.s < 0) continue;
-			// Static import spans exclude the quotes; dynamic import spans (d > -1)
-			// include them — requote when splicing a dynamic specifier.
-			const dynamic = record.d > -1;
-			const replaceWith = (value: string) => {
-				const spliced = dynamic ? JSON.stringify(value) : value;
-				code = code.slice(0, record.s) + spliced + code.slice(record.e);
-			};
-
-			if (specifier.startsWith('./')) {
-				const resolved = resolveSibling(specifier, names);
-				if (!resolved) {
-					return {
-						ok: false,
-						error: `${file.name}: "${specifier}" does not match any playground file.`,
-					};
-				}
-				if (!deps.includes(resolved)) deps.push(resolved);
-				replaceWith(moduleToken(resolved));
-			} else if (specifier.startsWith('../') || specifier.startsWith('/')) {
-				return {
-					ok: false,
-					error: `${file.name}: "${specifier}" — only sibling "./File" imports are supported.`,
-				};
-			} else if (IMPORT_MAP_SPECIFIERS.has(specifier)) {
-				// Left bare — the sandbox import map owns these.
-			} else if (specifier.startsWith('dartsx/')) {
-				return {
-					ok: false,
-					error: `${file.name}: "${specifier}" is not available in the playground (only "dartsx" and its runtime subpaths are).`,
-				};
-			} else if (specifier.startsWith('https://esm.sh/')) {
-				// Already an esm.sh URL — allowed verbatim.
-			} else if (/^(https?:)?\/\//.test(specifier) || specifier.includes(':')) {
-				return {
-					ok: false,
-					error: `${file.name}: "${specifier}" — only https://esm.sh/ URLs are supported for URL imports.`,
-				};
-			} else {
-				replaceWith(`https://esm.sh/${specifier}?external=dartsx`);
+			if (isReactHostFile(file.name)) {
+				const out = await compileReactHostFile(file);
+				if (!out.ok) return { ok: false, error: out.error };
+				for (const diagnostic of out.warnings) warnings.push({ file: file.name, diagnostic });
+				rewriteAndRecord(file.name, out.code, names, rewritten, siblingDeps, parse);
+				continue;
 			}
+			const output = getModuleOutput(file.name);
+			if (!output) {
+				return {
+					ok: false,
+					error: compileError(file.name) ?? `${file.name}: compilation failed.`,
+				};
+			}
+			rewriteAndRecord(file.name, output.js.code, names, rewritten, siblingDeps, parse);
+		} catch (error) {
+			return { ok: false, error: error instanceof Error ? error.message : String(error) };
 		}
-		rewritten.set(file.name, code);
-		siblingDeps.set(file.name, deps);
 	}
 
 	// Topo-sort the sibling graph (DFS from the entry; unreferenced files are

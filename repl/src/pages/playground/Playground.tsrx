@@ -373,8 +373,10 @@ export function Playground() @{
 			};
 
 			// One compile per (file, target) feeds the compiled pane. The preview's
-			// module graph compiles WITHOUT per-file inspection, so a session that
-			// never opens this pane pays nothing for it.
+			// module graph compiles through the same ProjectCompiler (see
+			// playground-modules.ts), so the pane shows the exact artifacts the
+			// preview runs — no second compile, and cross-file reactivity is
+			// visible in the emitted code.
 			type CodeEntry = {
 				source: string;
 				code: string;
@@ -426,23 +428,24 @@ export function Playground() @{
 								error: null,
 							};
 				} else {
-					const result = pg.compilePlayground(source, name);
-					entry = result.ok
+					const output = pgModules.getModuleOutput(name);
+					const error = pgModules.compileError(name);
+					entry = output
 						? {
 								source,
-								code: result.code,
-								asts: [result.sourceAst, result.ast],
-								ranges: result.ranges,
-								map: result.map,
+								code: output.js.code,
+								asts: [null, output.ast],
+								ranges: [],
+								map: output.js.map,
 								error: null,
 							}
 						: {
 								source,
-								code: '// Compilation failed:\n// ' + result.error,
+								code: '// Compilation failed:\n// ' + (error ?? 'unknown error'),
 								asts: [null, null],
 								ranges: [],
 								map: null,
-								error: result.error,
+								error,
 							};
 				}
 				runtimeCache.set(name, entry);

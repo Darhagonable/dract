@@ -69,7 +69,7 @@ export interface TransformResult {
 	code: string;
 	map: ReturnType<typeof print>['map'];
 	css: string;
-	/** The exact program that was printed as the emitted module. */
+	/** The exact program that was printed (the emitted module's AST). */
 	ast: AstNode;
 }
 
