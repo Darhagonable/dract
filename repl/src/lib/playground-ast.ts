@@ -168,32 +168,6 @@ export function preparePlaygroundAst(value: unknown): PreparedPlaygroundAst {
 }
 
 /**
- * Collect every authored range the tree carries, without building the display
- * tree — the position-mapping passes need the ranges alone (see
- * playground-mapping.ts).
- */
-export function collectAuthoredRanges(value: unknown): AstRange[] {
-	const ranges: AstRange[] = [];
-	const seen = new WeakSet<object>();
-	const visit = (current: unknown) => {
-		if (!current || typeof current !== 'object' || seen.has(current)) return;
-		seen.add(current);
-		const record = current as Record<string, unknown>;
-		const from = record.start;
-		const to = record.end;
-		if (typeof from === 'number' && typeof to === 'number' && from < to) {
-			ranges.push({ from, to });
-		}
-		for (const key in record) {
-			if (key === 'metadata' || key === 'loc') continue;
-			visit(record[key]);
-		}
-	};
-	visit(value);
-	return ranges;
-}
-
-/**
  * Select the narrowest AST node whose half-open range contains `offset`.
  * Ties go to the deeper node, so a zero-width-difference wrapper never hides
  * the node it wraps.

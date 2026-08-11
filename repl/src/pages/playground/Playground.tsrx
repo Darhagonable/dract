@@ -33,7 +33,7 @@
 // the default sources auto-run as before.
 import { useState, useRef, useEffect } from 'octane';
 import type { PlaygroundOutputTarget } from '../../lib/playground.ts';
-import type { CodeMapping, MappedRange } from '../../lib/playground-mapping.ts';
+import type { CodeMapping } from '../../lib/playground-mapping.ts';
 import {
 	decodePlaygroundHash,
 	encodePlaygroundHash,
@@ -382,8 +382,6 @@ export function Playground() @{
 				code: string;
 				/** Parsed ASTs for the AST pane: [authored source, compiled output]. */
 				asts: [unknown, unknown];
-				/** Authored ranges of the source AST — the mapping's verbatim passes. */
-				ranges: MappedRange[];
 				/** The compile's source map (output → authored) for code mappings. */
 				map: { mappings: string | unknown[][] } | null;
 				/** Lazy per-target mapping (see buildMapping). */
@@ -407,26 +405,24 @@ export function Playground() @{
 					const compiled = pgModules.peekCompiledFile({ name, source });
 					entry = compiled
 						? compiled.ok
-							? { source, code: compiled.code, asts: [null, null], ranges: [], map: null, error: null }
-							: {
-									source,
-									code: '// Compiled output failed:\n// ' + compiled.error,
-									asts: [null, null],
-									ranges: [],
-									map: null,
-									error: compiled.error,
-								}
-						// A missed cache hit here means the graph hasn't compiled
-						// since the file was edited — but the placeholder cannot
-						// outlive the compile that replaces it.
+						? { source, code: compiled.code, asts: [null, null], map: null, error: null }
 						: {
 								source,
-								code: '// Compiled output appears after the next compile.',
+								code: '// Compiled output failed:\n// ' + compiled.error,
 								asts: [null, null],
-								ranges: [],
 								map: null,
-								error: null,
-							};
+								error: compiled.error,
+							}
+					// A missed cache hit here means the graph hasn't compiled
+					// since the file was edited — but the placeholder cannot
+					// outlive the compile that replaces it.
+					: {
+							source,
+							code: '// Compiled output appears after the next compile.',
+							asts: [null, null],
+							map: null,
+							error: null,
+						};
 				} else {
 					const output = pgModules.getModuleOutput(name);
 					const error = pgModules.compileError(name);
@@ -435,7 +431,6 @@ export function Playground() @{
 								source,
 								code: output.js.code,
 								asts: [null, output.ast],
-								ranges: [],
 								map: output.js.map,
 								error: null,
 							}
@@ -443,7 +438,6 @@ export function Playground() @{
 								source,
 								code: '// Compilation failed:\n// ' + (error ?? 'unknown error'),
 								asts: [null, null],
-								ranges: [],
 								map: null,
 								error,
 							};
@@ -460,7 +454,6 @@ export function Playground() @{
 				source: '',
 				code,
 				asts: [null, null],
-				ranges: [],
 				map: null,
 				error: null,
 			});
@@ -527,9 +520,7 @@ export function Playground() @{
 			const buildMapping = (entry: CodeEntry, target: PlaygroundOutputTarget) => {
 				if (target === 'source') return pgMapping.identityMapping(entry.code.length);
 				if (target !== 'client' || !entry.map) return null;
-				return pgMapping.mappingFromSourceMap(entry.source, entry.code, entry.map, {
-					ranges: entry.ranges,
-				});
+				return pgMapping.mappingFromSourceMap(entry.source, entry.code, entry.map);
 			};
 			const activeMapping = () => {
 				if (
@@ -717,7 +708,6 @@ export function Playground() @{
 							source,
 							code: source,
 							asts: [null, null],
-							ranges: [],
 							map: null,
 							error: null,
 						};

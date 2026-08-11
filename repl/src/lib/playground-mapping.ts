@@ -22,10 +22,17 @@
 // A match returns EVERY range mapped from the selected source range because
 // one expression can appear in several output locations.
 //
-// Forwards (source→generated) only pairs that are true by construction
-// answer: a generated token whose text REPRODUCES the authored text, or a
-// range the verbatim passes verified as a unique exact text match. Everything
-// else answers only backwards, so a highlight, when shown, is always right.
+// Forwards (source→generated) answer from every segment whose authored range
+// does not strictly contain another segment's (the leaf rule), plus those
+// that reproduce their authored text. The compiler records a segment per node
+// it prints — dense maps — so a hover lands on the node's own image: hovering
+// `div` in the source selects the `"div"` literal of the lowered `$.jsx(...)`
+// call. JSX attributes are the exception: the strip map chained into the
+// compiler's remap has codegen-node granularity there, so an attribute's
+// value and its expression collapse into one segment and hover selects the
+// whole attribute. Segments covering a whole construct (a full declaration
+// the printer could attribute no more precisely) still answer, but only
+// where no finer segment exists.
 //
 // Pure string/offset math — no CodeMirror or DOM imports, so tests can run
 // it directly and the editor wiring stays in the page component.
@@ -54,12 +61,6 @@ interface Segment {
 	gen: number;
 	srcLen: number;
 	genLen: number;
-	/**
-	 * Is this pair an EXACT correspondence (a verified text match or a
-	 * compiler-asserted one), rather than an attribution inferred from a
-	 * source-map position? See `createMapping`.
-	 */
-	exact: boolean;
 }
 
 /**
@@ -113,26 +114,20 @@ interface MappingTexts {
  * comes back carrying that WHOLE declaration's range. Answering from those
  * would light up everything the declaration emitted — `const`, the parameter
  * list, the hoisted stylesheet a `<style>` block became — for a hover anywhere
- * inside it. Worse, a region with NO finer data inside it looks
- * indistinguishable from a real mapping, so no size or containment heuristic
- * separates them.
+ * inside it.
  *
- * So the forward index takes only pairs that are true by construction:
- *
- *   - `exact` segments — verified text matches from the verbatim passes, each
- *     a correspondence asserted rather than inferred;
- *   - fat segments whose generated text REPRODUCES the authored text, which is
- *     verifiable here and is what an identifier, a literal or a preserved
- *     expression looks like.
- *
- * Everything else answers only backwards. The cost is silence where the
- * compiler has no origin data (synthesized lowerings); the benefit is that a
- * highlight, when shown, is always right.
+ * So the forward index drops every segment that strictly contains another
+ * segment's authored range (the inner one is a finer answer, and the
+ * narrowest-containing query would pick it anyway), keeping the rest —
+ * including segments that reproduce their authored text, which is verifiable
+ * here and is what an identifier, a literal or a preserved expression looks
+ * like. With the compiler's dense maps, most segments are leaves: hovering a
+ * source token lights its own image in the output — except inside JSX
+ * attributes, where the chained strip map's coarser segments win.
  */
 function createMapping(
 	segments: Segment[],
 	texts: MappingTexts | null,
-	reprint = false,
 ): CodeMapping | null {
 	if (segments.length === 0) return null;
 	const reproduces = (segment: Segment): boolean =>
@@ -145,26 +140,12 @@ function createMapping(
 	// A compiled EMIT is a different program from the source, so a segment the
 	// printer could not place precisely carries its whole enclosing
 	// declaration, and answering from those scatters marks across unrelated
-	// tokens. Only pairs true by construction qualify: compiler-asserted ones
-	// (the verbatim passes), or ones whose generated text reproduces the
-	// authored text.
-	//
-	// A REPRINT is the same program printed again, so a segment's authored end
-	// is a real node range and its generated span is that node's own image even
-	// when the two differ in length. Those must answer, or attribute values
-	// stop resolving. The one thing that still cannot is a segment covering a
-	// whole CONSTRUCT, which would otherwise win at every position no finer
-	// segment covers and highlight the entire component. A segment containing
-	// another's source range is exactly that, unless it reproduces its authored
-	// text (a preserved expression, which legitimately answers for the
-	// punctuation inside it).
-	const leafOrReproducing = reprint ? notContainingAnother(segments, reproduces) : null;
+	// tokens. A segment containing another's source range is exactly that,
+	// unless it reproduces its authored text (a preserved expression, which
+	// legitimately answers for the punctuation inside it).
+	const leafOrReproducing = notContainingAnother(segments, reproduces);
 	const bySrc = segments
-		.filter((segment) =>
-			leafOrReproducing === null
-				? segment.exact || reproduces(segment)
-				: segment.exact || leafOrReproducing.has(segment),
-		)
+		.filter((segment) => leafOrReproducing.has(segment))
 		.sort((a, b) => a.src - b.src || a.gen - b.gen);
 	const byGen = [...segments].sort((a, b) => a.gen - b.gen || a.src - b.src);
 
@@ -291,21 +272,16 @@ function lineStartsOf(doc: string): number[] {
  * mapped all the way back to the authored `source` (not an intermediate
  * preprocessed document).
  *
- * `verbatim` may carry the authored source's OWN AST ranges (see
- * `playground-ast.ts` `collectAuthoredRanges`): synthesized lowerings and
- * rewritten JSX produce no map segments of their own, and their output text
- * lands inside a neighbour segment's span, so the segment pairs alone would
- * leave identifiers, literals and JSX text unmapped in the forward direction.
- * The verbatim passes rescue them by verified text matches — a range inside a
- * segment's authored span whose text appears once in that segment's generated
- * span, or (globally) exactly once in the whole document. A wrong highlight is
- * never invented: only unique, in-window matches qualify.
+ * Synthesized lowerings and rewritten JSX produce no map segments of their
+ * own, so their output text lands inside a neighbour segment's span: those
+ * positions still answer backwards (their origin is the enclosing construct),
+ * and forwards the leaf rule keeps whole-construct segments silent when a
+ * finer segment covers the position.
  */
 export function mappingFromSourceMap(
 	source: string,
 	generated: string,
 	map: { mappings?: string | unknown[][] } | null | undefined,
-	verbatim?: { ranges: readonly MappedRange[] } | null,
 ): CodeMapping | null {
 	if (!map || typeof map.mappings !== 'string' || map.mappings.length === 0) return null;
 	let decoded: ReturnType<typeof decode>;
@@ -362,116 +338,11 @@ export function mappingFromSourceMap(
 				gen: genFrom,
 				srcLen: srcTo - srcStart,
 				genLen: genEnd - genFrom,
-				exact: false,
 			});
 		}
 	}
 	if (segments.length === 0) return null;
-	if (verbatim && verbatim.ranges.length > 0) {
-		appendWindowedVerbatimSegments(segments, source, generated, verbatim.ranges);
-		appendUniqueVerbatimSegments(segments, source, generated, verbatim.ranges);
-	}
-	return createMapping(segments, { source, generated }, false);
-}
-
-/**
- * Rescue authored ranges inside a segment's authored span: a range whose text
- * appears exactly once inside that segment's GENERATED span (which is the
- * printed text the printer attributed to the span) is a verified
- * correspondence, so it may answer source→generated lookups.
- *
- * `segments` is the freshly built list — this mutates it, and the spans are
- * scanned in order so each range is claimed by the FIRST segment whose
- * authored span contains it.
- */
-function appendWindowedVerbatimSegments(
-	segments: Segment[],
-	source: string,
-	generated: string,
-	ranges: readonly MappedRange[],
-): void {
-	const byFrom = [...ranges]
-		.filter((range: MappedRange) => range.to > range.from)
-		.sort((a: MappedRange, b: MappedRange) => a.from - b.from || a.to - b.to);
-	const mapped = new Set<string>();
-	for (const segment of segments) mapped.add(segment.src + ':' + segment.srcLen);
-
-	for (const segment of segments) {
-		const srcEnd = segment.src + segment.srcLen;
-		const genEnd = segment.gen + segment.genLen;
-		let lo = 0;
-		let hi = byFrom.length;
-		while (lo < hi) {
-			const mid = (lo + hi) >> 1;
-			if (byFrom[mid].from < segment.src) lo = mid + 1;
-			else hi = mid;
-		}
-		for (let i = lo; i < byFrom.length && byFrom[i].from < srcEnd; i++) {
-			const range = byFrom[i];
-			if (range.to > srcEnd) continue;
-			const key = range.from + ':' + (range.to - range.from);
-			if (mapped.has(key)) continue;
-			let from = range.from;
-			let to = Math.min(range.to, source.length);
-			// Whitespace-insensitive at the edges: a JSX text run's range
-			// includes the newline and indentation around it.
-			while (from < to && WHITESPACE.test(source[from])) from++;
-			while (to > from && WHITESPACE.test(source[to - 1])) to--;
-			if (to <= from) continue;
-			const content = source.slice(from, to);
-			let at = generated.indexOf(content, segment.gen);
-			if (at < 0 || at + content.length > genEnd) continue;
-			const again = generated.indexOf(content, at + 1);
-			if (again >= 0 && again + content.length <= genEnd) continue; // ambiguous
-			mapped.add(key);
-			segments.push({
-				src: from,
-				gen: at,
-				srcLen: to - from,
-				genLen: content.length,
-				exact: true,
-			});
-		}
-	}
-}
-
-/**
- * Rescue authored ranges NO segment covers — rewritten JSX text, attribute
- * names, whole exports — when their text appears EXACTLY ONCE in the whole
- * generated document. Uniqueness is the verification: a repeated token cannot
- * be placed, and one that appears once is, by construction, the generated
- * image of this authored range.
- */
-function appendUniqueVerbatimSegments(
-	segments: Segment[],
-	source: string,
-	generated: string,
-	ranges: readonly MappedRange[],
-): void {
-	const mapped = new Set<string>();
-	for (const segment of segments) mapped.add(segment.src + ':' + segment.srcLen);
-	for (const range of ranges) {
-		if (range.to <= range.from || range.to - range.from > 256) continue;
-		const key = range.from + ':' + (range.to - range.from);
-		if (mapped.has(key)) continue;
-		let from = range.from;
-		let to = Math.min(range.to, source.length);
-		while (from < to && WHITESPACE.test(source[from])) from++;
-		while (to > from && WHITESPACE.test(source[to - 1])) to--;
-		if (to <= from) continue;
-		const content = source.slice(from, to);
-		const at = generated.indexOf(content);
-		if (at < 0) continue;
-		if (generated.indexOf(content, at + 1) >= 0) continue; // ambiguous
-		mapped.add(key);
-		segments.push({
-			src: from,
-			gen: at,
-			srcLen: to - from,
-			genLen: content.length,
-			exact: true,
-		});
-	}
+	return createMapping(segments, { source, generated });
 }
 
 /** React-host TSX is already the compiled document, so its mapping is identity. */
