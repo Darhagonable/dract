@@ -149,7 +149,7 @@ b = 20; // already scheduled — just marks dirty
 
 ## The compiler pipeline
 
-The compiler transforms `.tsx` source files through three phases:
+The compiler transforms `.tsx` source files through four phases:
 
 ### Phase 1 — Preprocess
 
@@ -166,7 +166,11 @@ Converts custom keywords into valid TSX that OXC can parse:
 
 The preprocessor also records metadata: which names are state vars, which are derived vars, and which functions are components.
 
-### Phase 2 — Analyze
+### Phase 2 — Parse
+
+Parses the preprocessed TSX with OXC.
+
+### Phase 3 — Analyze
 
 Walks the OXC AST and produces an IR (Intermediate Representation) for each component and for the module as a whole. Key responsibilities:
 
@@ -175,7 +179,7 @@ Walks the OXC AST and produces an IR (Intermediate Representation) for each comp
 - **`reactiveCallTargets`**: Maps function names → sets of reactive parameter indices. This tells the transformer which call arguments must NOT be unwrapped with `$.get()` (because the callee expects a signal)
 - **`reactiveCalls`**: Records cross-file reactive call info (specifier → function → indices) so the Vite plugin can recompile target modules
 
-### Phase 3 — Transform
+### Phase 4 — Transform
 
 Generates the output JavaScript. Key transformations:
 

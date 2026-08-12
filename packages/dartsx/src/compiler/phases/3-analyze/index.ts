@@ -1,5 +1,5 @@
 /**
- * Phase 2 — Analyze
+ * Phase 3 — Analyze
  *
  * Walks the OXC AST (already parsed) and builds metadata for the transform:
  * - Scope tree (via create_scopes)
@@ -13,8 +13,8 @@
  * Does NOT build any JSX IR. The transform walks the OXC AST directly
  * with zimmerframe visitors.
  */
-import type { ComponentMeta, PreprocessResult } from '../../preprocess';
-import { STATE_MARKER, DERIVED_MARKER } from '../../preprocess';
+import type { ComponentMeta, PreprocessResult } from '../1-preprocess';
+import { STATE_MARKER, DERIVED_MARKER } from '../1-preprocess';
 import {
 	Scope,
 	ScopeRoot,

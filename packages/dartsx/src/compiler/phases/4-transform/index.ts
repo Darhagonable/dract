@@ -1,9 +1,9 @@
 /**
- * Phase 3 — Transform
+ * Phase 4 — Transform
  *
  * Walks the OXC AST with zimmerframe and replaces nodes to produce
  * the output JavaScript AST. Uses the scope tree and binding metadata
- * from Phase 2 to perform reactive transformations.
+ * from Phase 3 to perform reactive transformations.
  *
  * Key visitors:
  * - `_` (universal): scope threading
@@ -17,8 +17,8 @@
  * - `CallExpression`: __try/__html → $.try/$.html, IIFEs → $.if/$.for/etc.
  */
 import { walk, type Context } from 'zimmerframe';
-import type { AnalysisResult, ComponentInfo, StyleBlockIR } from '../2-analyze';
-import { STATE_MARKER, DERIVED_MARKER, STYLE_MARKER_PREFIX } from '../../preprocess';
+import type { AnalysisResult, ComponentInfo, StyleBlockIR } from '../3-analyze';
+import { STATE_MARKER, DERIVED_MARKER, STYLE_MARKER_PREFIX } from '../1-preprocess';
 import type { Scope } from '../../scope';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 import * as b from '../../builders';

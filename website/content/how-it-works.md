@@ -8,9 +8,9 @@ This page explains the compiler pipeline and runtime architecture.
 
 ## Compiler pipeline
 
-The compiler transforms `.tsx` files through three phases:
+The compiler transforms `.tsx` files through four phases:
 
-### Phase 1 — Parse
+### Phase 1 — Preprocess
 
 Custom keywords are converted to valid TypeScript so the parser (OXC) can process them:
 
@@ -21,7 +21,11 @@ Custom keywords are converted to valid TypeScript so the parser (OXC) can proces
 | `derived doubled = count * 2` | `const doubled = count * 2` |
 | `render (...)` | `return (<>...</>)` |
 
-### Phase 2 — Analyze
+### Phase 2 — Parse
+
+The preprocessed source is parsed with OXC into an AST.
+
+### Phase 3 — Analyze
 
 The AST is walked to build an intermediate representation:
 
@@ -29,7 +33,7 @@ The AST is walked to build an intermediate representation:
 - **Call-site analysis** — function calls like `fn(reactiveVar)` are detected. The parameter position is recorded as reactive
 - **Cross-file tracking** — reactive imports and exports are recorded for the Vite plugin
 
-### Phase 3 — Transform
+### Phase 4 — Transform
 
 The final JavaScript is generated:
 

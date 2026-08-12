@@ -3,10 +3,10 @@
  *
  * Pipeline: preprocess → oxc-transform (strip TS) → parse (OXC) → analyze → transform
  */
-import { preprocess } from './preprocess';
-import { parse } from './phases/1-parse';
-import { analyze } from './phases/2-analyze';
-import { transform } from './phases/3-transform';
+import { preprocess } from './phases/1-preprocess';
+import { parse } from './phases/2-parse';
+import { analyze } from './phases/3-analyze';
+import { transform } from './phases/4-transform';
 import { transformSync as oxcTransformSync } from 'oxc-transform';
 import remapping, { type SourceMap } from '@jridgewell/remapping';
 
@@ -56,7 +56,7 @@ export interface CompileOptions {
 export function compile(source: string, options: CompileOptions = {}): CompileResult {
 	const filename = options.filename || 'input.tsx';
 
-	// Phase 1: Pre-process custom syntax + parse with OXC
+	// Phase 1: Pre-process custom syntax
 	const preprocessed = preprocess(source);
 
 	// Strip TypeScript types early using oxc-transform.
@@ -65,14 +65,14 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 	// JSX is preserved; the $$s/$$d/$$style markers survive as identifiers/elements.
 	const stripped = oxcTransformSync(filename, preprocessed.code, { sourcemap: true, jsx: 'preserve' });
 
-	// Parse as JSX (TS types already stripped by oxcTransformSync above)
+	// Phase 2: Parse with OXC
 	const parseResult = parse(filename, stripped.code, 'jsx');
 	if (parseResult.errors.length > 0) {
 		const errorMessages = parseResult.errors.map((e) => e.message).join('\n');
 		throw new Error(`Parse errors in ${filename}:\n${errorMessages}`);
 	}
 
-	// Phase 2: Analyze — walk AST, build scope tree + metadata
+	// Phase 3: Analyze — walk AST, build scope tree + metadata
 	const analysis = analyze(
 		parseResult.program,
 		stripped.code,
@@ -81,7 +81,7 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 		options.reactiveCallImports,
 	);
 
-	// Phase 3: Transform — walk AST with zimmerframe, print with esrap
+	// Phase 4: Transform — walk AST with zimmerframe, print with esrap
 	const result = transform(analysis, filename, options.css);
 
 	return {

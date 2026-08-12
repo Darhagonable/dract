@@ -1,8 +1,8 @@
 /**
  * Scope tree for the DarTsx compiler.
  *
- * Built during Phase 2 (analyze) via `create_scopes()` and consumed by
- * Phase 3 (transform) via zimmerframe's visitor state.
+ * Built during Phase 3 (analyze) via `create_scopes()` and consumed by
+ * Phase 4 (transform) via zimmerframe's visitor state.
  *
  * Architecture follows Svelte/Ripple: each AST node that introduces a scope
  * is mapped in `scopes: Map<Node, Scope>`. The `_` universal visitor switches

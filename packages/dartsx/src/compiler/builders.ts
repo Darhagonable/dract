@@ -1,7 +1,7 @@
 /**
  * ESTree-compatible AST node builders for DarTsx's code generation.
  *
- * Phase 3 uses these to build a proper AST via zimmerframe node replacement.
+ * Phase 4 uses these to build a proper AST via zimmerframe node replacement.
  * The AST is then printed by esrap with source maps.
  *
  * Builder functions return `AstNode & { type: K } & T`, which means:

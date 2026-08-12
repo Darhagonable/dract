@@ -75,18 +75,21 @@ The Vite plugin (`@dartsx/vite-plugin`) is essential for cross-file reactivity:
 
 ```
 Source (.tsx/.ts)
-  → Phase 1: Parse (preprocess custom syntax → valid TSX, then OXC parse)
-  → Phase 2: Analyze (AST walk → IR + call-site analysis)
-  → Phase 3: Transform (IR → output JavaScript using $.jsx() runtime)
+  → Phase 1: Preprocess (custom syntax → valid TSX)
+  → Phase 2: Parse (OXC parse)
+  → Phase 3: Analyze (AST walk → IR + call-site analysis)
+  → Phase 4: Transform (IR → output JavaScript using $.jsx() runtime)
 ```
 
-Phase 1 (Parse) preprocesses DarTsx keywords (`component`, `state`, `derived`, `render`, `bind`) into valid TSX, then parses with OXC.
+Phase 1 (Preprocess) rewrites DarTsx keywords (`component`, `state`, `derived`, `render`, `bind`) into valid TSX.
 
-Phase 2 (Analyze) walks the AST and builds an IR (Intermediate Representation). It also performs call-site analysis: for each `CallExpression`, it checks whether any arguments are reactive variables. If so, it records:
+Phase 2 (Parse) parses the preprocessed TSX with OXC.
+
+Phase 3 (Analyze) walks the AST and builds an IR (Intermediate Representation). It also performs call-site analysis: for each `CallExpression`, it checks whether any arguments are reactive variables. If so, it records:
 - **Local functions**: which parameter names are reactive (used during transform)
 - **Imported functions**: which specifier + function name + param indices (emitted in `CompileResult.reactiveCalls` for the Vite plugin)
 
-Phase 3 (Transform) converts the IR into JavaScript. JSX becomes `$.jsx()` calls, reactive reads become `$.get()`, assignments become `$.set()`, and dynamic children are wrapped in getter functions for fine-grained dependency tracking.
+Phase 4 (Transform) converts the IR into JavaScript. JSX becomes `$.jsx()` calls, reactive reads become `$.get()`, assignments become `$.set()`, and dynamic children are wrapped in getter functions for fine-grained dependency tracking.
 
 # Tests
 
