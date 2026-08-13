@@ -69,6 +69,8 @@ export interface TransformResult {
 	code: string;
 	map: ReturnType<typeof print>['map'];
 	css: string;
+	/** The exact program that was printed as the emitted module. */
+	ast: AstNode;
 }
 
 interface TransformState {
@@ -171,7 +173,7 @@ export function transform(
 		printOpts.sourceMapSource = filename;
 	}
 	const { code, map } = print(transformed, tsx(), printOpts);
-	return { code, map, css: cssFragments.join('\n') };
+	return { code, map, css: cssFragments.join('\n'), ast: transformed };
 }
 
 // ── Component transform ────────────────────────────────────────────

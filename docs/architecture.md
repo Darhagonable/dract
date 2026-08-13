@@ -87,7 +87,7 @@ Phase 2 (Parse) parses the preprocessed TSX with OXC.
 
 Phase 3 (Analyze) walks the AST and builds an IR (Intermediate Representation). It also performs call-site analysis: for each `CallExpression`, it checks whether any arguments are reactive variables. If so, it records:
 - **Local functions**: which parameter names are reactive (used during transform)
-- **Imported functions**: which specifier + function name + param indices (emitted in `CompileResult.reactiveCalls` for the Vite plugin)
+- **Imported functions**: which specifier + function name + param indices (emitted in `CompileResult.metadata.reactiveCalls` for the Vite plugin)
 
 Phase 4 (Transform) converts the IR into JavaScript. JSX becomes `$.jsx()` calls, reactive reads become `$.get()`, assignments become `$.set()`, and dynamic children are wrapped in getter functions for fine-grained dependency tracking.
 

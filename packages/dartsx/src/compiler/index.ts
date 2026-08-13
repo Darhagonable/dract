@@ -11,21 +11,34 @@ import { transformSync as oxcTransformSync } from 'oxc-transform';
 import remapping, { type SourceMap } from '@jridgewell/remapping';
 
 export interface CompileResult {
-	/** The generated JavaScript code */
-	code: string;
-	/** Source map from output positions to original source positions */
-	map: SourceMap;
-	/** Extracted CSS from scoped style blocks (for external CSS mode) */
-	css: string;
-	/** Names of exported state/derived variables (for cross-file reactivity) */
-	reactiveExports: string[];
-	/**
-	 * Cross-file reactive function calls detected at call sites.
-	 * Maps import specifier → { exportedName → reactive param indices }.
-	 */
-	reactiveCalls: Record<string, Record<string, number[]>>;
-	/** Import specifiers found in this module (for Vite plugin resolution, avoids regex) */
-	importSpecifiers: string[];
+	/** The compiled JavaScript and its source map. */
+	js: {
+		/** The generated JavaScript code */
+		code: string;
+		/** Source map from output positions to original source positions */
+		map: SourceMap;
+	};
+	/** The compiled CSS, from the source style blocks. */
+	css: {
+		/** The generated code */
+		code: string;
+		/** Source map from CSS output positions to source positions (not built yet). */
+		map: SourceMap | null;
+	};
+	/** Metadata about the compiled module. */
+	metadata: {
+		/** Names of exported state/derived variables (for cross-file reactivity) */
+		reactiveExports: string[];
+		/**
+		 * Cross-file reactive function calls detected at call sites.
+		 * Maps import specifier → { exportedName → reactive param indices }.
+		 */
+		reactiveCalls: Record<string, Record<string, number[]>>;
+		/** Import specifiers found in this module (for Vite plugin resolution, avoids regex) */
+		importSpecifiers: string[];
+	};
+	/** The exact program that was printed as the emitted module. */
+	ast: unknown;
 }
 
 export interface CompileOptions {
@@ -85,11 +98,19 @@ export function compile(source: string, options: CompileOptions = {}): CompileRe
 	const result = transform(analysis, filename, options.css);
 
 	return {
-		code: result.code,
-		map: remapping([result.map, stripped.map, preprocessed.map], () => null),
-		css: result.css,
-		reactiveExports: analysis.reactiveExports,
-		reactiveCalls: analysis.reactiveCalls,
-		importSpecifiers: analysis.importSpecifiers,
+		js: {
+			code: result.code,
+			map: remapping([result.map, stripped.map, preprocessed.map], () => null),
+		},
+		css: {
+			code: result.css,
+			map: null
+		},
+		metadata: {
+			reactiveExports: analysis.reactiveExports,
+			reactiveCalls: analysis.reactiveCalls,
+			importSpecifiers: analysis.importSpecifiers,
+		},
+		ast: result.ast,
 	};
 }

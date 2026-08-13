@@ -159,7 +159,7 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 								const importedSource = fs.readFileSync(resolved.id, 'utf-8');
 								if (isDarTsxSource(importedSource)) {
 									try {
-										exports = compile(importedSource, { filename: resolved.id }).reactiveExports;
+										exports = compile(importedSource, { filename: resolved.id }).metadata.reactiveExports;
 										if (exports.length > 0) reactiveRegistry.set(resolved.id, exports);
 									} catch {
 										// Ignore inspection failures and continue without reactive import info.
@@ -181,15 +181,15 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				});
 
 				// Cache import specifiers for next compile (avoids regex on subsequent transforms)
-				if (result.importSpecifiers.length > 0) {
-					importSpecifierCache.set(id, result.importSpecifiers);
+				if (result.metadata.importSpecifiers.length > 0) {
+					importSpecifierCache.set(id, result.metadata.importSpecifiers);
 				} else {
 					importSpecifierCache.delete(id);
 				}
 
 				// Store reactive exports in registry
-				if (result.reactiveExports.length > 0) {
-					reactiveRegistry.set(id, result.reactiveExports);
+				if (result.metadata.reactiveExports.length > 0) {
+					reactiveRegistry.set(id, result.metadata.reactiveExports);
 				} else {
 					reactiveRegistry.delete(id);
 				}
@@ -197,7 +197,7 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				// Update reactive call contributions for this caller and rebuild affected targets
 				// First, collect this caller's new contributions
 				const newContribs = new Map<string, Record<string, number[]>>();
-				for (const [specifier, fns] of Object.entries(result.reactiveCalls)) {
+				for (const [specifier, fns] of Object.entries(result.metadata.reactiveCalls)) {
 					const resolved = await this.resolve(specifier, id);
 					if (!resolved) continue;
 					// Skip pre-built output directories — compiled library files handle
@@ -244,12 +244,12 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 					}
 				}
 
-				let outputCode = result.code;
+				let outputCode = result.js.code;
 
 				// In external mode, append CSS as a virtual import so Vite can extract it
-				if (cssMode === 'external' && result.css) {
+				if (cssMode === 'external' && result.css.code) {
 					const cssId = id + '.css';
-					cssModuleMap.set(cssId, result.css);
+					cssModuleMap.set(cssId, result.css.code);
 					outputCode += `\nimport ${JSON.stringify(cssId)};`;
 				}
 
