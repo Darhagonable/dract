@@ -1,6 +1,6 @@
 use oxc for the compiler
 
-fully typescript 
+fully typescript
 
 pnpm because monorepo
 
@@ -62,7 +62,7 @@ This means:
 
 ### ProjectCompiler
 
-The **ProjectCompiler** (`packages/dartsx/src/compiler/project.ts`) owns the entire cross-file graph: per module it tracks the source and last compiled output, resolved imports and reverse edges, reactive exports (what an importer gets as `reactiveImports`), and per-caller call contributions merged per target (what a callee gets as `reactiveCallImports`).
+The **ProjectCompiler** (`packages/dartsx/src/compiler/project/index.ts`) owns the entire cross-file graph: per module it tracks the source and last compiled output, resolved imports and reverse edges, reactive exports (what an importer gets as `reactiveImports`), and per-caller call contributions merged per target (what a callee gets as `reactiveCallImports`).
 
 It is completely filesystem-agnostic. Files enter through `addFile`/`updateFile`/`removeFile`, and a file whose imports point at an id the project does not know is requested through the injected `loadFile` callback — the adapter decides where sources come from (disk for Vite, an in-memory map for the browser REPL, fixtures for tests). The compiler never touches the filesystem.
 
@@ -106,9 +106,9 @@ Source (.tsx/.ts)
   → Phase 4: Transform (IR → output JavaScript using $.jsx() runtime)
 ```
 
-Phase 1 (Preprocess) rewrites DarTsx keywords (`component`, `state`, `derived`, `render`, `bind`) into valid TSX.
+Phase 1 (Preprocess) converts DarTsx keywords (`component`, `state`, `derived`, `render`, `bind`) into valid TSX.
 
-Phase 2 (Parse) parses the preprocessed TSX with OXC.
+Phase 2 (Parse) parses the preprocessed source with OXC.
 
 Phase 3 (Analyze) walks the AST and builds an IR (Intermediate Representation). It also performs call-site analysis: for each `CallExpression`, it checks whether any arguments are reactive variables. If so, it records:
 - **Local functions**: which parameter names are reactive (used during transform)

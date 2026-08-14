@@ -20,7 +20,7 @@ import {
 	ScopeRoot,
 	create_scopes,
 } from '../../scope';
-import type { AstNode } from '../../builders';
+import type { AstNode } from '../../factory';
 import type {
 	Program,
 	Statement,

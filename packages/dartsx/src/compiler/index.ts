@@ -23,6 +23,14 @@ import { ProjectCompiler, type ModuleOutput, type ProjectCompilerOptions, type P
 export { ProjectCompiler };
 export type { ModuleOutput, ProjectCompilerOptions, ProjectUpdate };
 
+// Preprocess is re-exported as part of the compiler entry's public face.
+// The dedicated `dartsx/compiler/preprocess` subpath stays for tooling that
+// wants the preprocessor alone. Note: `preprocess`/`PreprocessResult` are
+// imported above, which would hide them from a bare `export *`, so re-export
+// them explicitly.
+export { preprocess } from './phases/1-preprocess';
+export type { PreprocessResult } from './phases/1-preprocess';
+
 export interface CompileResult {
 	/** The compiled JavaScript and its source map. */
 	js: {
@@ -152,8 +160,8 @@ export function analyzeSource(source: string, options: CompileOptions = {}): Com
 
 /**
  * Phase 4 of the split pipeline: walk the analysis with zimmerframe, print with
- * esrap, and chain the source maps. The analysis is consumed — its AST is
- * rewritten in place.
+ * esrap, chain the source maps, and (optionally) collect position artifacts.
+ * The analysis is consumed — its AST is rewritten in place.
  */
 export function generateOutput(
 	analysis: CompileAnalysis,

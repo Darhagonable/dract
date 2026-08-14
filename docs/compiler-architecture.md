@@ -13,8 +13,10 @@ The compiler is two layers:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  PROJECT LAYER (ProjectCompiler)                            │
-│  owns the cross-file graph: reactive exports, call          │
-│  contributions, incremental invalidation, loadFile adapter  │
+│  composition root: ProjectGraph (records + edges)           │
+│  + ProjectBuilder (worklist, two-phase run)                 │
+│  + reconcile() (metadata → invalidation rules)              │
+│  loadFile adapter injected for unknown ids                  │
 ├─────────────────────────────────────────────────────────────┤
 │  PER-FILE PIPELINE (analyzeSource → generateOutput)         │
 │  preprocess → oxc-transform (strip TS) → parse → analyze →  │
@@ -34,8 +36,8 @@ The compiler is two layers:
 | Import specifier               | Exports |
 |--------------------------------|---------|
 | `dartsx`                       | Runtime (`$.state`, `$.derived`, `$.get`, `$.set`, `$.jsx`, `$.style`, …) |
-| `dartsx/compiler`              | `compile`, `analyzeSource`, `generateOutput`, `ProjectCompiler`, types |
-| `dartsx/compiler/preprocess`   | `preprocess`, `isDarTsxFile`, `findSuppressZones`, markers — for editor/CLI tooling |
+| `dartsx/compiler`              | `compile`, `analyzeSource`, `generateOutput`, `ProjectCompiler`, `preprocess` (+ `PreprocessResult`), types |
+| `dartsx/compiler/preprocess`   | `preprocess`, `isDarTsxFile`, `findSuppressZones`, markers — for editor/CLI tooling that wants the preprocessor alone |
 | `dartsx/jsx-runtime` etc.      | JSX runtime shims |
 
 The generated code imports the runtime as `$` from `dartsx/internal/client`
@@ -157,8 +159,12 @@ Notes:
 
 ## 3. The project layer (`ProjectCompiler`)
 
-`ProjectCompiler` (`packages/dartsx/src/compiler/project.ts`) owns the
-cross-file graph. It is completely filesystem-agnostic: files enter through
+`ProjectCompiler` (`packages/dartsx/src/compiler/project/index.ts`) is the
+composition root of the project layer: the cross-file graph lives in
+`ProjectGraph` (`project/graph.ts`), the incremental machinery in
+`ProjectBuilder` (`project/builder.ts`), and the invalidation rules in
+`reconcile()` (`project/reconcile.ts`). The layer is completely
+filesystem-agnostic: files enter through
 `addFile`/`updateFile`/`removeFile`, and unknown imports are requested through
 the injected `loadFile` callback — the adapter decides where sources come from
 (disk for Vite, an in-memory map for the REPL, fixtures for tests).
@@ -418,9 +424,12 @@ tooling (Vite + REPL).
 | File | Role |
 |------|------|
 | `packages/dartsx/src/compiler/index.ts` | Pipeline split (`analyzeSource`/`generateOutput`/`compile`) + public types |
-| `packages/dartsx/src/compiler/project.ts` | `ProjectCompiler`: graph, worklist, two-phase run |
-| `packages/dartsx/src/compiler/preprocess.ts` | DarTsx syntax → TSX, markers, component meta, CSS extraction |
-| `packages/dartsx/src/compiler/phases/1-parse` | OXC parse wrapper |
-| `packages/dartsx/src/compiler/phases/2-analyze` | Scopes, bindings, call-site analysis, metadata |
-| `packages/dartsx/src/compiler/phases/3-transform` | zimmerframe walk, CSS scoping, esrap print, `attachLocations`/`makeLoc` locs |
-| `packages/dartsx/src/compiler/builders.ts` / `scope.ts` | AST builders, scope tree |
+| `packages/dartsx/src/compiler/project/index.ts` | `ProjectCompiler`: thin composition root (public API, option molding) |
+| `packages/dartsx/src/compiler/project/graph.ts` | `ProjectGraph`: records, edges (reverse imports, reactive exports, contributions, merged calls) — pure data |
+| `packages/dartsx/src/compiler/project/builder.ts` | `ProjectBuilder`: worklist, import resolution, two-phase analyze→generate run |
+| `packages/dartsx/src/compiler/project/reconcile.ts` | `reconcile()`: metadata → graph mutations + invalidation rules |
+| `packages/dartsx/src/compiler/phases/1-preprocess` | DarTsx syntax → TSX, markers, component meta, CSS extraction (public subpath) |
+| `packages/dartsx/src/compiler/phases/2-parse` | OXC parse wrapper |
+| `packages/dartsx/src/compiler/phases/3-analyze` | Scopes, bindings, call-site analysis, metadata |
+| `packages/dartsx/src/compiler/phases/4-transform` | zimmerframe walk, CSS scoping, esrap print, `attachLocations`/`makeLoc` locs |
+| `packages/dartsx/src/compiler/factory.ts` / `scope.ts` | AST builders, scope tree |

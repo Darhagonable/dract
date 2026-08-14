@@ -9,7 +9,7 @@
  * `state.scope` as the walk descends.
  */
 
-import type { AstNode } from './builders';
+import type { AstNode } from './factory';
 import { walk, type Context } from 'zimmerframe';
 import type {
 	Program,

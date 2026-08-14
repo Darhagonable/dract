@@ -59,7 +59,7 @@ watchCount(count);
 	expect(project.updateFile('/main.ts', caller).changed.sort()).toEqual(['/main.ts', '/utils.ts']);
 	// The target now treats its param as reactive — contribution persisted.
 	const utilsOutput = project.output('/utils.ts');
-	expect(utilsOutput?.code).toContain('$.set(count, $.get(count) + 1)');
+	expect(utilsOutput?.js.code).toContain('$.set(count, $.get(count) + 1)');
 });
 
 it('incremental: generated output matches compileAll output for the same graph', () => {
@@ -73,7 +73,7 @@ it('incremental: generated output matches compileAll output for the same graph',
 	project2.updateFile('/app.tsx', APP);
 	project2.updateFile('/utils.ts', UTILS);
 	for (const [id, output] of byId) {
-		expect(project2.output(id)?.code, id).toBe(output.code);
+		expect(project2.output(id)?.js.code, id).toBe(output.js.code);
 	}
 });
 
@@ -88,5 +88,5 @@ watchCount(count);
 	expect(project.removeFile('/store.ts').changed.sort()).toEqual(['/app.tsx', '/main.ts', '/utils.ts']);
 	// `count` is no longer a signal, so the contribution toward watchCount
 	// disappears and utils loses its reactive param.
-	expect(project.output('/utils.ts')?.code).not.toContain('$.set(count');
+	expect(project.output('/utils.ts')?.js.code).not.toContain('$.set(count');
 });
