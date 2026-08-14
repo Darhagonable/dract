@@ -84,8 +84,8 @@ remap()               chains [esrap map, oxc-strip map, preprocess map]. The
   │                   at codegen node boundaries — JSX attributes collapse
   │                   into one segment each, plain statements stay per-token.
   ▼
-CompileResult         { code, map, css, reactiveExports, reactiveCalls,
-                        importSpecifiers, inspect? }
+CompileResult         { js: { code, map }, css: null | { code, map },
+                        metadata: { reactiveExports, reactiveCalls }, ast }
 ```
 
 The pipeline is **split into two entry points** so the project layer can run
@@ -105,7 +105,6 @@ interface CompileOptions {
   css?: 'injected' | 'external';                  // default 'injected'
   reactiveImports?: Record<string, string[]>;     // specifier → reactive export names
   reactiveCallImports?: Record<string, number[]>; // fn name → reactive param indices
-  inspect?: boolean;                              // collect position artifacts
 }
 ```
 
@@ -119,7 +118,6 @@ interface CompileAnalysis {
   preprocessed: PreprocessResult;    // spans, maps, component meta
   strippedMap: OxcSourceMap | null;  // oxc-transform's map, chained into
                                      // codegen's remap (esrap → strip → preprocess)
-  inspect: boolean;
   reactiveExports: string[];         // ─┐
   reactiveCalls: Record<...>;        //  ├─ graph metadata (what the project
   importSpecifiers: string[];        // ─┘   consumes during reconciliation)
@@ -130,19 +128,19 @@ interface CompileAnalysis {
 
 ```ts
 interface CompileResult {
-  code: string;
-  map: SourceMap;
-  css: string;                                  // extracted CSS (external mode)
-  reactiveExports: string[];
-  reactiveCalls: Record<string, Record<string, number[]>>;
-  importSpecifiers: string[];
-  inspect?: CompileInspect;                     // when requested
-}
-
-interface CompileInspect {
-  sourceAst: unknown;        // authored tree: the PREPROCESSED form parsed,
-                             // spans index the preprocessed document
-  generatedAst: unknown;     // the exact program that was printed
+  js: {
+    code: string;                    // the generated JavaScript
+    map: SourceMap;                  // output → authored source positions
+  };
+  css: null | {                      // null when the source has no style blocks
+    code: string;                    // the extracted CSS
+    map: SourceMap | null;           // CSS map not built yet — always null
+  };
+  metadata: {
+    reactiveExports: string[];
+    reactiveCalls: Record<string, Record<string, number[]>>;
+  };
+  ast: unknown;                      // the exact program that was printed
 }
 ```
 
@@ -150,8 +148,8 @@ Notes:
 
 - `generateOutput` **consumes** the analysis — the transform walk rewrites the
   AST in place. The analysis is single-use.
-- `inspect` costs one extra parse of the preprocessed form; it powers the
-  REPL's AST/compiled panes.
+- `ast` is the transform's in-memory tree, not a re-parse of the emit — it
+  costs nothing beyond the codegen itself. It powers the REPL's AST pane.
 - `compile()` exists for one-off compilation (tests, tooling); the project
   layer uses the split form.
 
@@ -184,7 +182,6 @@ the injected `loadFile` callback — the adapter decides where sources come from
 ```ts
 interface ProjectCompilerOptions {
   css?: 'injected' | 'external';                 // forwarded to every generate
-  inspect?: boolean;                             // forwarded to every analyze
   resolveExternal?: (specifier, importerId) => string | null;  // bare/URL imports
   loadFile?: (id: string) => string | null;      // source for unknown ids
 }
@@ -226,7 +223,7 @@ Phase A — runAnalysis(): stabilize the graph
          reactiveCallImports = mergedReactiveCalls[id]
          key = JSON.stringify([reactiveImports, reactiveCallImports])
     3. guard: skip if (id, key) already analyzed THIS call
-    4. analysis = analyzeSource(source, { filename, inspect, inputs })
+    4. analysis = analyzeSource(source, { filename, inputs })
          record.analysis = analysis; record.analysisKey = key
     5. reconcile(record, analysis):
          - cache importSpecifiers
@@ -354,12 +351,12 @@ the plugin starts compiling it on subsequent transforms.
 ### 5.2 Browser REPL (`repl/src/lib/playground-modules.ts`)
 
 Same `ProjectCompiler` as Vite, in the browser (the compiler is pure
-JS/WASM — oxc-parser/oxc-transform wasm + esrap, no Node APIs). Configured
-with `inspect: true` so the AST/compiled panes read the parsed trees off the
-outputs without recompiling.
+JS/WASM — oxc-parser/oxc-transform wasm + esrap, no Node APIs). The AST pane
+reads the printed program off every output — the transform returns it with the
+codegen, so nothing is recompiled or re-parsed.
 
 ```ts
-const project = new ProjectCompiler({ css: 'injected', inspect: true });
+const project = new ProjectCompiler({ css: 'injected' });
 ```
 
 `buildModuleGraph(files, entry)` flow (called on every compile in the

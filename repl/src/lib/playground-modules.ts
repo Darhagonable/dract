@@ -52,8 +52,7 @@ export interface ModuleGraphFailure {
 // The ProjectCompiler is the single source of truth for every `.tsx`/`.ts`
 // file: it recompiles incrementally (an edit invalidates exactly the files
 // whose inputs it changes) and hands each module's output — code, source map,
-// metadata, and the printed program for the AST pane — to both the graph
-// builder and the pane.
+// and the printed AST — to both the graph builder and the compiled pane.
 const project = new ProjectCompiler({
 	css: 'injected',
 });

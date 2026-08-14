@@ -1,7 +1,7 @@
 // /playground — write TSX on the left, and on the right either the
 // LIVE rendered app or the compiled output, switchable with a tab. The
-// compiled pane selects a Client, Server, Types, or Parsed artifact and shows
-// it as code or an AST (Parsed is AST-only). Server and Types are kept as
+// compiled pane selects a Client, Server, or Types artifact and shows it as
+// code or an AST. Server and Types are kept as
 // targets for future DarTsx emits (a server renderer, .d.ts output) and show
 // a placeholder until then. Hovering or selecting source reveals the
 // corresponding AST node where the parser has a span; hovering a tree node
@@ -55,7 +55,7 @@ const COMPILE_DEBOUNCE_MS = 250;
 const AST_TARGET_META: Record<PlaygroundOutputTarget, { label: string; notice: string }> = {
 	client: {
 		label: 'Client output AST',
-		notice: 'The compiled client Program, parsed back out of the emit. Tap a node to pin its highlight.',
+		notice: 'The compiled client Program, as the transform left it. Tap a node to pin its highlight.',
 	},
 	server: {
 		label: 'Server output AST',
@@ -65,17 +65,12 @@ const AST_TARGET_META: Record<PlaygroundOutputTarget, { label: string; notice: s
 		label: 'Types output AST',
 		notice: 'No types emit yet — DarTsx compiles TypeScript directly to JavaScript.',
 	},
-	source: {
-		label: 'Parsed source AST',
-		notice: 'The parser tree for the authored source. Tap a node to pin its highlight.',
-	},
 };
 
 const OUTPUT_TARGET_LABEL: Record<PlaygroundOutputTarget, string> = {
 	client: 'Client',
 	server: 'Server',
 	types: 'Types',
-	source: 'Parsed',
 };
 
 // Server and Types are placeholders: DarTsx has no such emits yet. The
@@ -183,13 +178,7 @@ export function Playground() @{
 		resultModeRef.current.view = 'compiled';
 		controllerRef.current.syncOutput?.();
 	};
-	// Parsed is an AST-only target — leaving AST mode returns to the client
-	// emit, the mode's natural default.
 	const selectCompiledMode = (mode: 'code' | 'ast') => {
-		if (mode === 'code' && outputTarget === 'source') {
-			setOutputTarget('client');
-			resultModeRef.current.target = 'client';
-		}
 		setCompiledMode(mode);
 		resultModeRef.current.mode = mode;
 		controllerRef.current.syncOutput?.();
@@ -380,8 +369,8 @@ export function Playground() @{
 			type CodeEntry = {
 				source: string;
 				code: string;
-				/** Parsed ASTs for the AST pane: [authored source, compiled output]. */
-				asts: [unknown, unknown];
+				/** The compiled output's AST for the AST pane. */
+				ast: unknown;
 				/** The compile's source map (output → authored) for code mappings. */
 				map: { mappings: string | unknown[][] } | null;
 				/** Lazy per-target mapping (see buildMapping). */
@@ -389,9 +378,6 @@ export function Playground() @{
 				error: string | null;
 			};
 			const runtimeCache = new Map<string, CodeEntry>();
-			// "Parsed" shows the authored document — its own cache so the
-			// identity test in showOutput sees the same object per source.
-			const sourceEntryCache = new Map<string, CodeEntry>();
 			// Track the last graph-level error so pane-only updates don't wipe it
 			// when per-file compilation succeeds.
 			let lastGraphError = '';
@@ -405,11 +391,11 @@ export function Playground() @{
 					const compiled = pgModules.peekCompiledFile({ name, source });
 					entry = compiled
 						? compiled.ok
-						? { source, code: compiled.code, asts: [null, null], map: null, error: null }
+						? { source, code: compiled.code, ast: null, map: null, error: null }
 						: {
 								source,
 								code: '// Compiled output failed:\n// ' + compiled.error,
-								asts: [null, null],
+								ast: null,
 								map: null,
 								error: compiled.error,
 							}
@@ -419,7 +405,7 @@ export function Playground() @{
 					: {
 							source,
 							code: '// Compiled output appears after the next compile.',
-							asts: [null, null],
+							ast: null,
 							map: null,
 							error: null,
 						};
@@ -430,14 +416,14 @@ export function Playground() @{
 						? {
 								source,
 								code: output.js.code,
-								asts: [null, output.ast],
+								ast: output.ast,
 								map: output.js.map,
 								error: null,
 							}
 						: {
 								source,
 								code: '// Compilation failed:\n// ' + (error ?? 'unknown error'),
-								asts: [null, null],
+								ast: null,
 								map: null,
 								error,
 							};
@@ -453,7 +439,7 @@ export function Playground() @{
 			const placeholderEntry = (code: string): CodeEntry => ({
 				source: '',
 				code,
-				asts: [null, null],
+				ast: null,
 				map: null,
 				error: null,
 			});
@@ -518,7 +504,6 @@ export function Playground() @{
 			// Built once per (entry, target) and cached on the entry, so a
 			// mousemove stream costs one property read.
 			const buildMapping = (entry: CodeEntry, target: PlaygroundOutputTarget) => {
-				if (target === 'source') return pgMapping.identityMapping(entry.code.length);
 				if (target !== 'client' || !entry.map) return null;
 				return pgMapping.mappingFromSourceMap(entry.source, entry.code, entry.map);
 			};
@@ -637,7 +622,7 @@ export function Playground() @{
 				if (!update.transactions.some((tr: any) => tr.isUserEvent('select'))) return;
 				if (resultModeRef.current.view !== 'compiled') return;
 				const offset = update.state.selection.main.head;
-				if (resultModeRef.current.mode === 'ast' && side === 'source') {
+				if (resultModeRef.current.mode === 'ast') {
 					if (activeAstEntry()) astPreview.reveal(offset, true);
 					return;
 				}
@@ -651,13 +636,13 @@ export function Playground() @{
 			// position; clicking/cursor movement above additionally reveals them.
 			const crossHover = (side: 'source' | 'output') => EditorView.domEventObservers({
 				mousemove(event: MouseEvent, view: any) {
-					if (resultModeRef.current.view !== 'compiled') return;
-					const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
-					if (resultModeRef.current.mode === 'ast' && side === 'source') {
-						if (offset == null || !activeAstEntry()) clearMappedPair();
-						else astPreview.reveal(offset, false);
-						return;
-					}
+				if (resultModeRef.current.view !== 'compiled') return;
+				const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
+				if (resultModeRef.current.mode === 'ast') {
+					if (offset == null || !activeAstEntry()) clearMappedPair();
+					else astPreview.reveal(offset, false);
+					return;
+				}
 					const pair =
 						offset == null ? null : mappedPair(side, offset);
 					if (pair) revealPair(pair, null);
@@ -683,7 +668,7 @@ export function Playground() @{
 				const entry = runtimeEntry(currentFile);
 				if (entry.error) return { ast: null, source: entry.source, label: meta.label, notice: meta.notice, error: entry.error };
 				return {
-					ast: entry.asts[target === 'source' ? 0 : 1],
+					ast: entry.ast,
 					source: entry.source,
 					label: meta.label,
 					notice: meta.notice,
@@ -691,29 +676,14 @@ export function Playground() @{
 				};
 			};
 
-			// The output document per target. The source target shows the
-			// authored document with an identity mapping so interactions still
-			// work; server/types are placeholders with no mapping at all.
+			// The output document per target; server/types are placeholders with
+			// no mapping at all.
 			const targetEntry = (target: PlaygroundOutputTarget): CodeEntry => {
 				switch (target) {
 					case 'server':
 						return placeholderEntry(SERVER_OUTPUT_NOTE);
 					case 'types':
 						return placeholderEntry(TYPES_OUTPUT_NOTE);
-					case 'source': {
-						const source = fileSource(currentFile);
-						const cached = sourceEntryCache.get(currentFile);
-						if (cached && cached.source === source) return cached;
-						const entry: CodeEntry = {
-							source,
-							code: source,
-							asts: [null, null],
-							map: null,
-							error: null,
-						};
-						sourceEntryCache.set(currentFile, entry);
-						return entry;
-					}
 					default:
 						return runtimeEntry(currentFile);
 				}
@@ -978,7 +948,6 @@ export function Playground() @{
 				currentFile = workspace.entry;
 				editorStates.clear();
 				runtimeCache.clear();
-				sourceEntryCache.clear();
 				lastShownEntry = null;
 				lastShownAst = null;
 				sourceView.setState(makeEditorState(currentFile, fileSource(currentFile)));
@@ -1044,7 +1013,6 @@ export function Playground() @{
 				// The compile cache is keyed by file name — purge the deleted one
 				// rather than churn every key. Nothing else references them.
 				runtimeCache.delete(name);
-				sourceEntryCache.delete(name);
 				if (wasCurrent) {
 					// Fall to the file that took the tab's place, wrapping to the
 					// first when the last file was deleted.
@@ -1095,7 +1063,6 @@ export function Playground() @{
 				// The compile cache is keyed by file name — drop the old key so
 				// the next compile repopulates it under the new name.
 				runtimeCache.delete(oldName);
-				sourceEntryCache.delete(oldName);
 				// A rename makes the buffer non-example, like any edit.
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 					currentExampleId = CUSTOM_EXAMPLE_ID;
@@ -1395,9 +1362,6 @@ export function Playground() @{
 								<option value="client">Client</option>
 								<option value="server">Server</option>
 								<option value="types">Types</option>
-								@if (compiledMode === 'ast') {
-									<option value="source">Parsed</option>
-								}
 							</select>
 							<div class="pg-seg pg-seg-sm" role="group" aria-label="Output format">
 								<button

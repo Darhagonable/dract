@@ -27,7 +27,7 @@ export type PlaygroundRuntimeTarget = 'client' | 'server';
 // placeholders for now: DarTsx currently compiles one client runtime, and the
 // targets are kept so future emits (a server renderer, .d.ts output) land in
 // the same pane.
-export type PlaygroundOutputTarget = PlaygroundRuntimeTarget | 'types' | 'source';
+export type PlaygroundOutputTarget = PlaygroundRuntimeTarget | 'types';
 
 // ── Sandboxed execution ─────────────────────────────────────────────────────
 

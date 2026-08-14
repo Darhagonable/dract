@@ -344,15 +344,3 @@ export function mappingFromSourceMap(
 	if (segments.length === 0) return null;
 	return createMapping(segments, { source, generated });
 }
-
-/** React-host TSX is already the compiled document, so its mapping is identity. */
-export function identityMapping(length: number): CodeMapping | null {
-	if (!Number.isSafeInteger(length) || length <= 0) return null;
-	const pair = (offset: number): MappedPair | null => {
-		if (!Number.isSafeInteger(offset) || offset < 0 || offset > length) return null;
-		const from = Math.min(offset, length - 1);
-		const range = { from, to: from + 1 };
-		return { source: [range], output: [range] };
-	};
-	return { pairFromSource: pair, pairFromGenerated: pair };
-}

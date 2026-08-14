@@ -34,7 +34,7 @@ export type { PreprocessResult } from './phases/1-preprocess';
 export interface CompileResult {
 	/** The compiled JavaScript and its source map. */
 	js: {
-		/** The generated JavaScript code */
+		/** The generated code */
 		code: string;
 		/** Source map from output positions to original source positions */
 		map: SourceMap;
@@ -124,10 +124,13 @@ export function analyzeSource(source: string, options: CompileOptions = {}): Com
 	// Phase 1: Pre-process custom syntax
 	const preprocessed = preprocess(source, { filename });
 
-	// Strip TypeScript types early using oxc-transform.
-	// This removes interfaces, type aliases, type annotations, etc. from the source
-	// so the analyzer and transform don't need to handle TS-specific AST nodes.
-	// JSX is preserved; the $$s/$$d/$$style markers survive as identifiers/elements.
+	// Strip TypeScript with oxc-transform — a real transpiler: it emits JS
+	// for enums, namespaces, parameter properties, etc. (an in-tree node
+	// stripper cannot). JSX is preserved; the $$s/$$d/$$style markers
+	// survive as identifiers/elements. Its source map is chained into the
+	// output map — [esrap map, strip map, preprocess map] — which lands
+	// printed positions on the authored source, at oxc's codegen-level
+	// granularity.
 	const stripped = oxcTransformSync(filename, preprocessed.code, { sourcemap: true, jsx: 'preserve' });
 
 	// Phase 2: Parse with OXC
