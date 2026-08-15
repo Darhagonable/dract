@@ -228,6 +228,55 @@ describe('Project', () => {
 		expect(project.output(APP)!.code).toContain('$.get(total)');
 	});
 
+	it('compiles an importer in one shot before its dependency', async () => {
+		const files = {
+			[STORE]: `export state count = 0;`,
+			[APP]: `import { count } from './store'\n\nexport component App() {\nrender (<p>{count}</p>)\n}`,
+		};
+		// Vite-dev order: the importer transforms before its dependency, and
+		// the result is consumed immediately — the dep's reactive exports must
+		// be inspected rather than discovered by a later registration.
+		const project = makeProject(files);
+
+		await project.update(APP, files[APP]);
+
+		expect(project.output(APP)!.code).toContain('$.get(count)');
+	});
+
+	it('ignores import statements inside comments', async () => {
+		const files = {
+			[STORE]: `export state count = 0;`,
+			[APP]: `// import { count } from './store'\n\nexport component App() {\nrender (<p>{count}</p>)\n}`,
+		};
+		const project = makeProject(files);
+
+		await project.update(APP, files[APP]);
+
+		// The commented-out import is not a dependency and its specifier is
+		// not reactive — imports are read from parsed metadata, not regex.
+		expect(project.modules()).not.toContain(STORE);
+		expect(project.output(APP)!.code).not.toContain('$.get(count)');
+	});
+
+	it('picks up a new import added after the first compile', async () => {
+		const files = {
+			[STORE]: `export state count = 0;`,
+			[APP]: `export component App() {\nlet count = 0;\nrender (<p>{count}</p>)\n}`,
+		};
+		const project = makeProject(files);
+
+		// First compile: no imports at all, count is a plain local
+		await project.update(STORE, files[STORE]);
+		await project.update(APP, files[APP]);
+		expect(project.output(APP)!.code).not.toContain('$.get(count)');
+
+		// The source gains an import of a registered reactive module — the
+		// stored output must be reactive after a single update
+		const appWithImport = `import { count } from './store'\n\nexport component App() {\nrender (<p>{count}</p>)\n}`;
+		await project.update(APP, appWithImport);
+		expect(project.output(APP)!.code).toContain('$.get(count)');
+	});
+
 	it('modules() reflects updates and removals', async () => {
 		const project = makeProject(CHAIN_FILES);
 

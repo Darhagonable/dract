@@ -66,11 +66,11 @@ Cross-file reactive state lives in the compiler package (`dartsx/compiler/projec
 
 - **`reactiveRegistry`**: Maps module IDs → exported reactive variable names
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers
-- **`importSpecifierCache`**: Caches import specifiers from compile results (avoids regex parsing)
+- **`importSpecifierCache`**: Caches the OXC-parsed import specifier list per module — the authoritative import source, no regex parsing
 - **`invalidationGuard`**: Guards against invalidating the same module twice while one update is still being processed (mutually importing files); not a work queue — `init()` and the tool own recompilation scheduling
 - **dependency graph**: `dependencies` (module → imported ids) and `importers` (module → modules importing it), kept in sync on every update and removal
 - **`init()`**: Discovers and compiles the whole import graph from the entry points, following invalidated modules and newly discovered dependencies until the reactive information converges — no caller-side supervision needed
-- **`update(filename, source)`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, invalidates importers when the module's reactive exports change, and returns `{ invalidated }` — the modules whose outputs are now stale (the updated module's fresh output is read via `output()`)
+- **`update(filename, source)`**: Compiles a module with the reactive export/call info of already-registered dependencies, stores its output, replaces its reactive-call contributions, rebuilds affected targets, invalidates importers when the module's reactive exports change, and returns `{ invalidated }` — the modules whose outputs are now stale (the updated module's fresh output is read via `output()`). When the compile's metadata reveals an import list the pass didn't know about (first compile, or the source gained imports), the module recompiles once with the full reactive info, inspecting unregistered dependencies' reactive exports from source so single-shot tools get correct output on the first transform
 - **`output(id)`**: The project owns compiled outputs; tools read results back instead of receiving them per call
 - **`modules()`**: Lists all module ids the project currently knows about
 - **`remove()`**: Cleans up project state (outputs, registries, graph edges, contribution targets) and returns `{ invalidated }` — contribution targets plus importers of the removed module
