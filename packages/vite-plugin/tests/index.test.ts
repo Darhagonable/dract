@@ -6,7 +6,7 @@ function buildStartCtx(resolve: (specifier: string) => unknown, input: unknown) 
 	return {
 		resolve: async (specifier: string) => resolve(specifier),
 		environment: {
-			config: { build: { rollupOptions: { input } } },
+			config: { build: { rolldownOptions: { input } } },
 		},
 	} as never;
 }

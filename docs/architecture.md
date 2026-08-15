@@ -67,15 +67,15 @@ Cross-file reactive state lives in the compiler package (`dartsx/compiler/projec
 - **`reactiveRegistry`**: Maps module IDs → exported reactive variable names
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers
 - **`importSpecifierCache`**: Caches import specifiers from compile results (avoids regex parsing)
-- **`pendingInvalidations`**: Guards against recompilation loops between mutually importing files
+- **`invalidationGuard`**: Guards against invalidating the same module twice while one update is still being processed (mutually importing files); not a work queue — `init()` and the tool own recompilation scheduling
 - **dependency graph**: `dependencies` (module → imported ids) and `importers` (module → modules importing it), kept in sync on every update and removal
-- **`init()`**: Discovers and compiles the whole import graph from the entry points, following stale modules and newly discovered dependencies until the reactive information converges — no caller-side supervision needed
-- **`update(filename, source)`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, invalidates importers when the module's reactive exports change, and returns `{ changed }` — the module itself plus the ids whose outputs changed by the call
+- **`init()`**: Discovers and compiles the whole import graph from the entry points, following invalidated modules and newly discovered dependencies until the reactive information converges — no caller-side supervision needed
+- **`update(filename, source)`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, invalidates importers when the module's reactive exports change, and returns `{ invalidated }` — the modules whose outputs are now stale (the updated module's fresh output is read via `output()`)
 - **`output(id)`**: The project owns compiled outputs; tools read results back instead of receiving them per call
 - **`modules()`**: Lists all module ids the project currently knows about
-- **`remove()`**: Cleans up project state (outputs, registries, graph edges, contribution targets) and returns `{ changed }` — targets whose reactive-call info the removal changed
+- **`remove()`**: Cleans up project state (outputs, registries, graph edges, contribution targets) and returns `{ invalidated }` — contribution targets plus importers of the removed module
 
-Tools feed modules into `Project` and act on the results; `Project` never touches the bundler — it reports `changed` ids and the adapter decides what they mean (invalidate / write / re-render). The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it creates the `Project` in `buildStart` with vite's `resolve` and the filesystem as host, runs `init()` with the build's entry points, invalidates returned ids through the vite module graph, and handles CSS delivery.
+Tools feed modules into `Project` and act on the results; `Project` never touches the bundler — it reports `invalidated` ids and the adapter decides what they mean (invalidate / write / re-render). The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it creates the `Project` in `buildStart` with vite's `resolve` and the filesystem as host, runs `init()` with the build's entry points, invalidates returned ids through the vite module graph, and handles CSS delivery.
 
 ### Compiler Pipeline
 

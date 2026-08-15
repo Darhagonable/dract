@@ -54,14 +54,13 @@ function appendCssImport(
 
 /**
  * Adapt a compiler source map to vite's `TransformResult['map']`. The
- * compiler's maps are always encoded (esrap/remapping emit `mappings` as a
- * string); rolldown additionally types source maps as classes with
- * `toUrl`/`toString` methods that plain objects don't have, so the object is
- * cast — vite handles method-less maps at runtime.
+ * compiler's maps are runtime-compatible plain objects; rolldown merely types
+ * source maps as classes with `toUrl`/`toString` methods, which vite handles
+ * on method-less objects at runtime.
  */
-function toSourceMapInput(map: ModuleOutput['map']): TransformResult['map'] {
+function toViteSourceMap(map: ModuleOutput['map']): TransformResult['map'] {
 	if (map == null) return null;
-	return { ...map, mappings: map.mappings as string } as TransformResult['map'];
+	return map as TransformResult['map'];
 }
 
 export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
@@ -69,7 +68,7 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 	/** Maps virtual CSS module IDs to their CSS content (for external mode) */
 	const cssModuleMap = new Map<string, string>();
 	/** Shared cross-file reactive tracking; created in `buildStart` */
-	let project: Project | null = null;
+	let project: Project;
 
 	return {
 		name: 'dartsx',
@@ -85,7 +84,7 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 		async buildStart() {
 			// Determine entry points: vite's build input (defaults to index.html,
 			// which `init()` resolves through vite) plus any explicit options.
-			const input = this.environment.config.build.rollupOptions.input;
+			const input = this.environment.config.build.rolldownOptions.input;
 			let entries: string[] = [];
 			if (typeof input === 'string') entries = [input];
 			else if (Array.isArray(input)) entries = [...input];
@@ -113,14 +112,14 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 			await project.init();
 		},
 		// Clean up project state when files are deleted or renamed, and
-		// invalidate modules whose reactive-call info the removal changed.
+		// invalidate modules whose reactive info the removal changed.
 		handleHotUpdate({ modules, server }) {
-			if (!project) return;
+			if (!project) throw new Error('dartsx: project not initialized (buildStart did not run)');
 			for (const mod of modules) {
 				if (!mod.id || !mod.file) continue;
 				if (!fs.existsSync(mod.file)) {
-					const { changed } = project.remove(mod.id);
-					invalidateModules(server.moduleGraph, changed);
+					const { invalidated } = project.remove(mod.id);
+					invalidateModules(server.moduleGraph, invalidated);
 				}
 			}
 		},
@@ -135,23 +134,22 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 		},
 		async transform(code, id) {
 			if (!isCompilable(id)) return;
-			if (!project) return;
+			if (!project) throw new Error('dartsx: project not initialized (buildStart did not run)');
 
-			const { changed } = await project.update(id, code);
+			const { invalidated } = await project.update(id, code);
 
 			// Recompile modules whose reactive information changed (their
-			// outputs are stale until re-transformed). The current module was
-			// just updated, so it needs no invalidation. Build mode needs none
-			// either — `init()` pre-compiled the graph with final information.
+			// outputs are stale until re-transformed). Build mode needs no
+			// invalidation — `init()` pre-compiled the graph with final info.
 			if (this.environment.mode === 'dev') {
-				invalidateModules(this.environment.moduleGraph, changed.filter((other) => other !== id));
+				invalidateModules(this.environment.moduleGraph, invalidated);
 			}
 
 			const output = project.output(id);
 			if (!output) return;
 
 			let outputCode = output.code;
-			let map = toSourceMapInput(output.map);
+			let map = toViteSourceMap(output.map);
 
 			// In external mode, append CSS as a virtual import so Vite can extract it
 			if (cssMode === 'external' && output.css != null) {
