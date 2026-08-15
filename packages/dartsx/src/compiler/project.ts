@@ -362,7 +362,7 @@ export class Project {
 
 		// If this module's reactive export surface changed, its importers must
 		// recompile — they were compiled against the old surface.
-		if (prevExports.join(',') !== result.metadata.reactiveExports.join(',')) {
+		if (!sameStrings(prevExports, result.metadata.reactiveExports)) {
 			const importers = this.importers.get(filename);
 			if (importers) {
 				for (const importer of importers) {
