@@ -83,15 +83,23 @@ export interface PreprocessResult {
 // ── Detection ──────────────────────────────────────────────────────
 
 /**
- * Detect whether a .tsx file contains DarTsx syntax.
+ * Detect whether a source file contains DarTsx syntax.
+ *
+ * Comments and string literals are stripped first so JSDoc, prose strings,
+ * and template literals mentioning `state`/`derived` don't cause false
+ * positives.
  */
 export function isDarTsxFile(content: string): boolean {
-	return /\bcomponent\s+\w+\s*\(/.test(content)
-		|| /\bstate\s+\w+/.test(content)
-		|| /\bderived\s+\w+/.test(content)
-		|| /\bderived\s+[{[]/.test(content)
-		|| /\brender\s*[(<]/.test(content)
-		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(content);
+	const sample = content.replace(
+		/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g,
+		() => '',
+	);
+	return /\bcomponent\s+\w+\s*\(/.test(sample)
+		|| /\bstate\s+\w+/.test(sample)
+		|| /\bderived\s+\w+/.test(sample)
+		|| /\bderived\s+[{[]/.test(sample)
+		|| /\brender\s*[(<]/.test(sample)
+		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
 }
 
 // ── Main entry point ───────────────────────────────────────────────
