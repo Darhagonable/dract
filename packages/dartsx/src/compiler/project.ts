@@ -68,20 +68,6 @@ export interface ProjectUpdate {
 }
 
 /**
- * Extract import specifiers from source without parsing (used when the
- * compiled metadata cache has no entry yet).
- */
-function extractImportSpecifiers(code: string): string[] {
-	const specifiers = new Set<string>();
-	const importRe = /import\s+(?:[^'";]+?)\s+from\s+['"]([^'"]+)['"]/g;
-	let match: RegExpExecArray | null;
-	while ((match = importRe.exec(code)) !== null) {
-		specifiers.add(match[1]);
-	}
-	return [...specifiers];
-}
-
-/**
  * A collection of DarTsx modules compiled together, with cross-file reactive
  * tracking: reactive exports, reactive call propagation, the dependency graph,
  * and the invalidation decisions that follow from all of them.
@@ -105,7 +91,7 @@ export class Project {
 	 * still being processed (mutually-importing files). Not a work queue —
 	 * `init()` and the tool own recompilation scheduling. */
 	private invalidationGuard = new Set<string>();
-	/** Cached import specifiers per module (avoids regex, populated from compile results) */
+	/** Cached import specifiers per module (populated from compile metadata) */
 	private importSpecifierCache = new Map<string, string[]>();
 	/** Compiled outputs, owned by the project and read by the tool. */
 	private outputs = new Map<string, ModuleOutput>();
@@ -263,50 +249,60 @@ export class Project {
 			return { invalidated: [] };
 		}
 
-		let reactiveImports: Record<string, string[]> | undefined;
+		// First compile pass: reactive import info comes only from modules
+		// already known to export reactive names. Import specifiers themselves
+		// come from OXC metadata — no regex parsing.
+		const cachedSpecifiers = this.importSpecifierCache.get(filename);
+		const { deps, reactiveImports } = await this.resolveDeps(filename, cachedSpecifiers ?? []);
 
-		// Build reactiveImports from cached specifiers
-		const specifiers = this.importSpecifierCache.get(filename) ?? extractImportSpecifiers(source);
-		const deps = new Set<string>();
-		if (specifiers?.length) {
-			reactiveImports = {};
-			for (const specifier of specifiers) {
-				const resolved = await this.host.resolve(specifier, filename);
-				if (resolved) {
-					deps.add(resolved);
-					let exports = this.reactiveRegistry.get(resolved);
-					if (!exports) {
-						const importedSource = await this.host.readFile(resolved);
-						if (importedSource && isDarTsxFile(importedSource)) {
-							try {
-								exports = compileModule(importedSource, { filename: resolved }).metadata.reactiveExports;
-								if (exports.length > 0) this.reactiveRegistry.set(resolved, exports);
-							} catch {
-								// Ignore inspection failures and continue without reactive import info.
-							}
-						}
-					}
-					if (exports?.length) {
-						reactiveImports[specifier] = exports;
-					}
-				}
-			}
-		}
-		this.replaceEdges(filename, [...deps]);
-
-		const result = compileModule(source, {
+		let result = compileModule(source, {
 			filename,
 			css: this.css,
 			reactiveImports,
 			reactiveCallImports: this.reactiveCallRegistry.get(filename),
 		});
 
-		// Cache import specifiers for next compile (avoids regex on subsequent updates)
-		if (result.metadata.importSpecifiers.length > 0) {
-			this.importSpecifierCache.set(filename, result.metadata.importSpecifiers);
+		// Cache the authoritative specifier list from OXC metadata.
+		const specifiers = result.metadata.importSpecifiers;
+		if (specifiers.length > 0) {
+			this.importSpecifierCache.set(filename, specifiers);
 		} else {
 			this.importSpecifierCache.delete(filename);
 		}
+
+		// If the compile ran without the current import list (first compile of
+		// an importing module, or the source gained imports since the last
+		// compile), recompile with full reactive info so the stored output is
+		// correct in one call. Dependencies that haven't compiled yet are
+		// inspected for their reactive exports right here — a single-shot tool
+		// (e.g. a Vite dev transform) consumes the result immediately and the
+		// dependency's own registration would come too late for it.
+		let finalDeps = deps;
+		if (specifiers.join(',') !== (cachedSpecifiers ?? []).join(',')) {
+			for (const specifier of specifiers) {
+				const resolved = await this.host.resolve(specifier, filename);
+				if (!resolved || this.reactiveRegistry.has(resolved)) continue;
+				const importedSource = await this.host.readFile(resolved);
+				if (!importedSource) continue;
+				try {
+					const exports = compileModule(importedSource, { filename: resolved }).metadata.reactiveExports;
+					if (exports.length > 0) this.reactiveRegistry.set(resolved, exports);
+				} catch {
+					// Inspect what we can; the dependency's own compile surfaces its errors.
+				}
+			}
+			const fresh = await this.resolveDeps(filename, specifiers);
+			finalDeps = fresh.deps;
+			if (Object.keys(fresh.reactiveImports).length > 0) {
+				result = compileModule(source, {
+					filename,
+					css: this.css,
+					reactiveImports: fresh.reactiveImports,
+					reactiveCallImports: this.reactiveCallRegistry.get(filename),
+				});
+			}
+		}
+		this.replaceEdges(filename, finalDeps);
 
 		// Store reactive exports in registry, remembering the previous surface
 		const prevExports = this.reactiveRegistry.get(filename) ?? [];
@@ -379,6 +375,27 @@ export class Project {
 		});
 
 		return { invalidated: stale };
+	}
+
+	/**
+	 * Resolve a module's import specifiers to dependency ids and collect the
+	 * reactive export names of dependencies that are already registered
+	 * (populated when the dependencies themselves were compiled).
+	 */
+	private async resolveDeps(
+		filename: string,
+		specifiers: string[],
+	): Promise<{ deps: string[]; reactiveImports: Record<string, string[]> }> {
+		const deps: string[] = [];
+		const reactiveImports: Record<string, string[]> = {};
+		for (const specifier of specifiers) {
+			const resolved = await this.host.resolve(specifier, filename);
+			if (!resolved) continue;
+			deps.push(resolved);
+			const exports = this.reactiveRegistry.get(resolved);
+			if (exports?.length) reactiveImports[specifier] = exports;
+		}
+		return { deps, reactiveImports };
 	}
 
 	/**
