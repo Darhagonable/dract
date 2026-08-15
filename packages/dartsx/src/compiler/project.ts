@@ -67,6 +67,11 @@ export interface ProjectUpdate {
 	invalidated: string[];
 }
 
+/** Order-sensitive array equality (import/export lists are source-ordered). */
+function sameStrings(a: string[], b: string[]): boolean {
+	return a.length === b.length && a.every((value, i) => value === b[i]);
+}
+
 /**
  * A collection of DarTsx modules compiled together, with cross-file reactive
  * tracking: reactive exports, reactive call propagation, the dependency graph,
@@ -278,7 +283,7 @@ export class Project {
 		// (e.g. a Vite dev transform) consumes the result immediately and the
 		// dependency's own registration would come too late for it.
 		let finalDeps = deps;
-		if (specifiers.join(',') !== (cachedSpecifiers ?? []).join(',')) {
+		if (!sameStrings(specifiers, cachedSpecifiers ?? [])) {
 			for (const specifier of specifiers) {
 				const resolved = await this.host.resolve(specifier, filename);
 				if (!resolved || this.reactiveRegistry.has(resolved)) continue;
