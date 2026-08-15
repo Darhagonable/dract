@@ -7,38 +7,44 @@
  * - which imported functions receive reactive arguments at call sites
  * - which modules need recompilation when that information changes
  *
- * The project owns its environment: the tool supplies `resolve`/`readFile` hooks
- * once at construction, and `update()` is called per module change. It also owns
- * the compiled outputs: tools read results back with `output()`.
+ * The project owns its environment: the tool supplies a `host` (module
+ * resolution + source loading) once at construction, and `update()` is called
+ * per module change. It also owns the compiled outputs: tools read results
+ * back with `output()` and act on the `changed` ids they receive.
  *
- * Tools that know their entry points can call `init()`, which discovers and
- * compiles the whole import graph without further supervision.
+ * Tools that know their entry points call `init()`, which discovers and
+ * compiles the whole reachable import graph without further supervision.
  */
 import { compileModule } from './index';
 import { isDarTsxFile } from './phases/1-preprocess';
 import type { SourceMap } from '@jridgewell/remapping';
 
-/** Bundler-agnostic environment hooks supplied by the tool. */
-export interface ProjectHooks {
+/** Bundler-agnostic environment supplied by the tool. */
+export interface ProjectHost {
 	/** Resolve an import specifier (as seen in `importer`) to a module id. */
-	resolve(specifier: string, importer: string): Promise<string | null> | string | null;
-	/** Read a module's source, used to inspect imports whose exports aren't cached. */
-	readFile(id: string): Promise<string | null> | string | null;
+	resolve(
+		specifier: string,
+		importer: string,
+	): string | undefined | Promise<string | undefined>;
+	/** Read a module's source, or undefined when the module doesn't exist. */
+	readFile(id: string): string | undefined | Promise<string | undefined>;
 }
 
-export interface ProjectOptions extends ProjectHooks {
+export interface ProjectOptions {
 	/**
-	 * Entry points for `init()`. Optional — tools that feed modules in
-	 * themselves (e.g. a Vite plugin in dev mode) can skip discovery and
-	 * drive the project purely through `update()`.
+	 * Entry points for `init()`. Tools that feed modules in themselves (e.g. a
+	 * Vite plugin in dev mode) can pass `[]` and drive the project purely
+	 * through `update()`.
 	 */
-	entryPoints?: string[];
+	entryPoints: string[];
 	/**
 	 * CSS delivery mode, forwarded to `compileModule`.
 	 * - `'injected'`: emit `$.style()` calls in JS (default)
 	 * - `'external'`: omit `$.style()` calls, collect CSS for external delivery
 	 */
 	css?: 'injected' | 'external';
+	/** The environment the project reads its modules through. */
+	host: ProjectHost;
 }
 
 /** The compiled output of one module, owned by the project. */
@@ -108,13 +114,13 @@ export class Project {
 	/** Reverse edges: module id → ids that import it. */
 	private importers = new Map<string, Set<string>>();
 
-	private hooks: ProjectHooks;
+	private host: ProjectHost;
 	private entryPoints: string[];
 	private css: 'injected' | 'external';
 
 	constructor(options: ProjectOptions) {
-		this.hooks = { resolve: options.resolve, readFile: options.readFile };
-		this.entryPoints = options.entryPoints ?? [];
+		this.host = options.host;
+		this.entryPoints = options.entryPoints;
 		this.css = options.css || 'injected';
 	}
 
@@ -177,32 +183,38 @@ export class Project {
 
 	/**
 	 * Drop a caller's reactive-call contributions and rebuild the aggregated
-	 * registry for every target that received them.
+	 * registry for every target that received them. Returns the ids whose
+	 * registry changed (their outputs are stale until re-transformed).
 	 */
-	private dropContributions(callerId: string) {
+	private dropContributions(callerId: string): string[] {
 		const contribs = this.reactiveCallContributions.get(callerId);
 		this.reactiveCallContributions.delete(callerId);
-		if (!contribs) return;
+		if (!contribs) return [];
+		const changed: string[] = [];
 		for (const targetId of contribs.keys()) {
 			if (this.pendingInvalidations.has(targetId)) continue;
-			this.rebuildRegistryForTarget(targetId);
+			if (this.rebuildRegistryForTarget(targetId)) {
+				this.pendingInvalidations.add(targetId);
+				changed.push(targetId);
+			}
 		}
+		return changed;
 	}
 
 	/**
 	 * Discover and initially compile the project from its entry points.
 	 *
-	 * Walks the import graph via the `resolve`/`readFile` hooks: each module is
-	 * compiled with `update()`, then its changed neighbours and newly discovered
-	 * dependencies are compiled in turn until the graph converges.
+	 * Walks the import graph via the `host`: each module is compiled with
+	 * `update()`, then its changed neighbours and newly discovered dependencies
+	 * are compiled in turn until the graph converges.
 	 */
 	async init(): Promise<void> {
 		let worklist = new Set(this.entryPoints);
 		while (worklist.size > 0) {
 			const next = new Set<string>();
 			for (const id of worklist) {
-				const source = await this.hooks.readFile(id);
-				if (source === null || source === undefined) {
+				const source = await this.host.readFile(id);
+				if (source === undefined) {
 					this.remove(id);
 					continue;
 				}
@@ -258,12 +270,12 @@ export class Project {
 		if (specifiers?.length) {
 			reactiveImports = {};
 			for (const specifier of specifiers) {
-				const resolved = await this.hooks.resolve(specifier, filename);
+				const resolved = await this.host.resolve(specifier, filename);
 				if (resolved) {
 					deps.add(resolved);
 					let exports = this.reactiveRegistry.get(resolved);
-					if (!exports && this.hooks.readFile) {
-						const importedSource = await this.hooks.readFile(resolved);
+					if (!exports) {
+						const importedSource = await this.host.readFile(resolved);
 						if (importedSource && isDarTsxFile(importedSource)) {
 							try {
 								exports = compileModule(importedSource, { filename: resolved }).metadata.reactiveExports;
@@ -307,7 +319,7 @@ export class Project {
 		// First, collect this caller's new contributions
 		const newContribs = new Map<string, Record<string, number[]>>();
 		for (const [specifier, fns] of Object.entries(result.metadata.reactiveCalls)) {
-			const resolved = await this.hooks.resolve(specifier, filename);
+			const resolved = await this.host.resolve(specifier, filename);
 			if (!resolved) continue;
 			// Skip pre-built output directories — compiled library files handle
 			// signals internally and must not be recompiled with reactive param
@@ -369,9 +381,11 @@ export class Project {
 	}
 
 	/**
-	 * Forget a module (e.g. its file was deleted or renamed).
+	 * Forget a module (e.g. its file was deleted or renamed). Returns the ids
+	 * whose outputs are now stale (targets that received reactive-call
+	 * contributions from the removed module).
 	 */
-	remove(filename: string): void {
+	remove(filename: string): ProjectUpdate {
 		this.outputs.delete(filename);
 		this.reactiveRegistry.delete(filename);
 		this.reactiveCallRegistry.delete(filename);
@@ -379,7 +393,7 @@ export class Project {
 		this.pendingInvalidations.delete(filename);
 		this.modulesSet.delete(filename);
 		this.replaceEdges(filename, []);
-		this.dropContributions(filename);
+		return { changed: this.dropContributions(filename) };
 	}
 
 	/**

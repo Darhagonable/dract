@@ -186,9 +186,9 @@ The Vite plugin is a thin adapter around the compiler's `Project` layer for dev 
 Its current responsibilities are:
 
 - compile DarTsx `.tsx` and `.jsx` modules and DarTsx-flavored `.ts` and `.js` modules
-- construct the `Project` once with vite's `resolve` and the filesystem as environment hooks, plus the build's entry points when available
-- run `Project.init()` once so the whole import graph is compiled up front in build mode (dev mode drives the project purely through `update()`)
-- invalidate modules in the vite module graph when `Project` reports changed reactive information
+- construct the `Project` in `buildStart` with vite's `resolve` and the filesystem as host, plus entry points from vite's build input (defaults to `index.html`, which `init()` resolves through vite) and any explicit plugin options
+- run `Project.init()` so the whole reachable graph is compiled up front in build mode (dev mode drives the project purely through `update()`)
+- invalidate modules in the vite module graph when `Project` reports changed reactive information (dev only — build needs no invalidation thanks to `init()`)
 - serve external CSS via virtual modules
 
 All cross-file state (reactive exports, reactive call propagation, invalidation decisions) lives in the tooling-agnostic `Project` class in `packages/dartsx` (`dartsx/compiler/project`). Non-Vite tools (CLI, build scripts) can drive the same `Project` API without a bundler.

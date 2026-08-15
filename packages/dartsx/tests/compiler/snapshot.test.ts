@@ -54,15 +54,17 @@ async function compileMultiFile(dir: string, files: string[]): Promise<Map<strin
 
 	const project = new Project({
 		entryPoints: [...filePaths.values()],
-		resolve: async (specifier) => {
-			if (!specifier.startsWith('./')) return null;
-			const base = specifier.slice(2);
-			for (const [name, abs] of filePaths) {
-				if (base === name || base === name.replace(/\.[^.]+$/, '')) return abs;
-			}
-			return null;
+		host: {
+			resolve: async (specifier) => {
+				if (!specifier.startsWith('./')) return undefined;
+				const base = specifier.slice(2);
+				for (const [name, abs] of filePaths) {
+					if (base === name || base === name.replace(/\.[^.]+$/, '')) return abs;
+				}
+				return undefined;
+			},
+			readFile: (id) => (existsSync(id) ? readFileSync(id, 'utf-8') : undefined),
 		},
-		readFile: (id) => (existsSync(id) ? readFileSync(id, 'utf-8') : null),
 	});
 
 	// Discover and compile the whole graph from the entry points, following

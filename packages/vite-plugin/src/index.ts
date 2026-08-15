@@ -1,12 +1,6 @@
-import type { Plugin } from 'vite';
-import { Project } from 'dartsx/compiler';
+import type { Plugin, TransformResult } from 'vite';
+import { Project, type ModuleOutput } from 'dartsx/compiler';
 import fs from 'node:fs';
-
-export interface DarTsxTransformContext {
-	resolve(specifier: string, importer?: string): Promise<{ id: string } | null>;
-	error(msg: string): never;
-	environment: unknown;
-}
 
 export interface DarTsxPluginOptions {
 	/**
@@ -15,18 +9,67 @@ export interface DarTsxPluginOptions {
 	 * - `'external'`: extract CSS to separate `.css` files
 	 */
 	css?: 'injected' | 'external';
+	/**
+	 * Additional entry points for `Project.init()`. The plugin also extracts
+	 * vite's build input in `buildStart`; dev mode is update-driven.
+	 */
+	entryPoints?: string[];
+}
+
+/** Whether a module id should be processed as DarTsx. */
+function isCompilable(id: string): boolean {
+	const isTs = id.endsWith('.ts') && !id.endsWith('.d.ts');
+	const isJs = id.endsWith('.js') && !id.endsWith('.d.ts');
+	return id.endsWith('.tsx') || id.endsWith('.jsx') || isTs || isJs;
+}
+
+/**
+ * Invalidate modules in a vite module graph. Works with both the legacy
+ * combined `ModuleGraph` and per-environment `EnvironmentModuleGraph`.
+ */
+function invalidateModules(
+	graph: {
+		getModuleById(id: string): { id: string | null } | undefined;
+		invalidateModule(mod: { id: string | null }): void;
+	},
+	ids: string[],
+) {
+	for (const id of ids) {
+		const mod = graph.getModuleById(id);
+		if (mod) graph.invalidateModule(mod);
+	}
+}
+
+/** Append an import for a virtual CSS module and register its content. */
+function appendCssImport(
+	cssModuleMap: Map<string, string>,
+	code: string,
+	id: string,
+	css: string,
+): string {
+	const cssId = `${id}.css`;
+	cssModuleMap.set(cssId, css);
+	return `${code}\nimport ${JSON.stringify(cssId)};`;
+}
+
+/**
+ * Adapt a compiler source map to vite's `TransformResult['map']`. The
+ * compiler's maps are always encoded (esrap/remapping emit `mappings` as a
+ * string); rolldown additionally types source maps as classes with
+ * `toUrl`/`toString` methods that plain objects don't have, so the object is
+ * cast — vite handles method-less maps at runtime.
+ */
+function toSourceMapInput(map: ModuleOutput['map']): TransformResult['map'] {
+	if (map == null) return null;
+	return { ...map, mappings: map.mappings as string } as TransformResult['map'];
 }
 
 export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 	const cssMode = options.css || 'injected';
 	/** Maps virtual CSS module IDs to their CSS content (for external mode) */
 	const cssModuleMap = new Map<string, string>();
-	/** Shared cross-file reactive tracking; lazily created on first transform */
+	/** Shared cross-file reactive tracking; created in `buildStart` */
 	let project: Project | null = null;
-	/** Guards one-time init so concurrent transforms share it */
-	let initPromise: Promise<void> | null = null;
-	/** Entry points from the resolved config (build mode; empty in dev) */
-	let entryPoints: string[] = [];
 
 	return {
 		name: 'dartsx',
@@ -39,18 +82,45 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				},
 			};
 		},
-		configResolved(config) {
-			const input = config.build.rolldownOptions.input;
-			if (typeof input === 'string') entryPoints = [input];
-			else if (Array.isArray(input)) entryPoints = [...input];
-			else if (input && typeof input === 'object') entryPoints = Object.values(input);
+		async buildStart() {
+			// Determine entry points: vite's build input (defaults to index.html,
+			// which `init()` resolves through vite) plus any explicit options.
+			const input = this.environment.config.build.rollupOptions.input;
+			let entries: string[] = [];
+			if (typeof input === 'string') entries = [input];
+			else if (Array.isArray(input)) entries = [...input];
+			else if (input && typeof input === 'object') entries = Object.values(input);
+			entries = [...new Set([...entries, ...(options.entryPoints ?? [])])];
+
+			project = new Project({
+				css: cssMode,
+				entryPoints: entries,
+				host: {
+					resolve: async (specifier, importer) => {
+						const resolved = await this.resolve(specifier, importer);
+						if (!resolved) return undefined;
+						return typeof resolved === 'string' ? resolved : resolved.id;
+					},
+					readFile: (file) => {
+						try {
+							return fs.readFileSync(file, 'utf8');
+						} catch {
+							return undefined;
+						}
+					},
+				},
+			});
+			await project.init();
 		},
-		// Clean up project state when files are deleted or renamed
-		handleHotUpdate({ modules }) {
+		// Clean up project state when files are deleted or renamed, and
+		// invalidate modules whose reactive-call info the removal changed.
+		handleHotUpdate({ modules, server }) {
+			if (!project) return;
 			for (const mod of modules) {
-				if (!mod.id) continue;
-				if (!mod.file || !fs.existsSync(mod.file)) {
-					project?.remove(mod.id);
+				if (!mod.id || !mod.file) continue;
+				if (!fs.existsSync(mod.file)) {
+					const { changed } = project.remove(mod.id);
+					invalidateModules(server.moduleGraph, changed);
 				}
 			}
 		},
@@ -64,64 +134,35 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 			if (css !== undefined) return css;
 		},
 		async transform(code, id) {
-			const isTsx = id.endsWith('.tsx');
-			const isJsx = id.endsWith('.jsx');
-			const isTs = id.endsWith('.ts') && !id.endsWith('.d.ts');
-			const isJs = id.endsWith('.js') && !id.endsWith('.d.ts');
-
-			if (!isTsx && !isTs && !isJsx && !isJs) return;
-
-			if (!project) {
-				project = new Project({
-					css: cssMode,
-					entryPoints,
-					resolve: async (specifier, importer) => {
-						const resolved = await this.resolve(specifier, importer);
-						if (!resolved) return null;
-						return typeof resolved === 'string' ? resolved : resolved.id;
-					},
-					readFile: (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null),
-				});
-				initPromise = project.init().finally(() => {
-					initPromise = null;
-				});
-			}
-			if (initPromise) await initPromise;
+			if (!isCompilable(id)) return;
+			if (!project) return;
 
 			const { changed } = await project.update(id, code);
+
+			// Recompile modules whose reactive information changed (their
+			// outputs are stale until re-transformed). The current module was
+			// just updated, so it needs no invalidation. Build mode needs none
+			// either — `init()` pre-compiled the graph with final information.
+			if (this.environment.mode === 'dev') {
+				invalidateModules(this.environment.moduleGraph, changed.filter((other) => other !== id));
+			}
 
 			const output = project.output(id);
 			if (!output) return;
 
-			// Recompile modules whose reactive-call info changed (their outputs
-			// are stale until re-transformed). The current module was just
-			// updated, so it needs no invalidation.
-			for (const otherId of changed) {
-				if (otherId === id) continue;
-				const env = this.environment;
-				if (env && typeof env === 'object' && 'moduleGraph' in env) {
-					const mg = env.moduleGraph;
-					if (mg && typeof mg === 'object' && 'getModuleById' in mg && typeof mg.getModuleById === 'function') {
-						const mod = mg.getModuleById(otherId);
-						if (mod && 'invalidateModule' in mg && typeof mg.invalidateModule === 'function') {
-							mg.invalidateModule(mod);
-						}
-					}
-				}
-			}
-
 			let outputCode = output.code;
+			let map = toSourceMapInput(output.map);
 
 			// In external mode, append CSS as a virtual import so Vite can extract it
-			if (cssMode === 'external' && output.css) {
-				const cssId = id + '.css';
-				cssModuleMap.set(cssId, output.css);
-				outputCode += `\nimport ${JSON.stringify(cssId)};`;
+			if (cssMode === 'external' && output.css != null) {
+				outputCode = appendCssImport(cssModuleMap, outputCode, id, output.css);
+				// The appended CSS import would misalign the map, so drop it then
+				map = null;
 			}
 
 			return {
 				code: outputCode,
-				map: null,
+				map,
 			};
 		},
 	};

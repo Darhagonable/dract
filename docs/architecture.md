@@ -62,7 +62,7 @@ This means:
 
 ### Project Layer
 
-Cross-file reactive state lives in the compiler package (`dartsx/compiler/project`), keeping it tooling-agnostic. The `Project` class is constructed with `resolve`/`readFile` environment hooks (plus optional `entryPoints` and a CSS mode), drives the single-file `compileModule()` under the hood, and tracks:
+Cross-file reactive state lives in the compiler package (`dartsx/compiler/project`), keeping it tooling-agnostic. The `Project` class is constructed with a `host` (module resolution + source loading), `entryPoints`, and an optional CSS mode, drives the single-file `compileModule()` under the hood, and tracks:
 
 - **`reactiveRegistry`**: Maps module IDs → exported reactive variable names
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers
@@ -73,9 +73,9 @@ Cross-file reactive state lives in the compiler package (`dartsx/compiler/projec
 - **`update(filename, source)`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, invalidates importers when the module's reactive exports change, and returns `{ changed }` — the module itself plus the ids whose outputs changed by the call
 - **`output(id)`**: The project owns compiled outputs; tools read results back instead of receiving them per call
 - **`modules()`**: Lists all module ids the project currently knows about
-- **`remove()`**: Cleans up project state (outputs, registries, graph edges, contribution targets) when files are deleted or renamed
+- **`remove()`**: Cleans up project state (outputs, registries, graph edges, contribution targets) and returns `{ changed }` — targets whose reactive-call info the removal changed
 
-Tools feed modules into `Project` and act on the results. The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it supplies vite's `resolve` and the filesystem as constructor hooks, runs `init()` once with the build's entry points, invalidates the returned module IDs through the vite module graph, and handles CSS delivery.
+Tools feed modules into `Project` and act on the results; `Project` never touches the bundler — it reports `changed` ids and the adapter decides what they mean (invalidate / write / re-render). The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it creates the `Project` in `buildStart` with vite's `resolve` and the filesystem as host, runs `init()` with the build's entry points, invalidates returned ids through the vite module graph, and handles CSS delivery.
 
 ### Compiler Pipeline
 

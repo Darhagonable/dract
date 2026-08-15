@@ -8,18 +8,21 @@ import { Project, type ProjectOptions } from '../../src/compiler/project';
 function makeProject(files: Record<string, string>, options: Partial<ProjectOptions> = {}): Project {
 	return new Project({
 		...options,
-		async resolve(specifier: string) {
-			if (!specifier.startsWith('./')) return null;
-			const base = specifier.slice(2);
-			for (const id of Object.keys(files)) {
-				if (base === id || base === id.replace(/\.[^.]+$/, '')) return id;
-				const name = id.split('/').pop()!;
-				if (base === name || base === name.replace(/\.[^.]+$/, '')) return id;
-			}
-			return null;
-		},
-		readFile(id: string) {
-			return files[id] ?? null;
+		entryPoints: options.entryPoints ?? [],
+		host: {
+			async resolve(specifier: string) {
+				if (!specifier.startsWith('./')) return undefined;
+				const base = specifier.slice(2);
+				for (const id of Object.keys(files)) {
+					if (base === id || base === id.replace(/\.[^.]+$/, '')) return id;
+					const name = id.split('/').pop()!;
+					if (base === name || base === name.replace(/\.[^.]+$/, '')) return id;
+				}
+				return undefined;
+			},
+			readFile(id: string) {
+				return files[id];
+			},
 		},
 	});
 }
