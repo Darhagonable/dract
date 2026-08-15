@@ -7,31 +7,38 @@
  * - which imported functions receive reactive arguments at call sites
  * - which modules need recompilation when that information changes
  *
- * It also owns the compiled outputs: tools feed modules in through `update()`
- * and read results back with `output()`. It is deliberately free of bundler
- * APIs. The tool (Vite plugin, CLI, etc.) injects `resolve`/`readFile` hooks
- * per update so the project can discover imported modules and inspect their
- * sources.
+ * The project owns its environment: the tool supplies `resolve`/`readFile` hooks
+ * once at construction, and `update()` is called per module change. It also owns
+ * the compiled outputs: tools read results back with `output()`.
+ *
+ * Tools that know their entry points can call `init()`, which discovers and
+ * compiles the whole import graph without further supervision.
  */
 import { compileModule } from './index';
 import { isDarTsxFile } from './phases/1-preprocess';
 import type { SourceMap } from '@jridgewell/remapping';
 
-export interface ProjectOptions {
+/** Bundler-agnostic environment hooks supplied by the tool. */
+export interface ProjectHooks {
+	/** Resolve an import specifier (as seen in `importer`) to a module id. */
+	resolve(specifier: string, importer: string): Promise<string | null> | string | null;
+	/** Read a module's source, used to inspect imports whose exports aren't cached. */
+	readFile(id: string): Promise<string | null> | string | null;
+}
+
+export interface ProjectOptions extends ProjectHooks {
+	/**
+	 * Entry points for `init()`. Optional — tools that feed modules in
+	 * themselves (e.g. a Vite plugin in dev mode) can skip discovery and
+	 * drive the project purely through `update()`.
+	 */
+	entryPoints?: string[];
 	/**
 	 * CSS delivery mode, forwarded to `compileModule`.
 	 * - `'injected'`: emit `$.style()` calls in JS (default)
 	 * - `'external'`: omit `$.style()` calls, collect CSS for external delivery
 	 */
 	css?: 'injected' | 'external';
-}
-
-/** Bundler-agnostic hooks supplied by the tool per update. */
-export interface ProjectHooks {
-	/** Resolve an import specifier (as seen in `importer`) to a module id. */
-	resolve(specifier: string, importer: string): Promise<string | null> | string | null;
-	/** Read a module's source, used to inspect imports whose exports aren't cached. */
-	readFile(id: string): Promise<string | null> | string | null;
 }
 
 /** The compiled output of one module, owned by the project. */
@@ -42,6 +49,16 @@ export interface ModuleOutput {
 	map: SourceMap | null;
 	/** Collected CSS (external mode only); null when no style blocks compiled. */
 	css: string | null;
+}
+
+/** Result of an `update()` call. */
+export interface ProjectUpdate {
+	/**
+	 * Module ids whose outputs changed: the updated module itself plus any
+	 * modules whose reactive information changed under them (their stored
+	 * outputs are stale until the tool re-transforms them).
+	 */
+	changed: string[];
 }
 
 /**
@@ -60,8 +77,8 @@ function extractImportSpecifiers(code: string): string[] {
 
 /**
  * A collection of DarTsx modules compiled together, with cross-file reactive
- * tracking: reactive exports, reactive call propagation, and the invalidation
- * decisions that follow from both.
+ * tracking: reactive exports, reactive call propagation, the dependency graph,
+ * and the invalidation decisions that follow from all of them.
  */
 export class Project {
 	/** Maps resolved module IDs to their reactive export names */
@@ -84,10 +101,20 @@ export class Project {
 	private importSpecifierCache = new Map<string, string[]>();
 	/** Compiled outputs, owned by the project and read by the tool. */
 	private outputs = new Map<string, ModuleOutput>();
+	/** All module ids the project knows about. */
+	private modulesSet = new Set<string>();
+	/** Resolved import edges: module id → ids it imports. */
+	private dependencies = new Map<string, string[]>();
+	/** Reverse edges: module id → ids that import it. */
+	private importers = new Map<string, Set<string>>();
 
+	private hooks: ProjectHooks;
+	private entryPoints: string[];
 	private css: 'injected' | 'external';
 
-	constructor(options: ProjectOptions = {}) {
+	constructor(options: ProjectOptions) {
+		this.hooks = { resolve: options.resolve, readFile: options.readFile };
+		this.entryPoints = options.entryPoints ?? [];
 		this.css = options.css || 'injected';
 	}
 
@@ -127,6 +154,72 @@ export class Project {
 	}
 
 	/**
+	 * Replace a module's dependency edges, keeping the importers map in sync.
+	 * Also registers newly discovered modules.
+	 */
+	private replaceEdges(filename: string, deps: string[]) {
+		const prevDeps = this.dependencies.get(filename) ?? [];
+		for (const dep of prevDeps) {
+			const importers = this.importers.get(dep);
+			if (importers) {
+				importers.delete(filename);
+				if (importers.size === 0) this.importers.delete(dep);
+			}
+		}
+		this.dependencies.set(filename, deps);
+		for (const dep of deps) {
+			if (dep === filename) continue;
+			if (!this.importers.has(dep)) this.importers.set(dep, new Set());
+			this.importers.get(dep)!.add(filename);
+			this.modulesSet.add(dep);
+		}
+	}
+
+	/**
+	 * Drop a caller's reactive-call contributions and rebuild the aggregated
+	 * registry for every target that received them.
+	 */
+	private dropContributions(callerId: string) {
+		const contribs = this.reactiveCallContributions.get(callerId);
+		this.reactiveCallContributions.delete(callerId);
+		if (!contribs) return;
+		for (const targetId of contribs.keys()) {
+			if (this.pendingInvalidations.has(targetId)) continue;
+			this.rebuildRegistryForTarget(targetId);
+		}
+	}
+
+	/**
+	 * Discover and initially compile the project from its entry points.
+	 *
+	 * Walks the import graph via the `resolve`/`readFile` hooks: each module is
+	 * compiled with `update()`, then its changed neighbours and newly discovered
+	 * dependencies are compiled in turn until the graph converges.
+	 */
+	async init(): Promise<void> {
+		let worklist = new Set(this.entryPoints);
+		while (worklist.size > 0) {
+			const next = new Set<string>();
+			for (const id of worklist) {
+				const source = await this.hooks.readFile(id);
+				if (source === null || source === undefined) {
+					this.remove(id);
+					continue;
+				}
+				const { changed } = await this.update(id, source);
+				for (const other of changed) {
+					if (other === id) continue;
+					next.add(other);
+				}
+				for (const dep of this.dependencies.get(id) ?? []) {
+					if (!this.outputs.has(dep)) next.add(dep);
+				}
+			}
+			worklist = next;
+		}
+	}
+
+	/**
 	 * The current compiled output for a module, or null when the project has
 	 * none (module not compiled or no longer part of the project).
 	 */
@@ -138,11 +231,14 @@ export class Project {
 	 * Compile (or recompile) a module and update cross-file tracking.
 	 *
 	 * The output is stored in the project and read back via `output()`.
-	 * Returns the ids whose outputs changed by this call: the module itself
-	 * (fresh output) plus any modules whose reactive-call information changed
-	 * (their stored outputs are stale until the tool re-transforms them).
+	 * The returned `changed` ids are the module itself (fresh output) plus any
+	 * modules whose outputs are now stale: targets of the module's reactive
+	 * calls and importers of its reactive exports.
 	 */
-	async update(filename: string, source: string, hooks: ProjectHooks): Promise<string[]> {
+	async update(filename: string, source: string): Promise<ProjectUpdate> {
+		this.pendingInvalidations.delete(filename);
+		this.modulesSet.add(filename);
+
 		// JSX-flavored files compile eagerly. Plain TS/JS modules compile only
 		// when they contain DarTsx syntax or participate in reactive-call
 		// propagation. A module that stops qualifying drops its stale output.
@@ -150,24 +246,24 @@ export class Project {
 		const isJsx = filename.endsWith('.jsx');
 		if (!isTsx && !isJsx && !this.reactiveCallRegistry.has(filename) && !isDarTsxFile(source)) {
 			this.outputs.delete(filename);
-			return [];
+			this.replaceEdges(filename, []);
+			return { changed: [] };
 		}
-
-		// Clear invalidation guard now that we're recompiling
-		this.pendingInvalidations.delete(filename);
 
 		let reactiveImports: Record<string, string[]> | undefined;
 
 		// Build reactiveImports from cached specifiers
 		const specifiers = this.importSpecifierCache.get(filename) ?? extractImportSpecifiers(source);
+		const deps = new Set<string>();
 		if (specifiers?.length) {
 			reactiveImports = {};
 			for (const specifier of specifiers) {
-				const resolved = await hooks.resolve(specifier, filename);
+				const resolved = await this.hooks.resolve(specifier, filename);
 				if (resolved) {
+					deps.add(resolved);
 					let exports = this.reactiveRegistry.get(resolved);
-					if (!exports && hooks.readFile) {
-						const importedSource = await hooks.readFile(resolved);
+					if (!exports && this.hooks.readFile) {
+						const importedSource = await this.hooks.readFile(resolved);
 						if (importedSource && isDarTsxFile(importedSource)) {
 							try {
 								exports = compileModule(importedSource, { filename: resolved }).metadata.reactiveExports;
@@ -183,6 +279,7 @@ export class Project {
 				}
 			}
 		}
+		this.replaceEdges(filename, [...deps]);
 
 		const result = compileModule(source, {
 			filename,
@@ -198,7 +295,8 @@ export class Project {
 			this.importSpecifierCache.delete(filename);
 		}
 
-		// Store reactive exports in registry
+		// Store reactive exports in registry, remembering the previous surface
+		const prevExports = this.reactiveRegistry.get(filename) ?? [];
 		if (result.metadata.reactiveExports.length > 0) {
 			this.reactiveRegistry.set(filename, result.metadata.reactiveExports);
 		} else {
@@ -209,7 +307,7 @@ export class Project {
 		// First, collect this caller's new contributions
 		const newContribs = new Map<string, Record<string, number[]>>();
 		for (const [specifier, fns] of Object.entries(result.metadata.reactiveCalls)) {
-			const resolved = await hooks.resolve(specifier, filename);
+			const resolved = await this.hooks.resolve(specifier, filename);
 			if (!resolved) continue;
 			// Skip pre-built output directories — compiled library files handle
 			// signals internally and must not be recompiled with reactive param
@@ -248,13 +346,26 @@ export class Project {
 			}
 		}
 
+		// If this module's reactive export surface changed, its importers must
+		// recompile — they were compiled against the old surface.
+		if (prevExports.join(',') !== result.metadata.reactiveExports.join(',')) {
+			const importers = this.importers.get(filename);
+			if (importers) {
+				for (const importer of importers) {
+					if (importer === filename || this.pendingInvalidations.has(importer)) continue;
+					this.pendingInvalidations.add(importer);
+					stale.push(importer);
+				}
+			}
+		}
+
 		this.outputs.set(filename, {
 			code: result.js.code,
 			map: result.js.map,
 			css: result.css.code || null,
 		});
 
-		return [filename, ...stale];
+		return { changed: [filename, ...stale] };
 	}
 
 	/**
@@ -264,8 +375,17 @@ export class Project {
 		this.outputs.delete(filename);
 		this.reactiveRegistry.delete(filename);
 		this.reactiveCallRegistry.delete(filename);
-		this.reactiveCallContributions.delete(filename);
 		this.importSpecifierCache.delete(filename);
 		this.pendingInvalidations.delete(filename);
+		this.modulesSet.delete(filename);
+		this.replaceEdges(filename, []);
+		this.dropContributions(filename);
+	}
+
+	/**
+	 * The ids of all modules the project currently knows about.
+	 */
+	modules(): string[] {
+		return [...this.modulesSet];
 	}
 }
