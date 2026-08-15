@@ -181,15 +181,15 @@ The grammar is intentionally lightweight. Semantic correctness still comes from 
 
 ### 6.1 Vite Plugin Role
 
-The Vite plugin is responsible for real compile-time behavior in dev and build flows.
+The Vite plugin is a thin adapter between Vite and the ProjectCompiler; the compiler owns the real compile-time behavior.
 
 Its current responsibilities are:
 
-- compile DarTsx `.tsx` and `.jsx` modules
-- compile DarTsx-flavored `.ts` and `.js` modules when they contain DarTsx syntax
-- inspect imported DarTsx modules to discover reactive exports
-- propagate reactive call information across modules
-- invalidate affected modules when reactive call-site information changes
+- compile DarTsx `.tsx` and `.jsx` modules (via `project.updateFile`)
+- compile DarTsx-flavored `.ts` and `.js` modules when they contain DarTsx syntax or the project already serves them
+- load neighbor sources from disk through `loadFile`
+- invalidate `changed` modules in Vite's module graph after an update
+- serve extracted CSS as virtual modules (external mode)
 
 ### 6.2 Compiler vs Editor Transform
 
@@ -204,7 +204,7 @@ They intentionally solve different problems. The editor transform aims for type-
 
 Cross-file reactive behavior is a build concern, not just an editor concern.
 
-The Vite plugin tracks:
+The ProjectCompiler tracks:
 
 - reactive exports produced by DarTsx modules
 - which imported functions receive reactive arguments

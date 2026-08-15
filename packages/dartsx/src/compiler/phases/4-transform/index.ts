@@ -21,8 +21,8 @@ import type { AnalysisResult, ComponentInfo, StyleBlockIR } from '../3-analyze';
 import { STATE_MARKER, DERIVED_MARKER, STYLE_MARKER_PREFIX } from '../1-preprocess';
 import type { Scope } from '../../scope';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
-import * as b from '../../builders';
-import type { AstNode } from '../../builders';
+import * as b from '../../factory';
+import type { AstNode, SourceLocation } from '../../factory';
 import { print, type PrintOptions } from 'esrap';
 import tsx from 'esrap/languages/tsx';
 import { decodeHTML } from 'entities';
@@ -69,7 +69,7 @@ export interface TransformResult {
 	code: string;
 	map: ReturnType<typeof print>['map'];
 	css: string;
-	/** The exact program that was printed as the emitted module. */
+	/** The exact program that was printed (the emitted module's AST). */
 	ast: AstNode;
 }
 
@@ -98,6 +98,15 @@ interface TransformState {
 	emitStyleCalls: boolean;
 	/** Whether we're inside a derived/effect callback body */
 	insideDerived: boolean;
+	/**
+	 * Compute a svelte-style loc (line/column) for a span of the STRIPPED
+	 * source (oxc-transform's output), so synthesized nodes can carry the
+	 * position of the source construct they were lowered from. esrap only
+	 * records a source-map segment for nodes with a loc, and the REPL's
+	 * forward mapping needs dense segments. Returns null when there is no
+	 * source to locate into.
+	 */
+	makeLoc: (from: number, to: number) => SourceLocation | null;
 }
 
 // ── Main entry ─────────────────────────────────────────────────────
@@ -109,6 +118,41 @@ export function transform(
 ): TransformResult {
 	const cssFragments: string[] = [];
 	const emitStyleCalls = cssMode !== 'external';
+
+	const lineStarts = [0];
+	// Positions in the AST index the STRIPPED document (oxc-transform's
+	// output, which `analysis.source` holds) — the same document the printed
+	// map is in. generateOutput chains [esrap map, oxc-strip map, preprocess
+	// map] to land on the authored source.
+	const source = analysis.source;
+	if (source) {
+		for (let i = 0; i < source.length; i++) {
+			if (source.charCodeAt(i) === 10) lineStarts.push(i + 1);
+		}
+	}
+	const locate = (offset: number): { line: number; column: number } => {
+		let lo = 0;
+		let hi = lineStarts.length - 1;
+		let line = 0;
+		while (lo <= hi) {
+			const mid = (lo + hi) >> 1;
+			if (lineStarts[mid] <= offset) {
+				line = mid;
+				lo = mid + 1;
+			} else {
+				hi = mid - 1;
+			}
+		}
+		return { line: line + 1, column: offset - lineStarts[line] };
+	};
+	const makeLoc = (from: number, to: number): SourceLocation | null => {
+		if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || to <= from) {
+			return null;
+		}
+		const start = locate(from);
+		const end = locate(to);
+		return { start, end };
+	};
 
 	const initialState: TransformState = {
 		scope: analysis.scope,
@@ -124,6 +168,7 @@ export function transform(
 		cssFragments,
 		emitStyleCalls,
 		insideDerived: false,
+		makeLoc,
 	};
 
 	derivedDestructureCounter = 0;
@@ -167,6 +212,15 @@ export function transform(
 		},
 	});
 
+	// esrap records a source-map segment only for nodes carrying a `loc`
+	// (svelte-style line/column spans); OXC nodes carry numeric start/end
+	// spans instead and builder-created nodes default to `loc: null`, so
+	// without this pass the printed map would be empty. Built nodes with a
+	// `0,0` span (no authored origin) are left alone — nodes that kept a
+	// real span get a `loc` computed from the stripped document's line
+	// starts.
+	if (analysis.source) attachLocations(transformed, makeLoc);
+
 	const printOpts: PrintOptions = {};
 	if (analysis.source && filename) {
 		printOpts.sourceMapContent = analysis.source;
@@ -174,6 +228,30 @@ export function transform(
 	}
 	const { code, map } = print(transformed, tsx(), printOpts);
 	return { code, map, css: cssFragments.join('\n'), ast: transformed };
+}
+
+/**
+ * Attach svelte-style `loc` objects to every span-bearing AST node that
+ * lacks one, so esrap can record its position in the printed source map.
+ * Positions are translated into the preprocessed document (see strip-locs).
+ */
+function attachLocations(ast: AstNode, makeLoc: (from: number, to: number) => SourceLocation | null): void {
+	const seen = new WeakSet<object>();
+	const visit = (value: unknown): void => {
+		if (!value || typeof value !== 'object' || seen.has(value)) return;
+		seen.add(value);
+		const record = value as Record<string, unknown>;
+		const { start, end } = record;
+		if (typeof start === 'number' && typeof end === 'number' && end > start && !record.loc) {
+			record.loc = makeLoc(start, end);
+		}
+		for (const key in record) {
+			if (key === 'loc') continue;
+			const child = record[key];
+			if (child && typeof child === 'object') visit(child);
+		}
+	};
+	visit(ast);
 }
 
 // ── Component transform ────────────────────────────────────────────
@@ -724,11 +802,27 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 		}
 		const attrResult = transformJSXAttribute(attr, state);
 		if (attrResult) {
-			if (Array.isArray(attrResult)) {
-				props.push(...attrResult);
-			} else {
-				props.push(attrResult);
+			const items = Array.isArray(attrResult) ? attrResult : [attrResult];
+			for (const item of items) {
+				if (item.type === 'Property') {
+					// Give the synthesized property the source position of the
+					// attribute it was lowered from, so the printed map carries a
+					// segment for the attribute name (and static value) — the
+					// REPL's forward mapping depends on dense segments.
+					const keyLoc = state.makeLoc(attr.name.start, attr.name.end);
+					if (keyLoc) {
+						(item.key as { loc?: SourceLocation | null }).loc = keyLoc;
+						// Getters/setters print a `get`/`set` keyword: map it too.
+						if (item.kind === 'get' || item.kind === 'set') {
+							(item as AstNode & { loc?: SourceLocation | null }).loc = keyLoc;
+						}
+					}
+					if (item.value.type === 'Literal' && attr.value?.type === 'Literal') {
+						(item.value as { loc?: SourceLocation | null }).loc = state.makeLoc(attr.value.start, attr.value.end);
+					}
+				}
 			}
+			props.push(...items);
 		}
 	}
 
@@ -782,7 +876,7 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 		}
 	}
 
-	const tag = isComponent ? b.id(tagName) : b.literal(tagName);
+	const tag = isComponent ? b.id(tagName, state.makeLoc(opening.name.start, opening.name.end)) : b.literal(tagName, state.makeLoc(opening.name.start, opening.name.end));
 	const factory = selfNs === 'svg' ? '$.svg' : selfNs === 'math' ? '$.math' : '$.jsx';
 	if (props.length === 0) return b.call(factory, [tag]);
 
@@ -938,7 +1032,7 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 					continue;
 				}
 			}
-			result.push(b.literal(text));
+			result.push(b.literal(text, state.makeLoc(child.start, child.end)));
 			continue;
 		}
 

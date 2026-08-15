@@ -187,13 +187,13 @@ console.log(total); // 7
 
 Under the hood, the compiler sees that `add(a, b)` passes two reactive variables. It transforms the function body so that `a` and `b` are read with `$.get()` and written with `$.set()`. The signal objects are passed directly — never the raw values — so the function always sees the current state.
 
-This works for any function, not just ones in the same file. The compiler and Vite plugin cooperate to track which parameter positions receive signals across module boundaries (see [Passing state across modules](#passing-state-across-modules)).
+This works for any function, not just ones in the same file. The compiler and ProjectCompiler cooperate to track which parameter positions receive signals across module boundaries (see [Passing state across modules](#passing-state-across-modules)).
 
 > [!NOTE] Only parameters at positions where a reactive variable is actually passed will be transformed. If a parameter only ever receives plain values, it stays untouched. The runtime is also safe — `$.get(nonSignal)` returns the value as-is, and `$.set(nonSignal, val)` returns `val`.
 
 ## Passing state across modules
 
-State flows naturally across module boundaries — no special syntax required. You can export `state` and `derived` variables, and the compiler + Vite plugin will automatically track them:
+State flows naturally across module boundaries — no special syntax required. You can export `state` and `derived` variables, and the compiler's project layer will automatically track them:
 
 ```tsx
 // @filename: store.ts
@@ -217,11 +217,11 @@ export default component App() {
 }
 ```
 
-This works because the Vite plugin maintains a registry of reactive exports. When `store.ts` is compiled, the plugin records that `count` is reactive. When `App.tsx` imports it, the compiler knows to wrap reads in `$.get()` and writes in `$.set()`.
+This works because the ProjectCompiler tracks reactive exports across the module graph. When `store.ts` is compiled, the project records that `count` is reactive. When `App.tsx` is compiled against that, the compiler knows to wrap reads in `$.get()` and writes in `$.set()`.
 
 ### Cross-file function calls
 
-When you pass state to an imported function, the compiler detects this at the call site and coordinates with the Vite plugin to recompile the target module:
+When you pass state to an imported function, the compiler detects this at the call site and the project recompiles the target module with the merged contributions:
 
 ```tsx
 // @filename: helpers.ts
@@ -250,7 +250,7 @@ export default component App() {
 }
 ```
 
-The compiler sees that `double(count)` and `reset(count)` pass a signal at position 0. The Vite plugin records this and recompiles `helpers.ts` so that `value` is treated as reactive — reads become `$.get(value)` and assignments become `$.set(value, 0)`.
+The compiler sees that `double(count)` and `reset(count)` pass a signal at position 0. The project records this and recompiles `helpers.ts` so that `value` is treated as reactive — reads become `$.get(value)` and assignments become `$.set(value, 0)`.
 
 > [!NOTE] This analysis is positional. If a function is called from multiple sites, the union of all reactive positions is used. For example, if `test(signal, plain)` is called in one place and `test(plain, signal)` in another, both parameters are treated as reactive.
 

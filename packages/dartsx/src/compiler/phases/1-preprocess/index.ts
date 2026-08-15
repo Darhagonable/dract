@@ -43,6 +43,8 @@ export interface PreprocessOptions {
 	 * - `typecheck`: uses `satisfies T as T`, blanks styles preserving interpolations
 	 */
 	mode?: 'compiler' | 'typecheck';
+	/** Filename recorded in the generated source map (for remapping chains). */
+	filename?: string;
 }
 
 export interface ComponentMeta {
@@ -123,7 +125,14 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	transformHtmlDirective(ms, source);
 
 	const code = ms.toString();
-	const map = ms.generateMap({ hires: true });
+	// The map must name its source (and include it) or a remapping chain that
+	// resolves through it drops every mapping: an unnamed source resolves to
+	// null and the original positions are discarded as unmapped.
+	const map = ms.generateMap({
+		hires: true,
+		source: options.filename ?? 'input.tsx',
+		includeContent: true,
+	});
 
 	return { code, map, components, stateVars, derivedVars, renamedParams, bindParams, styleBlocks };
 }
