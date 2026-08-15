@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'fs';
 import { join } from 'path';
-import { Project, type ProjectHooks } from '../../src/compiler/project';
+import { Project } from '../../src/compiler/project';
 
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;
@@ -50,11 +50,11 @@ function assertOutputs(dir: string, outputs: Map<string, string>) {
 
 /** Drive the Project across multiple files with cross-module tracking. */
 async function compileMultiFile(dir: string, files: string[]): Promise<Map<string, string>> {
-	const project = new Project();
 	const filePaths = new Map(files.map(f => [f, join(dir, f)]));
 
-	const hooks: ProjectHooks = {
-		async resolve(specifier: string) {
+	const project = new Project({
+		entryPoints: [...filePaths.values()],
+		resolve: async (specifier) => {
 			if (!specifier.startsWith('./')) return null;
 			const base = specifier.slice(2);
 			for (const [name, abs] of filePaths) {
@@ -62,25 +62,14 @@ async function compileMultiFile(dir: string, files: string[]): Promise<Map<strin
 			}
 			return null;
 		},
-		readFile: (id: string) => (existsSync(id) ? readFileSync(id, 'utf-8') : null),
-	};
+		readFile: (id) => (existsSync(id) ? readFileSync(id, 'utf-8') : null),
+	});
 
-	// Worklist: compile every file, then follow stale ids (modules whose
-	// reactive-call info changed under them) until the graph converges.
+	// Discover and compile the whole graph from the entry points, following
+	// stale ids until the reactive information converges.
+	await project.init();
+
 	const outputs = new Map<string, string>();
-	let worklist = new Set(filePaths.values());
-	while (worklist.size > 0) {
-		const next = new Set<string>();
-		for (const abs of worklist) {
-			const changed = await project.update(abs, readFileSync(abs, 'utf-8'), hooks);
-			for (const id of changed) {
-				if (id === abs) continue;
-				next.add(id);
-			}
-		}
-		worklist = next;
-	}
-
 	for (const filename of files) {
 		const abs = filePaths.get(filename)!;
 		const output = project.output(abs);

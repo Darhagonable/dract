@@ -23,6 +23,10 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 	const cssModuleMap = new Map<string, string>();
 	/** Shared cross-file reactive tracking; lazily created on first transform */
 	let project: Project | null = null;
+	/** Guards one-time init so concurrent transforms share it */
+	let initPromise: Promise<void> | null = null;
+	/** Entry points from the resolved config (build mode; empty in dev) */
+	let entryPoints: string[] = [];
 
 	return {
 		name: 'dartsx',
@@ -34,6 +38,12 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 					noDiscovery: true,
 				},
 			};
+		},
+		configResolved(config) {
+			const input = config.build.rolldownOptions.input;
+			if (typeof input === 'string') entryPoints = [input];
+			else if (Array.isArray(input)) entryPoints = [...input];
+			else if (input && typeof input === 'object') entryPoints = Object.values(input);
 		},
 		// Clean up project state when files are deleted or renamed
 		handleHotUpdate({ modules }) {
@@ -64,17 +74,21 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 			if (!project) {
 				project = new Project({
 					css: cssMode,
+					entryPoints,
+					resolve: async (specifier, importer) => {
+						const resolved = await this.resolve(specifier, importer);
+						if (!resolved) return null;
+						return typeof resolved === 'string' ? resolved : resolved.id;
+					},
+					readFile: (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null),
+				});
+				initPromise = project.init().finally(() => {
+					initPromise = null;
 				});
 			}
+			if (initPromise) await initPromise;
 
-			const changed = await project.update(id, code, {
-				resolve: async (specifier, importer) => {
-					const resolved = await this.resolve(specifier, importer);
-					if (!resolved) return null;
-					return typeof resolved === 'string' ? resolved : resolved.id;
-				},
-				readFile: (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null),
-			});
+			const { changed } = await project.update(id, code);
 
 			const output = project.output(id);
 			if (!output) return;

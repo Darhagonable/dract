@@ -62,17 +62,20 @@ This means:
 
 ### Project Layer
 
-Cross-file reactive state lives in the compiler package (`dartsx/compiler/project`), keeping it tooling-agnostic. The `Project` class accepts the single-file `compileModule()` output plus injected `resolve`/`readFile` hooks and tracks:
+Cross-file reactive state lives in the compiler package (`dartsx/compiler/project`), keeping it tooling-agnostic. The `Project` class is constructed with `resolve`/`readFile` environment hooks (plus optional `entryPoints` and a CSS mode), drives the single-file `compileModule()` under the hood, and tracks:
 
 - **`reactiveRegistry`**: Maps module IDs → exported reactive variable names
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers
 - **`importSpecifierCache`**: Caches import specifiers from compile results (avoids regex parsing)
 - **`pendingInvalidations`**: Guards against recompilation loops between mutually importing files
-- **`update()`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, and returns the ids whose outputs changed by the call
+- **dependency graph**: `dependencies` (module → imported ids) and `importers` (module → modules importing it), kept in sync on every update and removal
+- **`init()`**: Discovers and compiles the whole import graph from the entry points, following stale modules and newly discovered dependencies until the reactive information converges — no caller-side supervision needed
+- **`update(filename, source)`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, invalidates importers when the module's reactive exports change, and returns `{ changed }` — the module itself plus the ids whose outputs changed by the call
 - **`output(id)`**: The project owns compiled outputs; tools read results back instead of receiving them per call
-- **`remove()`**: Cleans up project state (including outputs) when files are deleted or renamed
+- **`modules()`**: Lists all module ids the project currently knows about
+- **`remove()`**: Cleans up project state (outputs, registries, graph edges, contribution targets) when files are deleted or renamed
 
-Tools feed modules into `Project` and act on the results. The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it supplies vite's `resolve` and the filesystem as hooks, invalidates the returned module IDs through the vite module graph, and handles CSS delivery.
+Tools feed modules into `Project` and act on the results. The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it supplies vite's `resolve` and the filesystem as constructor hooks, runs `init()` once with the build's entry points, invalidates the returned module IDs through the vite module graph, and handles CSS delivery.
 
 ### Compiler Pipeline
 
