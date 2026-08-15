@@ -68,8 +68,9 @@ Cross-file reactive state lives in the compiler package (`dartsx/compiler/projec
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers
 - **`importSpecifierCache`**: Caches import specifiers from compile results (avoids regex parsing)
 - **`pendingInvalidations`**: Guards against recompilation loops between mutually importing files
-- **`update()`**: Compiles a module, replaces its reactive-call contributions, rebuilds affected targets, and returns the module IDs whose reactive-call info changed
-- **`remove()`**: Cleans up project state when files are deleted or renamed
+- **`update()`**: Compiles a module, stores its output, replaces its reactive-call contributions, rebuilds affected targets, and returns the ids whose outputs changed by the call
+- **`output(id)`**: The project owns compiled outputs; tools read results back instead of receiving them per call
+- **`remove()`**: Cleans up project state (including outputs) when files are deleted or renamed
 
 Tools feed modules into `Project` and act on the results. The Vite plugin (`@dartsx/vite-plugin`) is a thin adapter: it supplies vite's `resolve` and the filesystem as hooks, invalidates the returned module IDs through the vite module graph, and handles CSS delivery.
 
