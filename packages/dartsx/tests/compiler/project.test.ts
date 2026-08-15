@@ -41,28 +41,28 @@ const CHAIN_FILES = {
 describe('Project', () => {
 	it('produces no output for plain modules without DarTsx syntax', async () => {
 		const project = makeProject({});
-		const { changed } = await project.update('/src/plain.ts', 'export const x = 1;');
-		expect(changed).toEqual([]);
+		const { invalidated } = await project.update('/src/plain.ts', 'export const x = 1;');
+		expect(invalidated).toEqual([]);
 		expect(project.output('/src/plain.ts')).toBeNull();
 	});
 
 	it('ignores DarTsx keywords inside comments and strings', async () => {
 		const project = makeProject({});
-		const { changed } = await project.update(
+		const { invalidated } = await project.update(
 			'/src/comment.ts',
 			`// state x = 1\n/* derived y = 2 */\nconst s = "state z = 3";\nexport const plain = true;`,
 		);
-		expect(changed).toEqual([]);
+		expect(invalidated).toEqual([]);
 		expect(project.output('/src/comment.ts')).toBeNull();
 	});
 
 	it('compiles modules with DarTsx syntax even without imports', async () => {
 		const project = makeProject({});
-		const { changed } = await project.update(
+		const { invalidated } = await project.update(
 			APP,
 			`export component App() {\nstate count = 0;\nrender (<p>{count}</p>)\n}`,
 		);
-		expect(changed).toEqual([APP]);
+		expect(invalidated).toEqual([]);
 		expect(project.output(APP)!.code).toContain('$.state(0)');
 	});
 
@@ -84,39 +84,39 @@ describe('Project', () => {
 
 		// App compiles and marks its reactive-call target stale
 		const app = await project.update(APP, CHAIN_FILES[APP]);
-		expect(app).toEqual({ changed: [APP, FORMAT] });
+		expect(app).toEqual({ invalidated: [FORMAT] });
 		expect(project.output(FORMAT)).toBeNull();
 
 		// The now-tracked helper compiles and forwards the chain
 		const format = await project.update(FORMAT, CHAIN_FILES[FORMAT]);
-		expect(format).toEqual({ changed: [FORMAT, NUMBER_FORMAT] });
+		expect(format).toEqual({ invalidated: [NUMBER_FORMAT] });
 		expect(project.output(NUMBER_FORMAT)).toBeNull();
 
 		// The leaf helper compiles with reactive param unwrapping
 		const numberFormat = await project.update(NUMBER_FORMAT, CHAIN_FILES[NUMBER_FORMAT]);
-		expect(numberFormat).toEqual({ changed: [NUMBER_FORMAT] });
+		expect(numberFormat).toEqual({ invalidated: [] });
 		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
 
 		// Convergence: recompiling App changes nothing
-		expect(await project.update(APP, CHAIN_FILES[APP])).toEqual({ changed: [APP] });
+		expect(await project.update(APP, CHAIN_FILES[APP])).toEqual({ invalidated: [] });
 	});
 
 	it('recompiles targets that were compiled before their caller', async () => {
 		const project = makeProject(CHAIN_FILES);
 
 		// Targets are plain modules — no output until a caller marks them
-		expect(await project.update(FORMAT, CHAIN_FILES[FORMAT])).toEqual({ changed: [] });
-		expect(await project.update(NUMBER_FORMAT, CHAIN_FILES[NUMBER_FORMAT])).toEqual({ changed: [] });
+		expect(await project.update(FORMAT, CHAIN_FILES[FORMAT])).toEqual({ invalidated: [] });
+		expect(await project.update(NUMBER_FORMAT, CHAIN_FILES[NUMBER_FORMAT])).toEqual({ invalidated: [] });
 
 		// Caller compiles and marks the previously-skipped target stale
 		const app = await project.update(APP, CHAIN_FILES[APP]);
-		expect(app).toEqual({ changed: [APP, FORMAT] });
+		expect(app).toEqual({ invalidated: [FORMAT] });
 
 		const format = await project.update(FORMAT, CHAIN_FILES[FORMAT]);
-		expect(format).toEqual({ changed: [FORMAT, NUMBER_FORMAT] });
+		expect(format).toEqual({ invalidated: [NUMBER_FORMAT] });
 
 		const numberFormat = await project.update(NUMBER_FORMAT, CHAIN_FILES[NUMBER_FORMAT]);
-		expect(numberFormat).toEqual({ changed: [NUMBER_FORMAT] });
+		expect(numberFormat).toEqual({ invalidated: [] });
 		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
 	});
 
@@ -129,7 +129,7 @@ describe('Project', () => {
 		const project = makeProject(files);
 
 		const app = await project.update(APP, files[APP]);
-		expect(app).toEqual({ changed: [APP] });
+		expect(app).toEqual({ invalidated: [] });
 		expect(project.output(DIST_HELPER)).toBeNull();
 	});
 
@@ -139,8 +139,8 @@ describe('Project', () => {
 		await project.update(id, `export state count = 0;`);
 		expect(project.output(id)).not.toBeNull();
 
-		const { changed } = await project.update(id, `export const plain = true;`);
-		expect(changed).toEqual([]);
+		const { invalidated } = await project.update(id, `export const plain = true;`);
+		expect(invalidated).toEqual([]);
 		expect(project.output(id)).toBeNull();
 	});
 
@@ -162,6 +162,23 @@ describe('Project', () => {
 
 		await project.update(APP, files[APP]);
 		expect(project.output(APP)!.code).not.toContain('$.get(count)');
+	});
+
+	it('invalidates importers when a module is removed', async () => {
+		const files = {
+			[STORE]: `export state count = 0;`,
+			[APP]: `import { count } from './store'\n\nexport component App() {\nrender (<p>{count}</p>)\n}`,
+		};
+		const project = makeProject(files);
+
+		await project.update(STORE, files[STORE]);
+		await project.update(APP, files[APP]);
+		expect(project.output(APP)!.code).toContain('$.get(count)');
+
+		// Removing the store invalidates its importers — they lose the
+		// reactive export surface they were compiled against.
+		const { invalidated } = project.remove(STORE);
+		expect(invalidated).toEqual([APP]);
 	});
 
 	it('init() discovers and compiles the whole graph from an entry point', async () => {
@@ -203,8 +220,8 @@ describe('Project', () => {
 		expect(project.output(APP)!.code).not.toContain('$.get(total)');
 
 		// The store gains a reactive export — its importers must recompile
-		const { changed } = await project.update(STORE, `export state count = 0;\nexport state total = 0;`);
-		expect(changed).toEqual(expect.arrayContaining([STORE, APP]));
+		const { invalidated } = await project.update(STORE, `export state count = 0;\nexport state total = 0;`);
+		expect(invalidated).toEqual([APP]);
 
 		// After recompiling, the new export is reactive in the importer
 		await project.update(APP, files[APP]);

@@ -10,7 +10,7 @@
  * The project owns its environment: the tool supplies a `host` (module
  * resolution + source loading) once at construction, and `update()` is called
  * per module change. It also owns the compiled outputs: tools read results
- * back with `output()` and act on the `changed` ids they receive.
+ * back with `output()` and act on the `invalidated` ids they receive.
  *
  * Tools that know their entry points call `init()`, which discovers and
  * compiles the whole reachable import graph without further supervision.
@@ -57,14 +57,14 @@ export interface ModuleOutput {
 	css: string | null;
 }
 
-/** Result of an `update()` call. */
+/** Result of an `update()` or `remove()` call. */
 export interface ProjectUpdate {
 	/**
-	 * Module ids whose outputs changed: the updated module itself plus any
-	 * modules whose reactive information changed under them (their stored
-	 * outputs are stale until the tool re-transforms them).
+	 * Module ids whose stored outputs are now stale because of this call.
+	 * The updated module itself is not included — its fresh output is read
+	 * back via `output()`.
 	 */
-	changed: string[];
+	invalidated: string[];
 }
 
 /**
@@ -101,8 +101,10 @@ export class Project {
 	 * E.g. '/path/helper.ts' → { test: [0] } means test()'s param 0 receives a signal.
 	 */
 	private reactiveCallRegistry = new Map<string, Record<string, number[]>>();
-	/** Guards against invalidation loops between mutually-importing files */
-	private pendingInvalidations = new Set<string>();
+	/** Guards against invalidating the same module twice while one update is
+	 * still being processed (mutually-importing files). Not a work queue —
+	 * `init()` and the tool own recompilation scheduling. */
+	private invalidationGuard = new Set<string>();
 	/** Cached import specifiers per module (avoids regex, populated from compile results) */
 	private importSpecifierCache = new Map<string, string[]>();
 	/** Compiled outputs, owned by the project and read by the tool. */
@@ -192,9 +194,9 @@ export class Project {
 		if (!contribs) return [];
 		const changed: string[] = [];
 		for (const targetId of contribs.keys()) {
-			if (this.pendingInvalidations.has(targetId)) continue;
+			if (this.invalidationGuard.has(targetId)) continue;
 			if (this.rebuildRegistryForTarget(targetId)) {
-				this.pendingInvalidations.add(targetId);
+				this.invalidationGuard.add(targetId);
 				changed.push(targetId);
 			}
 		}
@@ -205,8 +207,8 @@ export class Project {
 	 * Discover and initially compile the project from its entry points.
 	 *
 	 * Walks the import graph via the `host`: each module is compiled with
-	 * `update()`, then its changed neighbours and newly discovered dependencies
-	 * are compiled in turn until the graph converges.
+	 * `update()`, then its invalidated neighbours and newly discovered
+	 * dependencies are compiled in turn until the graph converges.
 	 */
 	async init(): Promise<void> {
 		let worklist = new Set(this.entryPoints);
@@ -218,9 +220,8 @@ export class Project {
 					this.remove(id);
 					continue;
 				}
-				const { changed } = await this.update(id, source);
-				for (const other of changed) {
-					if (other === id) continue;
+				const { invalidated } = await this.update(id, source);
+				for (const other of invalidated) {
 					next.add(other);
 				}
 				for (const dep of this.dependencies.get(id) ?? []) {
@@ -243,12 +244,12 @@ export class Project {
 	 * Compile (or recompile) a module and update cross-file tracking.
 	 *
 	 * The output is stored in the project and read back via `output()`.
-	 * The returned `changed` ids are the module itself (fresh output) plus any
-	 * modules whose outputs are now stale: targets of the module's reactive
-	 * calls and importers of its reactive exports.
+	 * The returned `invalidated` ids are the modules whose outputs are now
+	 * stale: targets of the module's reactive calls and importers of its
+	 * reactive exports.
 	 */
 	async update(filename: string, source: string): Promise<ProjectUpdate> {
-		this.pendingInvalidations.delete(filename);
+		this.invalidationGuard.delete(filename);
 		this.modulesSet.add(filename);
 
 		// JSX-flavored files compile eagerly. Plain TS/JS modules compile only
@@ -259,7 +260,7 @@ export class Project {
 		if (!isTsx && !isJsx && !this.reactiveCallRegistry.has(filename) && !isDarTsxFile(source)) {
 			this.outputs.delete(filename);
 			this.replaceEdges(filename, []);
-			return { changed: [] };
+			return { invalidated: [] };
 		}
 
 		let reactiveImports: Record<string, string[]> | undefined;
@@ -349,11 +350,11 @@ export class Project {
 		const stale: string[] = [];
 		for (const targetId of affectedTargets) {
 			// Skip if this target is already pending invalidation (prevent loops)
-			if (this.pendingInvalidations.has(targetId)) continue;
+			if (this.invalidationGuard.has(targetId)) continue;
 
 			const changed = this.rebuildRegistryForTarget(targetId);
 			if (changed) {
-				this.pendingInvalidations.add(targetId);
+				this.invalidationGuard.add(targetId);
 				stale.push(targetId);
 			}
 		}
@@ -364,8 +365,8 @@ export class Project {
 			const importers = this.importers.get(filename);
 			if (importers) {
 				for (const importer of importers) {
-					if (importer === filename || this.pendingInvalidations.has(importer)) continue;
-					this.pendingInvalidations.add(importer);
+					if (importer === filename || this.invalidationGuard.has(importer)) continue;
+					this.invalidationGuard.add(importer);
 					stale.push(importer);
 				}
 			}
@@ -377,23 +378,32 @@ export class Project {
 			css: result.css.code || null,
 		});
 
-		return { changed: [filename, ...stale] };
+		return { invalidated: stale };
 	}
 
 	/**
 	 * Forget a module (e.g. its file was deleted or renamed). Returns the ids
-	 * whose outputs are now stale (targets that received reactive-call
-	 * contributions from the removed module).
+	 * whose outputs are now stale: targets that received reactive-call
+	 * contributions from the removed module, plus its importers (they lose
+	 * the removed module's reactive exports).
 	 */
 	remove(filename: string): ProjectUpdate {
+		const importers = [...(this.importers.get(filename) ?? [])];
 		this.outputs.delete(filename);
 		this.reactiveRegistry.delete(filename);
 		this.reactiveCallRegistry.delete(filename);
 		this.importSpecifierCache.delete(filename);
-		this.pendingInvalidations.delete(filename);
+		this.invalidationGuard.delete(filename);
 		this.modulesSet.delete(filename);
 		this.replaceEdges(filename, []);
-		return { changed: this.dropContributions(filename) };
+
+		const stale = this.dropContributions(filename);
+		for (const importer of importers) {
+			if (this.invalidationGuard.has(importer)) continue;
+			this.invalidationGuard.add(importer);
+			stale.push(importer);
+		}
+		return { invalidated: stale };
 	}
 
 	/**
