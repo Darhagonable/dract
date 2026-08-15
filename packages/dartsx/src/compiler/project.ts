@@ -7,9 +7,11 @@
  * - which imported functions receive reactive arguments at call sites
  * - which modules need recompilation when that information changes
  *
- * It is deliberately free of bundler APIs. The tool (Vite plugin, CLI, etc.)
- * injects `resolve`/`readFile` hooks per update so the project can discover
- * imported modules and inspect their sources.
+ * It also owns the compiled outputs: tools feed modules in through `update()`
+ * and read results back with `output()`. It is deliberately free of bundler
+ * APIs. The tool (Vite plugin, CLI, etc.) injects `resolve`/`readFile` hooks
+ * per update so the project can discover imported modules and inspect their
+ * sources.
  */
 import { compile } from './index';
 import { isDarTsxFile } from './phases/1-preprocess';
@@ -32,18 +34,14 @@ export interface ProjectHooks {
 	readFile(id: string): Promise<string | null> | string | null;
 }
 
-export interface ProjectUpdateResult {
-	/** The compiled JavaScript and its source map. */
+/** The compiled output of one module, owned by the project. */
+export interface ModuleOutput {
+	/** The compiled JavaScript. */
 	code: string;
 	/** Source map from output positions to original source positions. */
 	map: SourceMap | null;
 	/** Collected CSS (external mode only); null when no style blocks compiled. */
 	css: string | null;
-	/**
-	 * Module ids whose reactive-call information changed. The tool should
-	 * re-transform (recompile) these modules.
-	 */
-	invalidated: string[];
 }
 
 /**
@@ -84,6 +82,8 @@ export class Project {
 	private pendingInvalidations = new Set<string>();
 	/** Cached import specifiers per module (avoids regex, populated from compile results) */
 	private importSpecifierCache = new Map<string, string[]>();
+	/** Compiled outputs, owned by the project and read by the tool. */
+	private outputs = new Map<string, ModuleOutput>();
 
 	private css: 'injected' | 'external';
 
@@ -127,18 +127,31 @@ export class Project {
 	}
 
 	/**
+	 * The current compiled output for a module, or null when the project has
+	 * none (module not compiled or no longer part of the project).
+	 */
+	output(id: string): ModuleOutput | null {
+		return this.outputs.get(id) ?? null;
+	}
+
+	/**
 	 * Compile (or recompile) a module and update cross-file tracking.
 	 *
-	 * Returns null when the module needs no transform (no DarTsx syntax and
-	 * not a reactive-call target).
+	 * The output is stored in the project and read back via `output()`.
+	 * Returns the ids whose outputs changed by this call: the module itself
+	 * (fresh output) plus any modules whose reactive-call information changed
+	 * (their stored outputs are stale until the tool re-transforms them).
 	 */
-	async update(filename: string, source: string, hooks: ProjectHooks): Promise<ProjectUpdateResult | null> {
+	async update(filename: string, source: string, hooks: ProjectHooks): Promise<string[]> {
 		// JSX-flavored files compile eagerly. Plain TS/JS modules compile only
 		// when they contain DarTsx syntax or participate in reactive-call
-		// propagation.
+		// propagation. A module that stops qualifying drops its stale output.
 		const isTsx = filename.endsWith('.tsx');
 		const isJsx = filename.endsWith('.jsx');
-		if (!isTsx && !isJsx && !this.reactiveCallRegistry.has(filename) && !isDarTsxFile(source)) return null;
+		if (!isTsx && !isJsx && !this.reactiveCallRegistry.has(filename) && !isDarTsxFile(source)) {
+			this.outputs.delete(filename);
+			return [];
+		}
 
 		// Clear invalidation guard now that we're recompiling
 		this.pendingInvalidations.delete(filename);
@@ -222,8 +235,8 @@ export class Project {
 		}
 
 		// Rebuild the aggregated registry for each affected target and collect
-		// the ones that changed for invalidation by the tool.
-		const invalidated: string[] = [];
+		// the ones that changed — their outputs are stale until re-transformed.
+		const stale: string[] = [];
 		for (const targetId of affectedTargets) {
 			// Skip if this target is already pending invalidation (prevent loops)
 			if (this.pendingInvalidations.has(targetId)) continue;
@@ -231,22 +244,24 @@ export class Project {
 			const changed = this.rebuildRegistryForTarget(targetId);
 			if (changed) {
 				this.pendingInvalidations.add(targetId);
-				invalidated.push(targetId);
+				stale.push(targetId);
 			}
 		}
 
-		return {
+		this.outputs.set(filename, {
 			code: result.js.code,
 			map: result.js.map,
 			css: result.css.code || null,
-			invalidated,
-		};
+		});
+
+		return [filename, ...stale];
 	}
 
 	/**
 	 * Forget a module (e.g. its file was deleted or renamed).
 	 */
 	remove(filename: string): void {
+		this.outputs.delete(filename);
 		this.reactiveRegistry.delete(filename);
 		this.reactiveCallRegistry.delete(filename);
 		this.reactiveCallContributions.delete(filename);

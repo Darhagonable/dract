@@ -29,34 +29,36 @@ const FORMAT = `/src/format.ts`;
 const NUMBER_FORMAT = `/src/numberFormat.ts`;
 
 describe('Project', () => {
-	it('returns null for plain modules without DarTsx syntax', async () => {
+	it('produces no output for plain modules without DarTsx syntax', async () => {
 		const project = new Project();
 		const hooks = makeHooks({});
-		const result = await project.update('/src/plain.ts', 'export const x = 1;', hooks);
-		expect(result).toBeNull();
+		const changed = await project.update('/src/plain.ts', 'export const x = 1;', hooks);
+		expect(changed).toEqual([]);
+		expect(project.output('/src/plain.ts')).toBeNull();
 	});
 
 	it('ignores DarTsx keywords inside comments and strings', async () => {
 		const project = new Project();
 		const hooks = makeHooks({});
-		const result = await project.update(
+		const changed = await project.update(
 			'/src/comment.ts',
 			`// state x = 1\n/* derived y = 2 */\nconst s = "state z = 3";\nexport const plain = true;`,
 			hooks,
 		);
-		expect(result).toBeNull();
+		expect(changed).toEqual([]);
+		expect(project.output('/src/comment.ts')).toBeNull();
 	});
 
 	it('compiles modules with DarTsx syntax even without imports', async () => {
 		const project = new Project();
 		const hooks = makeHooks({});
-		const result = await project.update(
+		const changed = await project.update(
 			APP,
 			`export component App() {\nstate count = 0;\nrender (<p>{count}</p>)\n}`,
 			hooks,
 		);
-		expect(result).not.toBeNull();
-		expect(result!.code).toContain('$.state(0)');
+		expect(changed).toEqual([APP]);
+		expect(project.output(APP)!.code).toContain('$.state(0)');
 	});
 
 	it('propagates reactive exports to importing modules', async () => {
@@ -68,13 +70,12 @@ describe('Project', () => {
 		const hooks = makeHooks(files);
 
 		await project.update(STORE, files[STORE], hooks);
-		const app = await project.update(APP, files[APP], hooks);
+		await project.update(APP, files[APP], hooks);
 
-		expect(app).not.toBeNull();
-		expect(app!.code).toContain('$.get(count)');
+		expect(project.output(APP)!.code).toContain('$.get(count)');
 	});
 
-	it('propagates reactive call info across plain helper modules and reports invalidations', async () => {
+	it('propagates reactive call info across plain helper modules and reports stale outputs', async () => {
 		const project = new Project();
 		const files = {
 			[APP]: `import { formatCount } from './format'\n\nexport component App() {\nstate count = 0;\nrender (<p>{formatCount(count)}</p>)\n}`,
@@ -83,24 +84,23 @@ describe('Project', () => {
 		};
 		const hooks = makeHooks(files);
 
-		// App compiles and invalidates its reactive-call target
+		// App compiles and marks its reactive-call target stale
 		const app = await project.update(APP, files[APP], hooks);
-		expect(app).not.toBeNull();
-		expect(app!.invalidated).toContain(FORMAT);
+		expect(app).toEqual([APP, FORMAT]);
+		expect(project.output(FORMAT)).toBeNull();
 
 		// The now-tracked helper compiles and forwards the chain
 		const format = await project.update(FORMAT, files[FORMAT], hooks);
-		expect(format).not.toBeNull();
-		expect(format!.invalidated).toContain(NUMBER_FORMAT);
+		expect(format).toEqual([FORMAT, NUMBER_FORMAT]);
+		expect(project.output(NUMBER_FORMAT)).toBeNull();
 
 		// The leaf helper compiles with reactive param unwrapping
 		const numberFormat = await project.update(NUMBER_FORMAT, files[NUMBER_FORMAT], hooks);
-		expect(numberFormat).not.toBeNull();
-		expect(numberFormat!.code).toContain('$.get(value)');
+		expect(numberFormat).toEqual([NUMBER_FORMAT]);
+		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
 
 		// Convergence: recompiling App changes nothing
-		const app2 = await project.update(APP, files[APP], hooks);
-		expect(app2!.invalidated).toEqual([]);
+		expect(await project.update(APP, files[APP], hooks)).toEqual([APP]);
 	});
 
 	it('recompiles targets that were compiled before their caller', async () => {
@@ -112,19 +112,20 @@ describe('Project', () => {
 		};
 		const hooks = makeHooks(files);
 
-		// Targets are plain modules — no transform until a caller marks them
-		expect(await project.update(FORMAT, files[FORMAT], hooks)).toBeNull();
-		expect(await project.update(NUMBER_FORMAT, files[NUMBER_FORMAT], hooks)).toBeNull();
+		// Targets are plain modules — no output until a caller marks them
+		expect(await project.update(FORMAT, files[FORMAT], hooks)).toEqual([]);
+		expect(await project.update(NUMBER_FORMAT, files[NUMBER_FORMAT], hooks)).toEqual([]);
 
-		// Caller compiles and invalidates the previously-skipped target
+		// Caller compiles and marks the previously-skipped target stale
 		const app = await project.update(APP, files[APP], hooks);
-		expect(app!.invalidated).toEqual([FORMAT]);
+		expect(app).toEqual([APP, FORMAT]);
 
 		const format = await project.update(FORMAT, files[FORMAT], hooks);
-		expect(format!.invalidated).toEqual([NUMBER_FORMAT]);
+		expect(format).toEqual([FORMAT, NUMBER_FORMAT]);
 
 		const numberFormat = await project.update(NUMBER_FORMAT, files[NUMBER_FORMAT], hooks);
-		expect(numberFormat!.code).toContain('$.get(value)');
+		expect(numberFormat).toEqual([NUMBER_FORMAT]);
+		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
 	});
 
 	it('skips reactive-call contributions into compiled dist output', async () => {
@@ -137,8 +138,20 @@ describe('Project', () => {
 		const hooks = makeHooks(files);
 
 		const app = await project.update(APP, files[APP], hooks);
-		expect(app!.invalidated).not.toContain(DIST_HELPER);
-		expect(await project.update(DIST_HELPER, files[DIST_HELPER], hooks)).toBeNull();
+		expect(app).toEqual([APP]);
+		expect(project.output(DIST_HELPER)).toBeNull();
+	});
+
+	it('drops stored output when a module stops qualifying', async () => {
+		const project = new Project();
+		const hooks = makeHooks({});
+		const id = '/src/state.ts';
+		await project.update(id, `export state count = 0;`, hooks);
+		expect(project.output(id)).not.toBeNull();
+
+		const changed = await project.update(id, `export const plain = true;`, hooks);
+		expect(changed).toEqual([]);
+		expect(project.output(id)).toBeNull();
 	});
 
 	it('recompiles without reactive import info after a module is removed', async () => {
@@ -150,15 +163,15 @@ describe('Project', () => {
 		const hooks = makeHooks(files);
 
 		await project.update(STORE, files[STORE], hooks);
-		const app = await project.update(APP, files[APP], hooks);
-		expect(app!.code).toContain('$.get(count)');
+		await project.update(APP, files[APP], hooks);
+		expect(project.output(APP)!.code).toContain('$.get(count)');
 
 		// Remove the store and stop serving its source (file deleted)
 		project.remove(STORE);
+		expect(project.output(STORE)).toBeNull();
 		delete files[STORE];
 
-		const app2 = await project.update(APP, files[APP], hooks);
-		expect(app2).not.toBeNull();
-		expect(app2!.code).not.toContain('$.get(count)');
+		await project.update(APP, files[APP], hooks);
+		expect(project.output(APP)!.code).not.toContain('$.get(count)');
 	});
 });

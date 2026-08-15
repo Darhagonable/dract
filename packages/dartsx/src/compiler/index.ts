@@ -10,7 +10,7 @@ import { transform } from './phases/4-transform';
 import { transformSync as oxcTransformSync } from 'oxc-transform';
 import remapping, { type SourceMap } from '@jridgewell/remapping';
 
-export { Project, type ProjectOptions, type ProjectHooks, type ProjectUpdateResult } from './project';
+export { Project, type ProjectOptions, type ProjectHooks, type ModuleOutput } from './project';
 
 export interface CompileResult {
 	/** The compiled JavaScript and its source map. */

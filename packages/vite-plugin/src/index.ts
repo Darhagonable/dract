@@ -67,7 +67,7 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				});
 			}
 
-			const result = await project.update(id, code, {
+			const changed = await project.update(id, code, {
 				resolve: async (specifier, importer) => {
 					const resolved = await this.resolve(specifier, importer);
 					if (!resolved) return null;
@@ -76,15 +76,19 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				readFile: (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null),
 			});
 
-			if (!result) return;
+			const output = project.output(id);
+			if (!output) return;
 
-			// Recompile modules whose reactive-call info changed
-			for (const targetId of result.invalidated) {
+			// Recompile modules whose reactive-call info changed (their outputs
+			// are stale until re-transformed). The current module was just
+			// updated, so it needs no invalidation.
+			for (const otherId of changed) {
+				if (otherId === id) continue;
 				const env = this.environment;
 				if (env && typeof env === 'object' && 'moduleGraph' in env) {
 					const mg = env.moduleGraph;
 					if (mg && typeof mg === 'object' && 'getModuleById' in mg && typeof mg.getModuleById === 'function') {
-						const mod = mg.getModuleById(targetId);
+						const mod = mg.getModuleById(otherId);
 						if (mod && 'invalidateModule' in mg && typeof mg.invalidateModule === 'function') {
 							mg.invalidateModule(mod);
 						}
@@ -92,12 +96,12 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 				}
 			}
 
-			let outputCode = result.code;
+			let outputCode = output.code;
 
 			// In external mode, append CSS as a virtual import so Vite can extract it
-			if (cssMode === 'external' && result.css) {
+			if (cssMode === 'external' && output.css) {
 				const cssId = id + '.css';
-				cssModuleMap.set(cssId, result.css);
+				cssModuleMap.set(cssId, output.css);
 				outputCode += `\nimport ${JSON.stringify(cssId)};`;
 			}
 
