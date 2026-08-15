@@ -62,7 +62,7 @@ This means:
 
 ### Project Layer
 
-Cross-file reactive state lives in the compiler package (`dartsx/compiler/project`), keeping it tooling-agnostic. The `Project` class accepts the single-file `compile()` output plus injected `resolve`/`readFile` hooks and tracks:
+Cross-file reactive state lives in the compiler package (`dartsx/compiler/project`), keeping it tooling-agnostic. The `Project` class accepts the single-file `compileModule()` output plus injected `resolve`/`readFile` hooks and tracks:
 
 - **`reactiveRegistry`**: Maps module IDs → exported reactive variable names
 - **`reactiveCallRegistry`**: Maps module IDs → which function params receive signals from callers

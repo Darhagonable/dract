@@ -1,7 +1,7 @@
 /**
  * Project — cross-file reactive compilation state
  *
- * The single-file `compile()` entry point is tooling-agnostic but knows nothing
+ * The single-file `compileModule()` entry point is tooling-agnostic but knows nothing
  * about how modules relate. `Project` adds the cross-file layer on top:
  * - which modules export reactive bindings (state/derived)
  * - which imported functions receive reactive arguments at call sites
@@ -13,13 +13,13 @@
  * per update so the project can discover imported modules and inspect their
  * sources.
  */
-import { compile } from './index';
+import { compileModule } from './index';
 import { isDarTsxFile } from './phases/1-preprocess';
 import type { SourceMap } from '@jridgewell/remapping';
 
 export interface ProjectOptions {
 	/**
-	 * CSS delivery mode, forwarded to `compile`.
+	 * CSS delivery mode, forwarded to `compileModule`.
 	 * - `'injected'`: emit `$.style()` calls in JS (default)
 	 * - `'external'`: omit `$.style()` calls, collect CSS for external delivery
 	 */
@@ -170,7 +170,7 @@ export class Project {
 						const importedSource = await hooks.readFile(resolved);
 						if (importedSource && isDarTsxFile(importedSource)) {
 							try {
-								exports = compile(importedSource, { filename: resolved }).metadata.reactiveExports;
+								exports = compileModule(importedSource, { filename: resolved }).metadata.reactiveExports;
 								if (exports.length > 0) this.reactiveRegistry.set(resolved, exports);
 							} catch {
 								// Ignore inspection failures and continue without reactive import info.
@@ -184,7 +184,7 @@ export class Project {
 			}
 		}
 
-		const result = compile(source, {
+		const result = compileModule(source, {
 			filename,
 			css: this.css,
 			reactiveImports,
