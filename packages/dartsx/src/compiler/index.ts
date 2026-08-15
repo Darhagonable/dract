@@ -12,7 +12,7 @@ import remapping, { type SourceMap } from '@jridgewell/remapping';
 
 export { Project, type ProjectOptions, type ProjectHooks, type ModuleOutput } from './project';
 
-export interface CompileResult {
+export interface CompileModuleResult {
 	/** The compiled JavaScript and its source map. */
 	js: {
 		/** The generated JavaScript code */
@@ -43,7 +43,7 @@ export interface CompileResult {
 	ast: unknown;
 }
 
-export interface CompileOptions {
+export interface CompileModuleOptions {
 	/** Filename (used for error messages and source maps) */
 	filename?: string;
 	/**
@@ -66,9 +66,13 @@ export interface CompileOptions {
 }
 
 /**
- * Compile a DarTsx source file into JavaScript.
+ * Compile a single DarTsx source file into JavaScript.
+ *
+ * Stateless: no cross-module tracking. For tools that manage multiple
+ * modules, use the `Project` entry point, which drives this function
+ * under the hood with cross-module reactivity state.
  */
-export function compile(source: string, options: CompileOptions = {}): CompileResult {
+export function compileModule(source: string, options: CompileModuleOptions = {}): CompileModuleResult {
 	const filename = options.filename || 'input.tsx';
 
 	// Phase 1: Pre-process custom syntax

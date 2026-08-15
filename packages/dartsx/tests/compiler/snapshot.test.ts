@@ -2,15 +2,16 @@
  * Snapshot test runner for the DarTsx compiler.
  *
  * Each subdirectory under `samples/` is a test case containing one or more
- * `.ts`/`.tsx` source files. Every test is driven through the real Vite plugin
- * with cross-module tracking. Outputs land in `_expected/<name>.js`.
+ * `.ts`/`.tsx` source files. Every test is driven through the compiler's
+ * standalone `Project` layer with cross-module tracking. Outputs land in
+ * `_expected/<name>.js`.
  *
  * Run `UPDATE_SNAPSHOTS=true pnpm test` to regenerate `_expected/`.
  */
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'fs';
 import { join } from 'path';
-import dartsx, { type DarTsxTransformContext } from '@dartsx/vite-plugin';
+import { Project, type ProjectHooks } from '../../src/compiler/project';
 
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;
@@ -47,36 +48,44 @@ function assertOutputs(dir: string, outputs: Map<string, string>) {
 	}
 }
 
-/** Drive the real Vite plugin across multiple files with cross-module tracking. */
+/** Drive the Project across multiple files with cross-module tracking. */
 async function compileMultiFile(dir: string, files: string[]): Promise<Map<string, string>> {
-	const plugin = dartsx();
+	const project = new Project();
 	const filePaths = new Map(files.map(f => [f, join(dir, f)]));
 
-	const ctx: DarTsxTransformContext = {
+	const hooks: ProjectHooks = {
 		async resolve(specifier: string) {
 			if (!specifier.startsWith('./')) return null;
 			const base = specifier.slice(2);
 			for (const [name, abs] of filePaths) {
-				if (base === name || base === name.replace(/\.[^.]+$/, '')) return { id: abs };
+				if (base === name || base === name.replace(/\.[^.]+$/, '')) return abs;
 			}
 			return null;
 		},
-		error(msg: string) { throw new Error(msg); },
-		environment: null,
+		readFile: (id: string) => (existsSync(id) ? readFileSync(id, 'utf-8') : null),
 	};
 
+	// Worklist: compile every file, then follow stale ids (modules whose
+	// reactive-call info changed under them) until the graph converges.
 	const outputs = new Map<string, string>();
-
-	// Two passes: first builds the registry, second picks up cross-file info
-	for (let pass = 0; pass < 2; pass++) {
-		for (const filename of files) {
-			const abs = filePaths.get(filename)!;
-			const result = await plugin.transform.call(ctx, readFileSync(abs, 'utf-8'), abs);
-			if (result && typeof result === 'object' && 'code' in result) {
-				outputs.set(filename.replace(/\.[^.]+$/, '.js'), result.code);
-			} else if (pass === 0) {
-				outputs.set(filename.replace(/\.[^.]+$/, '.js'), readFileSync(abs, 'utf-8'));
+	let worklist = new Set(filePaths.values());
+	while (worklist.size > 0) {
+		const next = new Set<string>();
+		for (const abs of worklist) {
+			const changed = await project.update(abs, readFileSync(abs, 'utf-8'), hooks);
+			for (const id of changed) {
+				if (id === abs) continue;
+				next.add(id);
 			}
+		}
+		worklist = next;
+	}
+
+	for (const filename of files) {
+		const abs = filePaths.get(filename)!;
+		const output = project.output(abs);
+		if (output) {
+			outputs.set(filename.replace(/\.[^.]+$/, '.js'), output.code);
 		}
 	}
 
