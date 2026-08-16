@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'fs';
 import { join } from 'path';
-import { Project } from '../../src/compiler/project';
+import { Project } from '../../src/compiler';
 
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;
