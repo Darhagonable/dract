@@ -1,6 +1,6 @@
 // Playground engine — compiles and executes TSRX/TS/TSX in the browser.
 //
-// Compilation now happens through the ProjectCompiler (see playground-modules.ts):
+// Compilation now happens through the Project (see playground-modules.ts):
 // it owns the cross-file graph, so imported state stays a signal across module
 // boundaries, and it is pure JS/WASM (oxc-parser + oxc-transform wasm bindings
 // + esrap printer, no Node APIs). This module keeps the EXECUTION side: the

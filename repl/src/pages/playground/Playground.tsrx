@@ -362,7 +362,7 @@ export function Playground() @{
 			};
 
 			// One compile per (file, target) feeds the compiled pane. The preview's
-			// module graph compiles through the same ProjectCompiler (see
+			// module graph compiles through the same Project (see
 			// playground-modules.ts), so the pane shows the exact artifacts the
 			// preview runs — no second compile, and cross-file reactivity is
 			// visible in the emitted code.
