@@ -63,7 +63,7 @@ describe('Project', () => {
 			`export component App() {\nstate count = 0;\nrender (<p>{count}</p>)\n}`,
 		);
 		expect(invalidated).toEqual([]);
-		expect(project.output(APP)!.code).toContain('$.state(0)');
+		expect(project.output(APP)!.js.code).toContain('$.state(0)');
 	});
 
 	it('propagates reactive exports to importing modules', async () => {
@@ -76,7 +76,7 @@ describe('Project', () => {
 		await project.update(STORE, files[STORE]);
 		await project.update(APP, files[APP]);
 
-		expect(project.output(APP)!.code).toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).toContain('$.get(count)');
 	});
 
 	it('propagates reactive call info across plain helper modules and reports stale outputs', async () => {
@@ -95,7 +95,7 @@ describe('Project', () => {
 		// The leaf helper compiles with reactive param unwrapping
 		const numberFormat = await project.update(NUMBER_FORMAT, CHAIN_FILES[NUMBER_FORMAT]);
 		expect(numberFormat).toEqual({ invalidated: [] });
-		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
+		expect(project.output(NUMBER_FORMAT)!.js.code).toContain('$.get(value)');
 
 		// Convergence: recompiling App changes nothing
 		expect(await project.update(APP, CHAIN_FILES[APP])).toEqual({ invalidated: [] });
@@ -117,7 +117,7 @@ describe('Project', () => {
 
 		const numberFormat = await project.update(NUMBER_FORMAT, CHAIN_FILES[NUMBER_FORMAT]);
 		expect(numberFormat).toEqual({ invalidated: [] });
-		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
+		expect(project.output(NUMBER_FORMAT)!.js.code).toContain('$.get(value)');
 	});
 
 	it('skips reactive-call contributions into compiled dist output', async () => {
@@ -153,7 +153,7 @@ describe('Project', () => {
 
 		await project.update(STORE, files[STORE]);
 		await project.update(APP, files[APP]);
-		expect(project.output(APP)!.code).toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).toContain('$.get(count)');
 
 		// Remove the store and stop serving its source (file deleted)
 		project.remove(STORE);
@@ -161,7 +161,7 @@ describe('Project', () => {
 		delete files[STORE];
 
 		await project.update(APP, files[APP]);
-		expect(project.output(APP)!.code).not.toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).not.toContain('$.get(count)');
 	});
 
 	it('invalidates importers when a module is removed', async () => {
@@ -173,7 +173,7 @@ describe('Project', () => {
 
 		await project.update(STORE, files[STORE]);
 		await project.update(APP, files[APP]);
-		expect(project.output(APP)!.code).toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).toContain('$.get(count)');
 
 		// Removing the store invalidates its importers — they lose the
 		// reactive export surface they were compiled against.
@@ -189,9 +189,9 @@ describe('Project', () => {
 		expect(project.modules().sort()).toEqual([APP, FORMAT, NUMBER_FORMAT].sort());
 		// The call chain resolves: the call forwards along the chain and the
 		// leaf unwraps the signal at the definition where it's consumed.
-		expect(project.output(APP)!.code).toContain('formatCount(count)');
-		expect(project.output(FORMAT)!.code).toContain('numberFormat(count)');
-		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
+		expect(project.output(APP)!.js.code).toContain('formatCount(count)');
+		expect(project.output(FORMAT)!.js.code).toContain('numberFormat(count)');
+		expect(project.output(NUMBER_FORMAT)!.js.code).toContain('$.get(value)');
 	});
 
 	it('init() converges the reactive-call chain in a single call', async () => {
@@ -201,9 +201,9 @@ describe('Project', () => {
 
 		// Every module ends up compiled with the full cross-file information,
 		// regardless of the order init processed them in.
-		expect(project.output(NUMBER_FORMAT)!.code).toContain('$.get(value)');
-		expect(project.output(FORMAT)!.code).toContain('numberFormat(count)');
-		expect(project.output(APP)!.code).toContain('formatCount(count)');
+		expect(project.output(NUMBER_FORMAT)!.js.code).toContain('$.get(value)');
+		expect(project.output(FORMAT)!.js.code).toContain('numberFormat(count)');
+		expect(project.output(APP)!.js.code).toContain('formatCount(count)');
 	});
 
 	it('invalidates importers when a module changes its reactive exports', async () => {
@@ -216,8 +216,8 @@ describe('Project', () => {
 		// App compiles against the store's current surface: count is reactive, total is not
 		await project.update(STORE, files[STORE]);
 		await project.update(APP, files[APP]);
-		expect(project.output(APP)!.code).toContain('$.get(count)');
-		expect(project.output(APP)!.code).not.toContain('$.get(total)');
+		expect(project.output(APP)!.js.code).toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).not.toContain('$.get(total)');
 
 		// The store gains a reactive export — its importers must recompile
 		const { invalidated } = await project.update(STORE, `export state count = 0;\nexport state total = 0;`);
@@ -225,7 +225,7 @@ describe('Project', () => {
 
 		// After recompiling, the new export is reactive in the importer
 		await project.update(APP, files[APP]);
-		expect(project.output(APP)!.code).toContain('$.get(total)');
+		expect(project.output(APP)!.js.code).toContain('$.get(total)');
 	});
 
 	it('compiles an importer in one shot before its dependency', async () => {
@@ -240,7 +240,7 @@ describe('Project', () => {
 
 		await project.update(APP, files[APP]);
 
-		expect(project.output(APP)!.code).toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).toContain('$.get(count)');
 	});
 
 	it('ignores import statements inside comments', async () => {
@@ -255,7 +255,7 @@ describe('Project', () => {
 		// The commented-out import is not a dependency and its specifier is
 		// not reactive — imports are read from parsed metadata, not regex.
 		expect(project.modules()).not.toContain(STORE);
-		expect(project.output(APP)!.code).not.toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).not.toContain('$.get(count)');
 	});
 
 	it('picks up a new import added after the first compile', async () => {
@@ -268,13 +268,13 @@ describe('Project', () => {
 		// First compile: no imports at all, count is a plain local
 		await project.update(STORE, files[STORE]);
 		await project.update(APP, files[APP]);
-		expect(project.output(APP)!.code).not.toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).not.toContain('$.get(count)');
 
 		// The source gains an import of a registered reactive module — the
 		// stored output must be reactive after a single update
 		const appWithImport = `import { count } from './store'\n\nexport component App() {\nrender (<p>{count}</p>)\n}`;
 		await project.update(APP, appWithImport);
-		expect(project.output(APP)!.code).toContain('$.get(count)');
+		expect(project.output(APP)!.js.code).toContain('$.get(count)');
 	});
 
 	it('modules() reflects updates and removals', async () => {

@@ -76,7 +76,7 @@ async function compileMultiFile(dir: string, files: string[]): Promise<Map<strin
 		const abs = filePaths.get(filename)!;
 		const output = project.output(abs);
 		if (output) {
-			outputs.set(filename.replace(/\.[^.]+$/, '.js'), output.code);
+			outputs.set(filename.replace(/\.[^.]+$/, '.js'), output.js.code);
 		}
 	}
 
