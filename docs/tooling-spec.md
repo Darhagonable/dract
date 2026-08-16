@@ -6,7 +6,7 @@ DarTsx tooling currently ships as a VS Code-extension-first stack:
 
 - `packages/vscode-extension` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
 - `packages/typescript-plugin` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
-- `packages/vite-plugin` compiles DarTsx source for dev/build and propagates cross-file reactivity metadata.
+- `packages/vite-plugin` adapts the compiler's `Project` layer to dev/build flows.
 - `packages/dartsx` remains the source of truth for compiler and runtime behavior.
 
 There is no standalone DarTsx language server in the current architecture. In VS Code, JavaScript and TypeScript language features are both powered by the built-in JS/TS service, so the extension works in JS-only projects without requiring a user-managed TypeScript setup.
@@ -95,11 +95,11 @@ DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts
                 └───────────┬───────────┘
                             │
 ┌───────────────────────────▼────────────────────────┐
-│ Compiler + Vite Plugin                             │
+│ Compiler + Project Layer + Vite Plugin             │
 │ (packages/dartsx, packages/vite-plugin)            │
 │ - Compile DarTsx for runtime                       │
-│ - Track reactive exports/imports across files      │
-│ - Recompile dependent modules when call sites move │
+│ - Project tracks reactive exports/calls across     │
+│   files; recompile dependents when call sites move │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -181,15 +181,17 @@ The grammar is intentionally lightweight. Semantic correctness still comes from 
 
 ### 6.1 Vite Plugin Role
 
-The Vite plugin is responsible for real compile-time behavior in dev and build flows.
+The Vite plugin is a thin adapter around the compiler's `Project` layer for dev and build flows.
 
 Its current responsibilities are:
 
-- compile DarTsx `.tsx` and `.jsx` modules
-- compile DarTsx-flavored `.ts` and `.js` modules when they contain DarTsx syntax
-- inspect imported DarTsx modules to discover reactive exports
-- propagate reactive call information across modules
-- invalidate affected modules when reactive call-site information changes
+- compile DarTsx `.tsx` and `.jsx` modules and DarTsx-flavored `.ts` and `.js` modules
+- construct the `Project` in `buildStart` with vite's `resolve` and the filesystem as host, plus entry points from vite's build input (defaults to `index.html`, which `init()` resolves through vite) and any explicit plugin options
+- run `Project.init()` so the whole reachable graph is compiled up front in build mode (dev mode drives the project purely through `update()`)
+- invalidate modules in the vite module graph when `Project` reports changed reactive information (dev only — build needs no invalidation thanks to `init()`)
+- serve external CSS via virtual modules
+
+All cross-file state (reactive exports, reactive call propagation, invalidation decisions) lives in the tooling-agnostic `Project` class in `packages/dartsx` (`dartsx/compiler/project`). Non-Vite tools (CLI, build scripts) can drive the same `Project` API without a bundler.
 
 ### 6.2 Compiler vs Editor Transform
 
@@ -204,13 +206,14 @@ They intentionally solve different problems. The editor transform aims for type-
 
 Cross-file reactive behavior is a build concern, not just an editor concern.
 
-The Vite plugin tracks:
+The `Project` compiler layer tracks:
 
 - reactive exports produced by DarTsx modules
 - which imported functions receive reactive arguments
+- the dependency graph (imports and importers) of every known module
 - when that information changes enough to require recompiling downstream modules
 
-This is what allows examples like shared state modules and helper functions in separate files to behave correctly in the playground and production build.
+This is what allows examples like shared state modules and helper functions in separate files to behave correctly in the playground and production build. The Vite plugin is the reference adapter for this layer and surfaces its invalidation decisions through the module graph.
 
 ## 7. Current Capability Snapshot
 
