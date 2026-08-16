@@ -1,12 +1,12 @@
 // Turns the playground's virtual files into the module graph the sandbox
-// executes: compiles each file (the ProjectCompiler for `.tsx`/`.ts`, sucrase's
+// executes: compiles each file (the Project for `.tsx`/`.ts`, sucrase's
 // react-jsx transform for `.react.tsx` React-host files), rewrites import
 // specifiers with es-module-lexer's exact offsets, and topo-sorts the sibling
 // graph so modules arrive at the sandbox dependencies-first.
 //
-// The ProjectCompiler instance lives at module scope: it OWNS the cross-file
-// graph (reactive exports, call contributions, incremental invalidation), so
-// the preview — unlike a per-file compile — gets genuinely reactive imported
+// The Project instance lives at module scope: it OWNS the cross-file graph
+// (reactive exports, call contributions, incremental invalidation), so the
+// preview — unlike a per-file compile — gets genuinely reactive imported
 // state, and each edit recompiles exactly what it invalidates. It is pure
 // JS/WASM (oxc-parser + oxc-transform wasm bindings + esrap printer, no Node
 // APIs), so it runs in the browser exactly as it does in the Vite plugin.
@@ -25,7 +25,7 @@
 //                         import map pins bindings to the runtime singleton
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { ProjectCompiler, type ModuleOutput } from 'dartsx/compiler';
+import { Project, type ModuleOutput } from 'dartsx/compiler';
 import { moduleToken } from './playground-sandbox.ts';
 
 export interface PlaygroundFile {
@@ -48,41 +48,83 @@ export interface ModuleGraphFailure {
 	error: string;
 }
 
-// ── Project compiler ───────────────────────────────────────────────────────
-// The ProjectCompiler is the single source of truth for every `.tsx`/`.ts`
-// file: it recompiles incrementally (an edit invalidates exactly the files
-// whose inputs it changes) and hands each module's output — code, source map,
-// and the printed AST — to both the graph builder and the compiled pane.
-const project = new ProjectCompiler({
-	css: 'injected',
-});
-/** File names the project knows about, for removeFile diffs. */
+// ── Project ───────────────────────────────────────────────────────────────
+// The Project is the single source of truth for every `.tsx`/`.ts` file:
+// it recompiles incrementally (an edit invalidates exactly the files whose
+// inputs it changes) and hands each module's output — code, source map, and
+// the printed AST — to both the graph builder and the compiled pane. The
+// host resolves sibling imports and reads sources from the live workspace
+// file set; everything else (esm.sh URLs, bare ids) stays unresolved — the
+// same contract as the old `resolveExternal: () => null`.
+/** The workspace file set the project host reads from (synced per compile). */
+let currentFiles = new Map<string, PlaygroundFile>();
+let currentFileNames = new Set<string>();
+/** File names the project knows about, for remove() diffs. */
 const projectFiles = new Set<string>();
-/** Last compile error per file — `updateFile` throws; errors surface per file. */
+/** Last compile error per file — `update` throws; errors surface per file. */
 const compileErrors = new Map<string, string>();
 
+const project = new Project({
+	css: 'injected',
+	entryPoints: [],
+	host: {
+		resolve: (specifier) => {
+			if (!specifier.startsWith('./')) return undefined;
+			const resolved = resolveSibling(specifier, currentFileNames);
+			return resolved && !isReactHostFile(resolved) ? resolved : undefined;
+		},
+		readFile: (id) => currentFiles.get(id)?.source,
+	},
+});
+
 /** Bring the project up to date with the workspace's `.tsx`/`.ts` files. */
-function ensureCompiled(files: PlaygroundFile[]): void {
-	for (const name of projectFiles) {
-		if (files.some((f) => f.name === name)) continue;
-		project.removeFile(name);
+async function ensureCompiled(files: PlaygroundFile[]): Promise<void> {
+	currentFiles = new Map(files.map((f) => [f.name, f]));
+	currentFileNames = new Set(currentFiles.keys());
+
+	for (const name of [...projectFiles]) {
+		if (currentFiles.has(name)) continue;
+		project.remove(name);
 		projectFiles.delete(name);
 		compileErrors.delete(name);
 	}
 	for (const file of files) {
 		if (isReactHostFile(file.name)) continue;
 		projectFiles.add(file.name);
-		try {
-			project.updateFile(file.name, file.source);
-			compileErrors.delete(file.name);
-		} catch (error) {
-			compileErrors.set(file.name, error instanceof Error ? error.message : String(error));
+	}
+
+	// Compile the workspace, then recompile whatever the project reports as
+	// invalidated: a module's inputs (a caller's reactive-call contributions,
+	// an importer's reactive exports) can change under it mid-pass, so its
+	// first output may be stale. Each pass recompiles only the invalidated
+	// files; the graph converges when a pass invalidates nothing.
+	let worklist = [...projectFiles];
+	while (worklist.length > 0) {
+		const next: string[] = [];
+		for (const name of worklist) {
+			const file = currentFiles.get(name);
+			if (!file) continue;
+			try {
+				const { invalidated } = await project.update(name, file.source);
+				compileErrors.delete(name);
+				for (const id of invalidated) {
+					if (projectFiles.has(id) && !next.includes(id)) next.push(id);
+				}
+			} catch (error) {
+				compileErrors.set(name, error instanceof Error ? error.message : String(error));
+			}
 		}
+		worklist = next;
 	}
 }
 
-/** The project's output for one file, or null when it has none (never compiles). */
+/**
+ * The project's output for one file, or null when it has none. Files whose
+ * last compile threw return null too — the project keeps the previous output
+ * around, but the pane must show the error, not stale code.
+ */
 export function getModuleOutput(name: string): ModuleOutput | null {
+	if (compileErrors.has(name)) return null;
 	return project.output(name);
 }
 
@@ -111,7 +153,7 @@ export function isReactHostFile(name: string): boolean {
 
 const SIBLING_EXTENSIONS = ['', '.tsx', '.react.tsx', '.ts'];
 
-// React-host files bypass the ProjectCompiler: sucrase strips types and
+// React-host files bypass the Project: sucrase strips types and
 // applies the automatic react-jsx transform (no type-checking — this is a
 // demo surface, not a toolchain). Memoized per (name, source) since it has no
 // incremental layer of its own.
@@ -144,7 +186,7 @@ async function compileReactHostFile(file: PlaygroundFile): Promise<CachedCompile
 /**
  * The memoized compile for one React-host file, if the graph already produced
  * it for this exact source. The compiled-output pane uses it to show
- * `.react.tsx` files — the ProjectCompiler cannot compile them at all (they
+ * `.react.tsx` files — the Project cannot compile them at all (they
  * are Sucrase's), and recompiling them a second time just for the pane would
  * duplicate the work `buildModuleGraph` has already done. Never compiles; a
  * miss means the next graph build fills it.
@@ -245,7 +287,7 @@ export async function buildModuleGraph(
 		return { ok: false, error: 'Playground file names must be unique.' };
 	}
 
-	ensureCompiled(files);
+	await ensureCompiled(files);
 
 	const { init, parse } = await import('es-module-lexer');
 	await init;
@@ -267,7 +309,9 @@ export async function buildModuleGraph(
 			if (!output) {
 				return {
 					ok: false,
-					error: compileError(file.name) ?? `${file.name}: compilation failed.`,
+					error:
+						compileError(file.name) ??
+						`${file.name}: not compiled — it contains no DarTsx syntax and no reactive calls target it.`,
 				};
 			}
 			rewriteAndRecord(file.name, output.js.code, names, rewritten, siblingDeps, parse);
