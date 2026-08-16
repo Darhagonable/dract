@@ -58,7 +58,7 @@ function appendCssImport(
  * source maps as classes with `toUrl`/`toString` methods, which vite handles
  * on method-less objects at runtime.
  */
-function toViteSourceMap(map: ModuleOutput['map']): TransformResult['map'] {
+function toViteSourceMap(map: ModuleOutput['js']['map']): TransformResult['map'] {
 	if (map == null) return null;
 	return map as TransformResult['map'];
 }
@@ -148,12 +148,12 @@ export default function dartsx(options: DarTsxPluginOptions = {}): Plugin {
 			const output = project.output(id);
 			if (!output) return;
 
-			let outputCode = output.code;
-			let map = toViteSourceMap(output.map);
+			let outputCode = output.js.code;
+			let map = toViteSourceMap(output.js.map);
 
 			// In external mode, append CSS as a virtual import so Vite can extract it
-			if (cssMode === 'external' && output.css != null) {
-				outputCode = appendCssImport(cssModuleMap, outputCode, id, output.css);
+			if (cssMode === 'external' && output.css.code != null) {
+				outputCode = appendCssImport(cssModuleMap, outputCode, id, output.css.code);
 				// The appended CSS import would misalign the map, so drop it then
 				map = null;
 			}

@@ -15,9 +15,8 @@
  * Tools that know their entry points call `init()`, which discovers and
  * compiles the whole reachable import graph without further supervision.
  */
-import { compileModule } from './index';
+import { compileModule, type ModuleOutput } from './module';
 import { isDarTsxFile } from './phases/1-preprocess';
-import type { SourceMap } from '@jridgewell/remapping';
 
 /** Bundler-agnostic environment supplied by the tool. */
 export interface ProjectHost {
@@ -45,16 +44,6 @@ export interface ProjectOptions {
 	css?: 'injected' | 'external';
 	/** The environment the project reads its modules through. */
 	host: ProjectHost;
-}
-
-/** The compiled output of one module, owned by the project. */
-export interface ModuleOutput {
-	/** The compiled JavaScript. */
-	code: string;
-	/** Source map from output positions to original source positions. */
-	map: SourceMap | null;
-	/** Collected CSS (external mode only); null when no style blocks compiled. */
-	css: string | null;
 }
 
 /** Result of an `update()` or `remove()` call. */
@@ -373,11 +362,7 @@ export class Project {
 			}
 		}
 
-		this.outputs.set(filename, {
-			code: result.js.code,
-			map: result.js.map,
-			css: result.css.code || null,
-		});
+		this.outputs.set(filename, result);
 
 		return { invalidated: stale };
 	}
