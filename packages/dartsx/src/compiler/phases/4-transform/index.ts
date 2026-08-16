@@ -22,7 +22,7 @@ import { STATE_MARKER, DERIVED_MARKER, STYLE_MARKER_PREFIX } from '../1-preproce
 import type { Scope } from '../../scope';
 import { scopeHash, SCOPE_ATTR, rewriteScopedCSS, extractCSSVars, type CSSVar } from './css';
 import * as b from '../../builders';
-import type { AstNode } from '../../builders';
+import type { AstNode, SourceSpan } from '../../builders';
 import { print, type PrintOptions } from 'esrap';
 import tsx from 'esrap/languages/tsx';
 import { decodeHTML } from 'entities';
@@ -106,6 +106,7 @@ export function transform(
 	analysis: AnalysisResult,
 	filename?: string,
 	cssMode?: 'injected' | 'external',
+	strippedCode?: string,
 ): TransformResult {
 	const cssFragments: string[] = [];
 	const emitStyleCalls = cssMode !== 'external';
@@ -171,9 +172,78 @@ export function transform(
 	if (analysis.source && filename) {
 		printOpts.sourceMapContent = analysis.source;
 		printOpts.sourceMapSource = filename;
+		// esrap records a mapping segment only for nodes that carry a `loc`
+		// (it never reads start/end), so derive locs from the numeric spans —
+		// which index the stripped document — right before printing, then drop
+		// them again. The printed map therefore maps output → stripped, and
+		// module.ts's remapping chain resolves it to the authored source.
+		if (strippedCode) {
+			applyLocs(transformed, lineStarts(strippedCode));
+		}
 	}
 	const { code, map } = print(transformed, tsx(), printOpts);
+	if (printOpts.sourceMapSource) {
+		clearLocs(transformed);
+	}
 	return { code, map, css: cssFragments.join('\n'), ast: transformed };
+}
+
+/** Narrow a numeric start/end pair to a span (null for synthesized nodes). */
+function spanOf(from: unknown, to: unknown): SourceSpan | null {
+	return typeof from === 'number' && typeof to === 'number' && to > from ? { start: from, end: to } : null;
+}
+
+function lineStarts(code: string): number[] {
+	const starts = [0];
+	for (let i = 0; i < code.length; i += 1) {
+		if (code.charCodeAt(i) === 10) starts.push(i + 1);
+	}
+	return starts;
+}
+
+function positionAt(starts: number[], offset: number): { line: number; column: number } {
+	let lo = 0;
+	let hi = starts.length - 1;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if (starts[mid] <= offset) lo = mid;
+		else hi = mid - 1;
+	}
+	return { line: lo + 1, column: offset - starts[lo] };
+}
+
+function applyLocs(node: unknown, starts: number[]): void {
+	const seen = new WeakSet<object>();
+	const visit = (value: unknown): void => {
+		if (!value || typeof value !== 'object' || seen.has(value)) return;
+		seen.add(value);
+		const record = value as Record<string, unknown>;
+		const start = record.start;
+		const end = record.end;
+		if (typeof start === 'number' && typeof end === 'number' && end > start) {
+			record.loc = { start: positionAt(starts, start), end: positionAt(starts, end) };
+		}
+		for (const key in record) {
+			if (key === 'metadata') continue;
+			visit(record[key]);
+		}
+	};
+	visit(node);
+}
+
+function clearLocs(node: unknown): void {
+	const seen = new WeakSet<object>();
+	const visit = (value: unknown): void => {
+		if (!value || typeof value !== 'object' || seen.has(value)) return;
+		seen.add(value);
+		const record = value as Record<string, unknown>;
+		if (record.loc !== undefined) record.loc = null;
+		for (const key in record) {
+			if (key === 'metadata') continue;
+			visit(record[key]);
+		}
+	};
+	visit(node);
 }
 
 // ── Component transform ────────────────────────────────────────────
@@ -782,7 +852,9 @@ function transformJSXElement(node: JSXElement, state: TransformState, visit: Wal
 		}
 	}
 
-	const tag = isComponent ? b.id(tagName) : b.literal(tagName);
+	const tag = isComponent
+		? b.id(tagName, spanOf(opening.name.start, opening.name.end))
+		: b.literal(tagName, spanOf(opening.name.start, opening.name.end));
 	const factory = selfNs === 'svg' ? '$.svg' : selfNs === 'math' ? '$.math' : '$.jsx';
 	if (props.length === 0) return b.call(factory, [tag]);
 
@@ -871,12 +943,13 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 
 	// Boolean: disabled
 	if (attr.value === null && attr.name.type === 'JSXIdentifier') {
-		return b.prop(attrName, b.literal(true));
+		const span = spanOf(attr.name.start, attr.name.end);
+		return b.prop(attrName, b.literal(true, span), false, span);
 	}
 
 	// Static string
 	if (attr.value?.type === 'Literal') {
-		return b.prop(attrName, b.literal(attr.value.value));
+		return b.prop(attrName, b.literal(attr.value.value, spanOf(attr.value.start, attr.value.end)), false, spanOf(attr.name.start, attr.name.end));
 	}
 
 	// Dynamic: {expr}
@@ -891,13 +964,13 @@ function transformJSXAttribute(attr: JSXAttribute, state: TransformState) {
 			// Walk with insideDerived so shorthand properties use eager $.get()
 			// instead of nested getters.
 			const transformed = walkNode(expr, { ...state, insideDerived: true });
-			return b.getter(attrName, [b.returnStmt(transformed)]);
+			return b.getter(attrName, [b.returnStmt(transformed)], spanOf(attr.name.start, attr.name.end));
 		}
 		const transformed = walkNode(expr, state);
-		return b.prop(attrName, transformed);
+		return b.prop(attrName, transformed, false, spanOf(attr.name.start, attr.name.end));
 	}
 
-	return b.prop(attrName, b.literal(null));
+	return b.prop(attrName, b.literal(null, spanOf(attr.name.start, attr.name.end)), false, spanOf(attr.name.start, attr.name.end));
 }
 
 
@@ -938,7 +1011,7 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 					continue;
 				}
 			}
-			result.push(b.literal(text));
+			result.push(b.literal(text, spanOf(child.start, child.end)));
 			continue;
 		}
 

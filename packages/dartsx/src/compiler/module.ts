@@ -74,7 +74,7 @@ export function compileModule(source: string, options: CompileModuleOptions = {}
 	const filename = options.filename || 'input.tsx';
 
 	// Phase 1: Pre-process custom syntax
-	const preprocessed = preprocess(source);
+	const preprocessed = preprocess(source, { filename });
 
 	// Strip TypeScript types early using oxc-transform.
 	// This removes interfaces, type aliases, type annotations, etc. from the source
@@ -99,7 +99,7 @@ export function compileModule(source: string, options: CompileModuleOptions = {}
 	);
 
 	// Phase 4: Transform — walk AST with zimmerframe, print with esrap
-	const result = transform(analysis, filename, options.css);
+	const result = transform(analysis, filename, options.css, stripped.code);
 
 	return {
 		js: {

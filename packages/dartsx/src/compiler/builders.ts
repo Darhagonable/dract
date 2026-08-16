@@ -26,6 +26,12 @@ export interface SourceLocation {
 	end: { line: number; column: number };
 }
 
+/** A numeric span (start/end offsets) — carries a node's source position. */
+export interface SourceSpan {
+	start: number;
+	end: number;
+}
+
 // ── Core builder ───────────────────────────────────────────────────
 
 /**
@@ -38,9 +44,9 @@ export interface SourceLocation {
  * All other code is fully type-safe.
  */
 function node<Type extends string, T extends Record<string, unknown>>(
-	type: Type, props: T, loc?: SourceLocation | null,
+	type: Type, props: T, span?: SourceSpan | null,
 ): AstNode & { type: Type; loc?: SourceLocation | null } & T {
-	return { type, start: 0, end: 0, loc: loc ?? null, ...props } as AstNode & { type: Type; loc?: SourceLocation | null } & T;
+	return { type, start: span?.start ?? 0, end: span?.end ?? 0, loc: null, ...props } as AstNode & { type: Type; loc?: SourceLocation | null } & T;
 }
 
 // ── Builder functions ──────────────────────────────────────────────
@@ -49,45 +55,45 @@ export function program(body: AstNode[]) {
 	return node('Program', { sourceType: 'module', body });
 }
 
-export function id(name: string, loc?: SourceLocation | null) {
-	return node('Identifier', { name }, loc);
+export function id(name: string, span?: SourceSpan | null) {
+	return node('Identifier', { name }, span);
 }
 
-export function literal(value: string | number | boolean | null, loc?: SourceLocation | null) {
+export function literal(value: string | number | boolean | null, span?: SourceSpan | null) {
 	const raw = typeof value === 'string' ? JSON.stringify(value) : String(value);
-	return node('Literal', { value, raw }, loc);
+	return node('Literal', { value, raw }, span);
 }
 
 /** Build a member expression from a dotted path: "$.state" → $.state */
-export function member(path: string, loc?: SourceLocation | null) {
+export function member(path: string, span?: SourceSpan | null) {
 	const parts = path.split('.');
-	if (parts.length === 1) return id(parts[0], loc);
+	if (parts.length === 1) return id(parts[0], span);
 	let result: AstNode = id(parts[0]);
 	for (let i = 1; i < parts.length; i++) {
 		result = node('MemberExpression', { object: result, property: id(parts[i]), computed: false },
-			i === parts.length - 1 ? loc : undefined);
+			i === parts.length - 1 ? span : undefined);
 	}
 	return result;
 }
 
 /** Build a call expression: call("$.state", [literal(0)]) */
-export function call(callee: string | AstNode, args: AstNode[], loc?: SourceLocation | null) {
+export function call(callee: string | AstNode, args: AstNode[], span?: SourceSpan | null) {
 	return node('CallExpression', {
 		callee: typeof callee === 'string' ? member(callee) : callee,
 		arguments: args,
-	}, loc);
+	}, span);
 }
 
-export function array(elements: AstNode[], loc?: SourceLocation | null) {
-	return node('ArrayExpression', { elements }, loc);
+export function array(elements: AstNode[], span?: SourceSpan | null) {
+	return node('ArrayExpression', { elements }, span);
 }
 
-export function object(properties: AstNode[], loc?: SourceLocation | null) {
-	return node('ObjectExpression', { properties }, loc);
+export function object(properties: AstNode[], span?: SourceSpan | null) {
+	return node('ObjectExpression', { properties }, span);
 }
 
 /** A regular key: value property */
-export function prop(key: string, value: AstNode, computed = false) {
+export function prop(key: string, value: AstNode, computed = false, span?: SourceSpan | null) {
 	return node('Property', {
 		key: computed ? id(key) : /^[$A-Z_a-z][$\w]*$/.test(key) ? id(key) : literal(key),
 		value,
@@ -95,11 +101,11 @@ export function prop(key: string, value: AstNode, computed = false) {
 		computed,
 		shorthand: false,
 		method: false,
-	});
+	}, span);
 }
 
 /** A getter property: get key() { return expr; } */
-export function getter(key: string, body: AstNode[]) {
+export function getter(key: string, body: AstNode[], span?: SourceSpan | null) {
 	return node('Property', {
 		key: /^[$A-Z_a-z][$\w]*$/.test(key) ? id(key) : literal(key),
 		value: node('FunctionExpression', {
@@ -112,11 +118,11 @@ export function getter(key: string, body: AstNode[]) {
 		computed: false,
 		shorthand: false,
 		method: false,
-	});
+	}, span);
 }
 
 /** A setter property: set key(param) { body } */
-export function setter(key: string, param: AstNode, body: AstNode[]) {
+export function setter(key: string, param: AstNode, body: AstNode[], span?: SourceSpan | null) {
 	return node('Property', {
 		key: /^[$A-Z_a-z][$\w]*$/.test(key) ? id(key) : literal(key),
 		value: node('FunctionExpression', {
@@ -129,62 +135,62 @@ export function setter(key: string, param: AstNode, body: AstNode[]) {
 		computed: false,
 		shorthand: false,
 		method: false,
-	});
+	}, span);
 }
 
-export function spread(expr: AstNode, loc?: SourceLocation | null) {
-	return node('SpreadElement', { argument: expr }, loc);
+export function spread(expr: AstNode, span?: SourceSpan | null) {
+	return node('SpreadElement', { argument: expr }, span);
 }
 
 /** Arrow with expression body: (params) => expr */
-export function arrow(params: AstNode[], body: AstNode, loc?: SourceLocation | null) {
+export function arrow(params: AstNode[], body: AstNode, span?: SourceSpan | null) {
 	return node('ArrowFunctionExpression', {
 		params,
 		body,
 		async: false,
 		expression: true,
-	}, loc);
+	}, span);
 }
 
 /** Arrow with block body: (params) => { stmts } */
-export function arrowBlock(params: AstNode[], body: AstNode[], loc?: SourceLocation | null) {
+export function arrowBlock(params: AstNode[], body: AstNode[], span?: SourceSpan | null) {
 	return node('ArrowFunctionExpression', {
 		params,
 		body: node('BlockStatement', { body }),
 		async: false,
 		expression: false,
-	}, loc);
+	}, span);
 }
 
-export function func(name: string, params: AstNode[], body: AstNode[], async_ = false, loc?: SourceLocation | null) {
+export function func(name: string, params: AstNode[], body: AstNode[], async_ = false, span?: SourceSpan | null) {
 	return node('FunctionDeclaration', {
 		id: id(name),
 		params,
 		body: node('BlockStatement', { body }),
 		async: async_,
-	}, loc);
+	}, span);
 }
 
-export function letDecl(name: string | AstNode, init: AstNode, loc?: SourceLocation | null) {
+export function letDecl(name: string | AstNode, init: AstNode, span?: SourceSpan | null) {
 	return node('VariableDeclaration', {
 		kind: 'let',
 		declarations: [node('VariableDeclarator', { id: typeof name === 'string' ? id(name) : name, init })],
-	}, loc);
+	}, span);
 }
 
-export function constDecl(name: string | AstNode, init: AstNode, loc?: SourceLocation | null) {
+export function constDecl(name: string | AstNode, init: AstNode, span?: SourceSpan | null) {
 	return node('VariableDeclaration', {
 		kind: 'const',
 		declarations: [node('VariableDeclarator', { id: typeof name === 'string' ? id(name) : name, init })],
-	}, loc);
+	}, span);
 }
 
 export function declarator(id_: AstNode, init: AstNode) {
 	return node('VariableDeclarator', { id: id_, init });
 }
 
-export function blockStmt(body: AstNode[], loc?: SourceLocation | null) {
-	return node('BlockStatement', { body }, loc);
+export function blockStmt(body: AstNode[], span?: SourceSpan | null) {
+	return node('BlockStatement', { body }, span);
 }
 
 export function forStmt(
@@ -192,29 +198,29 @@ export function forStmt(
 	test: AstNode | null,
 	update: AstNode | null,
 	body: AstNode,
-	loc?: SourceLocation | null,
+	span?: SourceSpan | null,
 ) {
-	return node('ForStatement', { init, test, update, body }, loc);
+	return node('ForStatement', { init, test, update, body }, span);
 }
 
-export function returnStmt(argument: AstNode | null = null, loc?: SourceLocation | null) {
-	return node('ReturnStatement', { argument }, loc);
+export function returnStmt(argument: AstNode | null = null, span?: SourceSpan | null) {
+	return node('ReturnStatement', { argument }, span);
 }
 
-export function exprStmt(expression: AstNode, loc?: SourceLocation | null) {
-	return node('ExpressionStatement', { expression }, loc);
+export function exprStmt(expression: AstNode, span?: SourceSpan | null) {
+	return node('ExpressionStatement', { expression }, span);
 }
 
-export function assignment(operator: string, left: AstNode, right: AstNode, loc?: SourceLocation | null) {
-	return node('AssignmentExpression', { operator, left, right }, loc);
+export function assignment(operator: string, left: AstNode, right: AstNode, span?: SourceSpan | null) {
+	return node('AssignmentExpression', { operator, left, right }, span);
 }
 
-export function binary(operator: string, left: AstNode, right: AstNode, loc?: SourceLocation | null) {
-	return node('BinaryExpression', { operator, left, right }, loc);
+export function binary(operator: string, left: AstNode, right: AstNode, span?: SourceSpan | null) {
+	return node('BinaryExpression', { operator, left, right }, span);
 }
 
-export function sequence(expressions: AstNode[], loc?: SourceLocation | null) {
-	return node('SequenceExpression', { expressions }, loc);
+export function sequence(expressions: AstNode[], span?: SourceSpan | null) {
+	return node('SequenceExpression', { expressions }, span);
 }
 
 export function importDefault(local: string, source: string) {
