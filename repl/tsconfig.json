@@ -12,13 +12,7 @@
 		"skipLibCheck": true,
 		"strict": true,
 		"types": ["node", "vite/client"],
-		"jsx": "react-jsx",
-		"jsxImportSource": "octane",
-		"plugins": [
-			{
-				"name": "@tsrx/typescript-plugin"
-			}
-		]
+		"jsx": "react-jsx"
 	},
 	"include": ["src/**/*", "vite.config.ts"],
 	"exclude": ["node_modules"]

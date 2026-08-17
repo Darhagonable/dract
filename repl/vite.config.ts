@@ -1,12 +1,9 @@
 import { defineConfig, type Plugin } from 'vite';
 import { createRequire } from 'node:module';
 import { build as esbuildBuild } from 'esbuild';
-// The site shell is an octane app (`.tsrx` routes) — this plugin compiles
-// those files for the dev server and the production build.
-import { octane } from 'octane/compiler/vite';
 
 // The playground executes user code in a sandboxed iframe with an OPAQUE
-// origin (src/lib/playground-sandbox.ts). That iframe can't import the site's
+// origin (src/utils/playground-sandbox.ts). That iframe can't import the site's
 // bundled dartsx (blob URLs are origin-bound and cross-origin module fetches
 // need CORS), so the parent hands it the runtime as TEXT and the iframe turns
 // it into blob modules on its own side of the boundary.
@@ -129,7 +126,7 @@ const PREBUNDLED = [
 ];
 
 export default defineConfig({
-	plugins: [playgroundRuntime(), octane()],
+	plugins: [playgroundRuntime()],
 
 	optimizeDeps: {
 		// The dartsx compiler resolves oxc-parser/oxc-transform through their
