@@ -2,8 +2,8 @@
 // the real module-graph pipeline and checks the "new file" scaffold compiles.
 // Run: pnpm exec sucrase-node scripts/verify-examples.ts
 import { readdirSync, readFileSync } from 'node:fs';
-import { buildModuleGraph } from '../src/lib/playground-modules.ts';
-import { compilePlayground } from '../src/lib/playground.ts';
+import { buildModuleGraph } from '../src/utils/playground-modules.ts';
+import { compilePlayground } from '../src/utils/playground.ts';
 
 const root = new URL('../examples/', import.meta.url);
 let failed = 0;
