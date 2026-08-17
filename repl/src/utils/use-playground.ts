@@ -1,48 +1,33 @@
-// /playground — write TSX on the left, and on the right either the
-// LIVE rendered app or the compiled output, switchable with a tab. The
-// compiled pane selects a Client, Server, or Types artifact and shows it as
-// code or an AST. Server and Types are kept as
-// targets for future DarTsx emits (a server renderer, .d.ts output) and show
-// a placeholder until then. Hovering or selecting source reveals the
-// corresponding AST node where the parser has a span; hovering a tree node
-// highlights its origin document. In code form the Client target maps BOTH
-// ways — through the compile's source map, widened with verified text matches
-// (see playground-mapping.ts). The
-// whole pipeline runs in the browser: the `dartsx` compiler (oxc-parser/
+// The playground engine: owns every piece of interactive state and the
+// imperative editor stack (CodeMirror, the compile pipeline, the sandboxed
+// preview, and the source↔output mapping). All of it boots once, in an
+// effect, via dynamic imports — so SSR renders just the static shell and
+// hydration stays clean. The components read state from this hook and drive
+// the engine through the `controller` (see PlaygroundController).
+//
+// The whole pipeline runs in the browser: the `dartsx` compiler (oxc-parser/
 // oxc-transform WASM bindings + esrap — no Node APIs) compiles the virtual
 // files on a debounce, the module graph executes inside a SANDBOXED IFRAME
-// with an opaque origin (see src/lib/playground.ts + playground-modules.ts +
+// with an opaque origin (see src/utils/playground.ts + playground-modules.ts +
 // playground-sandbox.ts — never in this page), and CodeMirror highlights
-// through Shiki with the bundled TSX grammar (src/lib/shiki-codemirror.ts).
-// Editors, panels, and the preview canvas all follow the site's light/dark
-// theme.
-//
-// Everything editor-related boots in an effect (dynamic imports), so SSR
-// renders just the static shell and hydration stays clean. A workspace is a
-// set of virtual files with an entry. The Examples dropdown
-// loads curated workspaces from repl/examples/ (src/lib/playground-examples.ts);
-// the file tabs manage the file set (add/delete), and editing any file
-// flips it to “Custom”. The active workspace persists into `location.hash`
-// (debounced) so playground states are shareable links, and the Format button
-// runs client-side Prettier (src/lib/playground-format.ts).
+// through Shiki with the bundled TSX grammar (src/utils/shiki-codemirror.ts).
 //
 // Shared links are UNTRUSTED input: a hash payload is decoded into the editor
 // and compiled (source + compiled output are safe to display — compilation is
 // pure string work), but it does NOT execute — even in the sandbox — until the
 // visitor explicitly presses "Run" on the consent overlay. Your own edits from
 // the default sources auto-run as before.
-import { useState, useRef, useEffect } from 'octane';
-import type { PlaygroundOutputTarget } from '../../lib/playground.ts';
-import type { CodeMapping } from '../../lib/playground-mapping.ts';
+import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
+import type { PlaygroundOutputTarget } from './playground.ts';
+import type { CodeMapping } from './playground-mapping.ts';
 import {
 	decodePlaygroundHash,
 	encodePlaygroundHash,
 	MAX_PLAYGROUND_FILES,
 	MAX_PLAYGROUND_SOURCE_LENGTH,
 	PLAYGROUND_SOURCE_LIMIT_ERROR,
-} from '../../lib/playground-hash.ts';
-import * as pgExamples from '../../lib/playground-examples.ts';
-import { useTitle } from '../../hooks/use-title.ts';
+} from './playground-hash.ts';
+import * as pgExamples from './playground-examples.ts';
 
 const { EXAMPLES, CUSTOM_EXAMPLE_ID, DEFAULT_EXAMPLE_ID } = pgExamples;
 
@@ -67,7 +52,7 @@ const AST_TARGET_META: Record<PlaygroundOutputTarget, { label: string; notice: s
 	},
 };
 
-const OUTPUT_TARGET_LABEL: Record<PlaygroundOutputTarget, string> = {
+export const OUTPUT_TARGET_LABEL: Record<PlaygroundOutputTarget, string> = {
 	client: 'Client',
 	server: 'Server',
 	types: 'Types',
@@ -99,8 +84,57 @@ for (const example of EXAMPLES) {
 	else EXAMPLE_GROUPS.push({ group: example.group, examples: [example] });
 }
 
-export function Playground() @{
-	useTitle('Octane — Playground');
+// Imperative bridge into the boot closure — the toolbar buttons (and the
+// consent overlay's Run button) call through it. Populated once the editor
+// stack has loaded.
+export interface PlaygroundController {
+	selectExample?: (id: string) => void;
+	selectFile?: (name: string) => void;
+	addFile?: () => void;
+	removeFile?: (name: string) => void;
+	renameFile?: (oldName: string, nextName: string) => void;
+	moveFile?: (fromName: string, toName: string) => void;
+	formatActive?: () => void;
+	approveRun?: () => void;
+	syncOutput?: () => void;
+	revealAst?: () => void;
+}
+
+export interface PlaygroundEngine {
+	view: 'preview' | 'compiled';
+	pane: 'editor' | 'result';
+	paneRef: RefObject<'editor' | 'result'>;
+	error: string;
+	ready: boolean;
+	formatting: boolean;
+	gated: boolean;
+	exampleId: string;
+	files: string[];
+	activeFile: string;
+	inputValue: string;
+	renameInputRef: RefObject<HTMLInputElement | null>;
+	dragOverFile: string | null;
+	draggingFileRef: MutableRefObject<string | null>;
+	focusInputSignal: number;
+	entryFile: string;
+	compiledMode: 'code' | 'ast';
+	outputTarget: PlaygroundOutputTarget;
+	sourceHostRef: RefObject<HTMLDivElement | null>;
+	outputHostRef: RefObject<HTMLDivElement | null>;
+	astHostRef: RefObject<HTMLDivElement | null>;
+	previewHostRef: RefObject<HTMLDivElement | null>;
+	controller: PlaygroundController;
+	selectView: (next: 'preview' | 'compiled') => void;
+	openMobilePreview: () => void;
+	openMobileCompiled: () => void;
+	selectCompiledMode: (mode: 'code' | 'ast') => void;
+	selectOutputTarget: (target: PlaygroundOutputTarget) => void;
+	setPane: (pane: 'editor' | 'result') => void;
+	setInputValue: (value: string) => void;
+	setDragOverFile: (file: string | null) => void;
+}
+
+export function usePlayground(): PlaygroundEngine {
 	const [view, setView] = useState<'preview' | 'compiled'>('preview');
 	// Mobile only: which panel is visible (desktop always shows both).
 	const [pane, setPane] = useState<'editor' | 'result'>('editor');
@@ -143,21 +177,7 @@ export function Playground() @{
 		mode: 'code',
 		target: 'client',
 	});
-	// Imperative bridge into the boot closure below — populated once the editor
-	// stack has loaded; the toolbar buttons (and the consent overlay's Run
-	// button) call through it.
-	const controllerRef = useRef<{
-		selectExample?: (id: string) => void;
-		selectFile?: (name: string) => void;
-		addFile?: () => void;
-		removeFile?: (name: string) => void;
-		renameFile?: (oldName: string, nextName: string) => void;
-		moveFile?: (fromName: string, toName: string) => void;
-		formatActive?: () => void;
-		approveRun?: () => void;
-		syncOutput?: () => void;
-		revealAst?: () => void;
-	}>({});
+	const controllerRef = useRef<PlaygroundController>({});
 
 	const selectView = (next: 'preview' | 'compiled') => {
 		setView(next);
@@ -237,11 +257,11 @@ export function Playground() @{
 					import('@codemirror/state'),
 					import('@codemirror/commands'),
 					import('@codemirror/view'),
-					import('../../lib/shiki-codemirror.ts'),
-					import('../../lib/playground.ts'),
-					import('../../lib/playground-modules.ts'),
-					import('../../lib/playground-ast.ts'),
-					import('../../lib/playground-mapping.ts'),
+					import('./shiki-codemirror.ts'),
+					import('./playground.ts'),
+					import('./playground-modules.ts'),
+					import('./playground-ast.ts'),
+					import('./playground-mapping.ts'),
 				]);
 			} catch (bootError) {
 				// A load failure after unmount (e.g. a test env torn down mid-import)
@@ -316,12 +336,12 @@ export function Playground() @{
 			const fileSource = (name: string): string =>
 				workspace.files.find((file: { name: string }) => file.name === name)?.source ?? '';
 
-		const publishWorkspaceState = () => {
-			setExampleId(currentExampleId);
-			setFiles(workspace.files.map((file: { name: string }) => file.name));
-			setActiveFile(currentFile);
-			setEntryFile(workspace.entry);
-		};
+			const publishWorkspaceState = () => {
+				setExampleId(currentExampleId);
+				setFiles(workspace.files.map((file: { name: string }) => file.name));
+				setActiveFile(currentFile);
+				setEntryFile(workspace.entry);
+			};
 
 			// Theme-variable canvas: the same custom properties the rest of the
 			// site swaps per `data-theme`, so both editors follow the ThemeToggle
@@ -636,13 +656,13 @@ export function Playground() @{
 			// position; clicking/cursor movement above additionally reveals them.
 			const crossHover = (side: 'source' | 'output') => EditorView.domEventObservers({
 				mousemove(event: MouseEvent, view: any) {
-				if (resultModeRef.current.view !== 'compiled') return;
-				const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
-				if (resultModeRef.current.mode === 'ast') {
-					if (offset == null || !activeAstEntry()) clearMappedPair();
-					else astPreview.reveal(offset, false);
-					return;
-				}
+					if (resultModeRef.current.view !== 'compiled') return;
+					const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
+					if (resultModeRef.current.mode === 'ast') {
+						if (offset == null || !activeAstEntry()) clearMappedPair();
+						else astPreview.reveal(offset, false);
+						return;
+					}
 					const pair =
 						offset == null ? null : mappedPair(side, offset);
 					if (pair) revealPair(pair, null);
@@ -762,7 +782,6 @@ export function Playground() @{
 				return output.error;
 			};
 
-
 			let compileSeq = 0;
 			const compileAndRun = async () => {
 				if (disposed) return;
@@ -813,11 +832,11 @@ export function Playground() @{
 				hashDebounceId = window.setTimeout(() => {
 					if (executionGated) return;
 					const { files: wsFiles, entry } = workspace;
-				const encoded = encodePlaygroundHash({
-					lang: 'tsx',
-					entry,
-					files: wsFiles,
-				});
+					const encoded = encodePlaygroundHash({
+						lang: 'tsx',
+						entry,
+						files: wsFiles,
+					});
 					if (!encoded) return;
 					window.history.replaceState(null, '', '#' + encoded);
 					try {
@@ -1102,7 +1121,7 @@ export function Playground() @{
 				setFormatting(true);
 				void (async () => {
 					try {
-						const { formatPlaygroundFile } = await import('../../lib/playground-format.ts');
+						const { formatPlaygroundFile } = await import('./playground-format.ts');
 						const source = sourceView.state.doc.toString();
 						const result = await formatPlaygroundFile(currentFile, source);
 						if (disposed) return;
@@ -1169,822 +1188,37 @@ export function Playground() @{
 		};
 	}, []);
 
-	<div class="pg">
-		<div class="pg-toolbar">
-			<div class="pg-toolbar-side">
-				<select
-					class="pg-select"
-					aria-label="Example"
-					disabled={!ready}
-					value={exampleId}
-					onChange={(e) => controllerRef.current.selectExample?.(e.currentTarget.value)}
-				>
-					{/* Static placeholder shown only while the buffer has diverged from
-    every example — always in the DOM (no conditional rendering
-    inside the select) so the option list never reconciles. */}
-					<option value="custom" disabled hidden>Custom</option>
-					@for (const group of EXAMPLE_GROUPS; key group.group) {
-						<optgroup label={group.group}>
-							@for (const example of group.examples; key example.id) {
-								<option value={example.id}>{example.label as string}</option>
-							}
-						</optgroup>
-					}
-				</select>
-				<button
-					type="button"
-					class="pg-format"
-					disabled={!ready || formatting}
-					title="Format with Prettier (Ctrl/Cmd-Shift-F)"
-					onClick={() => controllerRef.current.formatActive?.()}
-				>{(formatting ? 'Formatting…' : 'Format') as string}</button>
-			</div>
-			<div class="pg-seg pg-view-switch" role="group" aria-label="Result view">
-				<button
-					type="button"
-					class={['pg-seg-btn', view === 'preview' && 'active']}
-					onClick={() => selectView('preview')}
-				>
-					Preview
-				</button>
-				<button
-					type="button"
-					class={['pg-seg-btn', view === 'compiled' && 'active']}
-					onClick={() => selectView('compiled')}
-				>
-					Compiled
-				</button>
-			</div>
-		</div>
-
-		@if (error) {
-			<div class="pg-error" role="alert">{error}</div>
-		}
-
-		<div class={['pg-grid', ready && 'ready']}>
-			<section
-				class={['pg-panel', pane !== 'editor' && 'mobile-hidden']}
-				aria-label="Source editor"
-			>
-				<div class="pg-panel-head">
-					<div class="pg-tabs" role="tablist" aria-label="Playground files">
-						@for (const name of files; key name) {
-							<div
-								class={['pg-tab', name === activeFile && 'active', dragOverFile === name && 'drag-over']}
-								role="tab"
-								tabIndex={0}
-								aria-selected={name === activeFile}
-								draggable={true}
-								onClick={() => controllerRef.current.selectFile?.(name)}
-								onKeyDown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										controllerRef.current.selectFile?.(name);
-									}
-								}}
-								onDragStart={(e) => {
-									draggingFileRef.current = name;
-									e.dataTransfer!.effectAllowed = 'move';
-									e.dataTransfer!.setData('text/plain', name);
-								}}
-								onDragOver={(e) => {
-									e.preventDefault();
-									setDragOverFile(name);
-								}}
-								onDragLeave={() => {
-									if (dragOverFile === name) setDragOverFile(null);
-								}}
-								onDrop={(e) => {
-									e.preventDefault();
-									const from = draggingFileRef.current;
-									draggingFileRef.current = null;
-									setDragOverFile(null);
-									if (from && from !== name) {
-										controllerRef.current.moveFile?.(from, name);
-									}
-								}}
-								onDragEnd={() => {
-									draggingFileRef.current = null;
-									setDragOverFile(null);
-								}}
-							>
-								@if (name === entryFile) {
-									<span class="pg-tab-dot" title="Entry file — the preview renders this module's default export" />
-								}
-								<span class="pg-tab-name">
-									<span
-										class={name === activeFile && name !== entryFile ? 'pg-tab-input-mask' : undefined}
-									>
-										{(name === activeFile && name !== entryFile ? inputValue : name) as string}
-									</span>
-									@if (name === activeFile && name !== entryFile) {
-										<input
-											ref={renameInputRef}
-											class="pg-tab-input"
-											value={inputValue}
-											spellCheck={false}
-											aria-label={'Rename ' + name}
-											onInput={(e) => setInputValue(e.currentTarget.value)}
-											onFocus={(e) => {
-												const input = e.currentTarget;
-												setTimeout(() => input.select());
-											}}
-											onBlur={() => {
-												if (inputValue === name || inputValue === '') {
-													setInputValue(name);
-													return;
-												}
-												controllerRef.current.renameFile?.(name, inputValue);
-											}}
-											onKeyDown={(e) => {
-												if (e.key === 'Enter') {
-													e.preventDefault();
-													e.currentTarget.blur();
-												} else if (e.key === 'Escape') {
-													setInputValue(name);
-													e.currentTarget.blur();
-												}
-											}}
-										/>
-									}
-								</span>
-								@if (name === activeFile && name !== entryFile) {
-									<button
-										type="button"
-										class="pg-tab-close"
-										aria-label={'Delete ' + name}
-										title="Delete file"
-										disabled={files.length <= 1}
-										onClick={(e) => {
-											e.stopPropagation();
-											if (window.confirm('Delete ' + name + '?')) {
-												controllerRef.current.removeFile?.(name);
-											}
-										}}
-									>{'×'}</button>
-								}
-							</div>
-						}
-						<button
-							type="button"
-							class="pg-tab-add"
-							aria-label="Add file"
-							title={'Add a file (up to ' + MAX_PLAYGROUND_FILES + ')'}
-							disabled={!ready || files.length >= MAX_PLAYGROUND_FILES}
-							onClick={() => controllerRef.current.addFile?.()}
-						>{'+'}</button>
-					</div>
-					@if (!ready) {
-						<span class="pg-loading">Loading editor…</span>
-					}
-				</div>
-				<div class="pg-editor" ref={sourceHostRef} />
-			</section>
-
-			<section class={['pg-panel', pane !== 'result' && 'mobile-hidden']} aria-label="Result">
-				<div class="pg-panel-head">
-					<span>
-						{view === 'preview'
-							? 'Live preview'
-							: OUTPUT_TARGET_LABEL[outputTarget] +
-								(compiledMode === 'ast' ? ' AST · ' : ' output · ') +
-								(activeFile || '…')}
-					</span>
-					@if (view === 'compiled') {
-						<div class="pg-compiled-controls">
-							<select
-								class="pg-select pg-output-select"
-								aria-label="Compiler output"
-								value={outputTarget}
-								onChange={(event) => selectOutputTarget(
-									event.currentTarget.value as PlaygroundOutputTarget,
-								)}
-							>
-								<option value="client">Client</option>
-								<option value="server">Server</option>
-								<option value="types">Types</option>
-							</select>
-							<div class="pg-seg pg-seg-sm" role="group" aria-label="Output format">
-								<button
-									type="button"
-									class={['pg-seg-btn', compiledMode === 'code' && 'active']}
-									onClick={() => selectCompiledMode('code')}
-								>
-									Code
-								</button>
-								<button
-									type="button"
-									class={['pg-seg-btn', compiledMode === 'ast' && 'active']}
-									onClick={() => selectCompiledMode('ast')}
-								>
-									AST
-								</button>
-							</div>
-						</div>
-					}
-				</div>
-				<div class={['pg-result', view !== 'preview' && 'hidden']}>
-					<div class="pg-preview" ref={previewHostRef} />
-					@if (gated) {
-						<div class="pg-consent" role="alertdialog" aria-label="Run shared code?">
-							<div class="pg-consent-card">
-								<strong>This link contains shared code.</strong>
-								<p>
-									It was written by whoever sent you this link. Review it in the editor (and the
-									compiled output) — it runs in a sandbox, but only after you choose to run it.
-								</p>
-								<button
-									type="button"
-									class="pg-consent-run"
-									disabled={!ready}
-									onClick={() => controllerRef.current.approveRun?.()}
-								>
-									Run code
-								</button>
-							</div>
-						</div>
-					}
-				</div>
-				<div class={['pg-compiled', view !== 'compiled' && 'hidden']}>
-					<div class={['pg-ast-host', compiledMode !== 'ast' && 'hidden']} ref={astHostRef} />
-					<div class={['pg-output', compiledMode !== 'code' && 'hidden']}>
-						<div class="pg-editor" ref={outputHostRef} />
-					</div>
-				</div>
-			</section>
-		</div>
-
-		<div class="pg-mobile-toggle" role="group" aria-label="Visible panel">
-			<button
-				type="button"
-				class={['pg-seg-btn', pane === 'editor' && 'active']}
-				onClick={() => {
-					paneRef.current = 'editor';
-					setPane('editor');
-				}}
-			>
-				Code
-			</button>
-			<button
-				type="button"
-				class={['pg-seg-btn', pane === 'result' && view === 'preview' && 'active']}
-				onClick={openMobilePreview}
-			>
-				Preview
-			</button>
-			<button
-				type="button"
-				class={['pg-seg-btn', pane === 'result' && view === 'compiled' && 'active']}
-				title="Show the compiled output for the current file"
-				onClick={openMobileCompiled}
-			>
-				Inspect
-			</button>
-		</div>
-
-		<style>
-			.pg {
-				display: flex;
-				flex-direction: column;
-				position: relative;
-				/* Fill the viewport below the sticky nav (60px + 1px border), edge to
-				   edge — the layout renders no footer on this page, so nothing
-				   scrolls. dvh tracks mobile browser chrome. */
-				height: calc(100vh - 61px);
-				height: calc(100dvh - 61px);
-			}
-			.pg-toolbar {
-				display: flex;
-				align-items: center;
-				justify-content: space-between;
-				gap: 1rem;
-				flex-wrap: wrap;
-				padding: 0.65rem 1rem;
-			}
-			.pg-toolbar-side {
-				display: flex;
-				align-items: center;
-				gap: 0.75rem;
-				flex-wrap: wrap;
-			}
-			.pg-select {
-				font: inherit;
-				font-size: 0.85rem;
-				font-weight: 500;
-				color: var(--text);
-				/* Custom chevron (appearance: none drops the native one) so the
-				   indicator gets breathing room from the right edge. */
-				appearance: none;
-				padding: 0.35rem 2.1rem 0.35rem 0.65rem;
-				border-radius: 8px;
-				border: 1px solid var(--border);
-				background: var(--surface-subtle);
-				background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2399a1b3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-				background-repeat: no-repeat;
-				background-position: right 0.75rem center;
-				cursor: pointer;
-				max-width: 15rem;
-			}
-			.pg-select:disabled {
-				opacity: 0.5;
-				cursor: default;
-			}
-			.pg-select option,
-			.pg-select optgroup {
-				background: var(--panel);
-				color: var(--text);
-			}
-			.pg-format {
-				font: inherit;
-				font-size: 0.85rem;
-				font-weight: 500;
-				color: var(--text-secondary);
-				padding: 0.35rem 0.9rem;
-				border-radius: 9999px;
-				border: 1px solid var(--border);
-				background: var(--surface-subtle);
-				cursor: pointer;
-			}
-			.pg-format:hover:not(:disabled) {
-				color: var(--text);
-			}
-			.pg-format:disabled {
-				opacity: 0.5;
-				cursor: default;
-			}
-			.pg-seg {
-				display: inline-flex;
-				padding: 3px;
-				border-radius: 9999px;
-				border: 1px solid var(--border);
-				background: var(--surface-subtle);
-			}
-			/* Compact variant for the panel-head Code/AST switch. */
-			.pg-seg-sm {
-				padding: 2px;
-			}
-			.pg-seg-sm .pg-seg-btn {
-				font-size: 0.68rem;
-				padding: 0.12rem 0.6rem;
-				letter-spacing: 0.06em;
-			}
-			.pg-compiled-controls {
-				display: flex;
-				align-items: center;
-				gap: 0.45rem;
-			}
-			.pg-output-select {
-				max-width: 9.5rem;
-				padding: 0.18rem 1.7rem 0.18rem 0.55rem;
-				background-position: right 0.55rem center;
-				font-size: 0.68rem;
-				letter-spacing: 0;
-				text-transform: none;
-			}
-			.pg-seg-btn {
-				border: none;
-				background: transparent;
-				color: var(--text-secondary);
-				font: inherit;
-				font-size: 0.85rem;
-				font-weight: 500;
-				padding: 0.3rem 0.9rem;
-				border-radius: 9999px;
-				cursor: pointer;
-			}
-			.pg-seg-btn:hover:not(:disabled) {
-				color: var(--text);
-			}
-			.pg-seg-btn.active {
-				color: var(--accent-text);
-				background: rgba(255, 65, 90, 0.14);
-			}
-			.pg-seg-btn:disabled {
-				opacity: 0.5;
-				cursor: default;
-			}
-			.pg-error {
-				padding: 0.6rem 1rem;
-				border-top: 1px solid rgba(255, 93, 114, 0.4);
-				background: rgba(255, 65, 90, 0.12);
-				color: var(--danger-text);
-				font-size: 0.85rem;
-				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-				white-space: pre-wrap;
-			}
-			.pg-warning-location {
-				color: var(--text-secondary);
-			}
-			.pg-grid {
-				display: grid;
-				grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-				flex: 1;
-				min-height: 320px;
-			}
-			.pg-mobile-toggle {
-				display: none;
-			}
-			.pg-panel {
-				display: flex;
-				flex-direction: column;
-				min-width: 0;
-				min-height: 0;
-				border-top: 1px solid var(--border);
-				overflow: hidden;
-				background: var(--code-bg);
-			}
-			.pg-panel + .pg-panel {
-				border-left: 1px solid var(--border);
-			}
-			.pg-panel-head {
-				display: flex;
-				align-items: center;
-				justify-content: space-between;
-				gap: 1rem;
-				min-height: 2.7rem;
-				padding: 0.45rem 0.9rem;
-				border-bottom: 1px solid var(--border);
-				background: var(--surface-subtle);
-				color: var(--text-secondary);
-				font-size: 0.72rem;
-				letter-spacing: 0.08em;
-				text-transform: uppercase;
-			}
-			.pg-tabs {
-				display: flex;
-				align-items: center;
-				gap: 0.25rem;
-				flex-wrap: wrap;
-			}
-			.pg-tab {
-				position: relative;
-				display: flex;
-				align-items: center;
-				gap: 0.15rem;
-				/* Right padding reserves the close button's slot so active and
-				   inactive tabs stay the same width. */
-				padding: 0.15rem 1.6rem 0.15rem 0.5rem;
-				border-radius: 6px;
-				color: var(--text-secondary);
-				cursor: pointer;
-			}
-			.pg-tab.drag-over {
-				background: var(--surface);
-				box-shadow: inset 0 0 0 1px var(--border-strong);
-			}
-			.pg-tab.active {
-				color: var(--accent-text);
-				background: rgba(255, 65, 90, 0.14);
-			}
-			.pg-tab-dot {
-				flex: none;
-				width: 5px;
-				height: 5px;
-				border-radius: 50%;
-				background: var(--accent-text);
-			}
-			.pg-tab-name {
-				position: relative;
-				font-size: 0.78rem;
-				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-				text-transform: none;
-				letter-spacing: normal;
-				padding: 0.05rem 0.1rem;
-				border-radius: 4px;
-			}
-			/* While the overlay input is editing, the text below it is hidden
-			   (kept in flow only to hold the tab's width). */
-			.pg-tab-input-mask {
-				visibility: hidden;
-			}
-			.pg-tab.active .pg-tab-name {
-				cursor: text;
-			}
-			/* The active tab's name is a live input, invisible over the name
-			   text below it — clicking the tab edits the name in place. */
-			.pg-tab-input {
-				position: absolute;
-				inset: 0;
-				width: 100%;
-				margin: 0;
-				border: none;
-				outline: none;
-				background: transparent;
-				color: inherit;
-				font: inherit;
-				font-size: 0.78rem;
-				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-				text-transform: none;
-				letter-spacing: normal;
-				/* Matches .pg-tab-name so the input text lines up with where
-				   the masked text sits. */
-				padding: 0.05rem 0.1rem;
-				box-sizing: border-box;
-				cursor: text;
-			}
-			.pg-tab-close {
-				position: absolute;
-				right: 0.15rem;
-				top: 50%;
-				transform: translateY(-50%);
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				width: 1.3rem;
-				height: 1.3rem;
-				border: none;
-				background: transparent;
-				color: var(--text-secondary);
-				font-size: 0.9rem;
-				line-height: 1;
-				padding: 0;
-				border-radius: 4px;
-				cursor: pointer;
-				opacity: 0.65;
-			}
-			.pg-tab-close:hover:not(:disabled) {
-				opacity: 1;
-				color: var(--danger-text);
-				background: rgba(255, 93, 114, 0.14);
-			}
-			.pg-tab-close:disabled {
-				opacity: 0.2;
-				cursor: default;
-			}
-			.pg-tab-add {
-				border: none;
-				background: transparent;
-				color: var(--text-secondary);
-				font: inherit;
-				font-size: 0.95rem;
-				line-height: 1;
-				padding: 0.12rem 0.45rem;
-				border-radius: 6px;
-				cursor: pointer;
-			}
-			.pg-tab-add:hover:not(:disabled) {
-				color: var(--accent-text);
-				background: rgba(255, 65, 90, 0.12);
-			}
-			.pg-tab-add:disabled {
-				opacity: 0.4;
-				cursor: default;
-			}
-			.pg-loading {
-				text-transform: none;
-				letter-spacing: normal;
-			}
-			.pg-editor {
-				flex: 1;
-				min-height: 0;
-			}
-			.pg-editor.hidden,
-			.pg-compiled.hidden,
-			.pg-result.hidden {
-				display: none;
-			}
-			.pg-compiled {
-				display: flex;
-				flex: 1;
-				min-height: 0;
-				flex-direction: column;
-			}
-			.pg-output {
-				display: flex;
-				flex: 1;
-				min-height: 0;
-				flex-direction: column;
-			}
-			.pg-output.hidden,
-			.pg-ast-host.hidden {
-				display: none;
-			}
-			.pg-ast-host {
-				flex: 1;
-				min-height: 0;
-				overflow: hidden;
-			}
-			.pg-ast-host :global(.pg-ast-shell) {
-				display: flex;
-				height: 100%;
-				min-height: 0;
-				flex-direction: column;
-				background: var(--code-bg);
-				color: var(--text);
-				font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-				font-size: 0.75rem;
-			}
-			.pg-ast-host :global(.pg-ast-status),
-			.pg-ast-host :global(.pg-ast-notice) {
-				padding: 0.18rem 0.45rem;
-				border-bottom: 1px solid var(--border);
-				color: var(--text-secondary);
-				font-family: var(--font-sans, system-ui, sans-serif);
-				font-size: 0.65rem;
-			}
-			.pg-ast-host :global(.pg-ast-status) {
-				color: var(--text);
-				font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-			}
-			.pg-ast-host :global(.pg-ast-notice) {
-				border-top: 1px solid var(--border);
-				border-bottom: 0;
-			}
-			.pg-ast-host :global(.pg-ast-scroll) {
-				flex: 1;
-				min-height: 0;
-				overflow: auto;
-				padding: 0.35rem 0.45rem 0.65rem;
-			}
-			.pg-ast-host :global(.pg-ast-tree),
-			.pg-ast-host :global(.pg-ast-node ul) {
-				margin: 0;
-				padding: 0;
-				list-style: none;
-			}
-			.pg-ast-host :global(.pg-ast-node ul) {
-				padding-left: 1rem;
-			}
-			.pg-ast-host :global(.pg-ast-node summary),
-			.pg-ast-host :global(.pg-ast-value),
-			.pg-ast-host :global(.pg-ast-closing) {
-				display: block;
-				width: max-content;
-				padding: 0 0.1rem;
-				border-radius: 2px;
-				white-space: pre;
-			}
-			.pg-ast-host :global(.pg-ast-node summary) {
-				cursor: pointer;
-			}
-			.pg-ast-host :global(.pg-ast-node[data-ast-path='true'] > details:not([open]) > summary),
-			.pg-ast-host :global(.pg-ast-node[data-ast-leaf='true'] > details > summary) {
-				background: rgba(255, 234, 0, 0.2);
-				box-shadow: inset 0 0 0 1px rgba(214, 185, 0, 0.2);
-			}
-			.pg-ast-host :global(.pg-ast-node[data-ast-leaf='true'] > details > summary) {
-				background: rgba(255, 234, 0, 0.34);
-			}
-			.pg-ast-host :global(.pg-ast-node[data-ast-pinned='true'] > details > summary) {
-				box-shadow: inset 0 0 0 1px rgba(214, 185, 0, 0.55);
-			}
-			.pg-ast-host :global(.pg-ast-key) {
-				color: var(--text);
-				text-decoration: underline;
-				text-decoration-color: var(--border-strong);
-			}
-			.pg-ast-host :global(.pg-ast-type) {
-				color: var(--accent-text);
-			}
-			.pg-ast-host :global(.pg-ast-range),
-			.pg-ast-host :global(.pg-ast-reference),
-			.pg-ast-host :global(.pg-ast-undefined),
-			.pg-ast-host :global(.pg-ast-null) {
-				color: var(--text-secondary);
-			}
-			.pg-ast-host :global(.pg-ast-string) {
-				color: var(--syntax-string, #a56a12);
-			}
-			.pg-ast-host :global(.pg-ast-number),
-			.pg-ast-host :global(.pg-ast-boolean),
-			.pg-ast-host :global(.pg-ast-bigint) {
-				color: var(--syntax-number, #2f8f46);
-			}
-			.pg-grid:not(.ready) :global(.cm-editor) {
-				opacity: 0;
-			}
-			.pg-editor :global(.cm-editor) {
-				height: 100%;
-			}
-			/* Ranges revealed by source↔output position mapping. */
-			.pg-editor :global(.cm-mapped) {
-				background: rgba(255, 234, 0, 0.42);
-				box-shadow: inset 0 0 0 1px rgba(214, 185, 0, 0.28);
-				border-radius: 2px;
-			}
-			.pg-result {
-				position: relative;
-				display: flex;
-				flex: 1;
-				min-height: 0;
-			}
-			/* The preview is a sandboxed iframe (opaque origin) — the content's
-			   background/padding live in its srcdoc, not here (the parent relays
-			   theme flips over the sandbox protocol). */
-			.pg-preview {
-				flex: 1;
-				min-height: 0;
-				background: var(--code-bg);
-			}
-			.pg-consent {
-				position: absolute;
-				inset: 0;
-				display: grid;
-				place-items: center;
-				padding: 1.25rem;
-				background: var(--header-bg);
-				backdrop-filter: blur(6px);
-			}
-			.pg-consent-card {
-				max-width: 26rem;
-				display: grid;
-				gap: 0.6rem;
-				justify-items: start;
-				padding: 1.1rem 1.25rem;
-				border-radius: 12px;
-				border: 1px solid var(--border-strong);
-				background: var(--panel);
-				color: var(--text);
-				font-size: 0.9rem;
-			}
-			.pg-consent-card p {
-				margin: 0;
-				color: var(--text-secondary);
-			}
-			.pg-consent-run {
-				font: inherit;
-				font-weight: 600;
-				padding: 0.45rem 1.1rem;
-				border-radius: 8px;
-				border: 1px solid rgba(255, 93, 114, 0.5);
-				background: rgba(255, 65, 90, 0.14);
-				color: var(--accent-text);
-				cursor: pointer;
-			}
-			.pg-consent-run:disabled {
-				opacity: 0.5;
-				cursor: default;
-			}
-			@media (max-width: 980px) {
-				.pg-toolbar {
-					display: block;
-					padding: 0.45rem 0.6rem;
-				}
-				.pg-toolbar-side {
-					display: grid;
-					grid-template-columns: minmax(7rem, 1fr) auto auto;
-					gap: 0.4rem;
-					width: 100%;
-				}
-				.pg-toolbar-side .pg-select {
-					width: 100%;
-					min-width: 0;
-				}
-				.pg-toolbar-side .pg-seg {
-					padding: 2px;
-				}
-				.pg-toolbar-side .pg-seg-btn,
-				.pg-format {
-					padding: 0.3rem 0.55rem;
-				}
-				.pg-view-switch {
-					display: none;
-				}
-				/* One panel at a time — the bottom toggle switches editor ↔ result. */
-				.pg-grid {
-					grid-template-columns: 1fr;
-				}
-				.pg-panel.mobile-hidden {
-					display: none;
-				}
-				.pg-panel + .pg-panel {
-					border-left: none;
-				}
-				.pg-mobile-toggle {
-					display: flex;
-					position: absolute;
-					z-index: 10;
-					left: 50%;
-					bottom: max(0.45rem, env(safe-area-inset-bottom));
-					width: min(calc(100% - 1rem), 23rem);
-					transform: translateX(-50%);
-					gap: 0.25rem;
-					padding: 3px;
-					border-radius: 9999px;
-					border: 1px solid var(--border);
-					background: var(--header-bg-solid);
-					backdrop-filter: blur(12px);
-				}
-				.pg-mobile-toggle .pg-seg-btn {
-					flex: 1;
-					min-width: 0;
-					padding: 0.45rem 0.9rem;
-				}
-				.pg-editor :global(.cm-content),
-				.pg-ast-host :global(.pg-ast-scroll) {
-					padding-bottom: 4rem;
-				}
-				.pg-ast-host :global(.pg-ast-notice) {
-					order: 1;
-					border-top: 0;
-					border-bottom: 1px solid var(--border);
-				}
-				.pg-ast-host :global(.pg-ast-scroll) {
-					order: 2;
-				}
-				.pg-ast-host :global(.pg-ast-node summary) {
-					padding-block: 0.12rem;
-				}
-			}
-		</style>
-	</div>
+	return {
+		view,
+		pane,
+		paneRef,
+		error,
+		ready,
+		formatting,
+		gated,
+		exampleId,
+		files,
+		activeFile,
+		inputValue,
+		renameInputRef,
+		dragOverFile,
+		draggingFileRef,
+		focusInputSignal,
+		entryFile,
+		compiledMode,
+		outputTarget,
+		sourceHostRef,
+		outputHostRef,
+		astHostRef,
+		previewHostRef,
+		controller: controllerRef.current,
+		selectView,
+		openMobilePreview,
+		openMobileCompiled,
+		selectCompiledMode,
+		selectOutputTarget,
+		setPane,
+		setInputValue,
+		setDragOverFile,
+	};
 }
