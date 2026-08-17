@@ -1,5 +1,6 @@
-import { createElement, createRoot } from 'octane';
-import { Playground } from './pages/playground/Playground.tsrx';
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Playground } from './App.tsx';
 
 // Theme toggle for the standalone repl (the site's lives in its header).
 // Keeps the same 'octane-theme' key + data-theme contract as the inline

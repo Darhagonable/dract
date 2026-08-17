@@ -1,9 +1,9 @@
 // One-off migration script: writes every example from the inline template
-// strings of src/lib/playground-examples.ts into a svelte.dev-style folder
+// strings of src/utils/playground-examples.ts into a svelte.dev-style folder
 // tree under repl/examples/<NN-group>/<NN-example>/.
 // Run: pnpm exec sucrase-node scripts/extract-examples.ts
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { EXAMPLES } from '../src/lib/playground-examples.ts';
+import { EXAMPLES } from '../src/utils/playground-examples.ts';
 
 const GROUP_DIR: Record<string, string> = {
 	Basics: '00-basics',

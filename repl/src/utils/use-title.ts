@@ -3,8 +3,8 @@
 // restored, so routes that set nothing — the home page — fall back to the
 // template's static <title>. Effects never run during SSR, so crawlers see the
 // template title in the served HTML and this only refines it after hydration.
-import { useEffect } from 'octane';
-import { SITE_TITLE } from '../constants/site.ts';
+import { useEffect } from 'react';
+import { SITE_TITLE } from './site.ts';
 
 // Byte-identical to the template <title> in index.html, so restoring it after
 // a page unmount cannot flicker a different default.
