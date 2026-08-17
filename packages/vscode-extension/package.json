@@ -71,8 +71,8 @@
 		"package": "vsce package --no-dependencies"
 	},
 	"dependencies": {
-		"@volar/language-server": "~2.4.28",
 		"@dartsx/typescript-plugin": "workspace:*",
+		"@volar/language-server": "~2.4.28",
 		"volar-service-css": "0.0.71",
 		"volar-service-html": "0.0.71",
 		"vscode-languageclient": "^10.0.0"
@@ -81,7 +81,7 @@
 		"@types/vscode": "^1.120.0",
 		"@vscode-tmlanguage-snapshot/vscode": "^2.0.0",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.9",
+		"vitest": "5.0.0-rc.2",
 		"vitest-environment-vscode": "^0.1.3"
 	}
 }
