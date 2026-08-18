@@ -285,6 +285,15 @@
 	opacity: 0.4;
 	cursor: default;
 }
+/* The workspace config file (tsconfig.json) is a sibling of .pg-tabs, so
+   the panel head's space-between layout pins it to the far right on its own.
+   This only trims the base tab's close-button padding — it has none. */
+.pg-tab-config {
+	padding: 0.15rem 0.5rem;
+}
+.pg-tab-config.active .pg-tab-name {
+	cursor: pointer;
+}
 .pg-loading {
 	text-transform: none;
 	letter-spacing: normal;

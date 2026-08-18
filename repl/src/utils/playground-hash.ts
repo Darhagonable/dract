@@ -1,5 +1,5 @@
 import type { PlaygroundLang } from './playground.ts';
-import type { PlaygroundFile } from './playground-modules.ts';
+import { TSCONFIG_FILE_NAME, type PlaygroundFile } from './playground-modules.ts';
 
 /** Total source budget across ALL files in a workspace. */
 export const MAX_PLAYGROUND_SOURCE_LENGTH = 20_000;
@@ -17,8 +17,12 @@ export const MAX_PLAYGROUND_HASH_LENGTH = Math.ceil(
 export const PLAYGROUND_SOURCE_LIMIT_ERROR = `Source is limited to ${MAX_PLAYGROUND_SOURCE_LENGTH} characters in the playground.`;
 
 // One optional interior `.react` segment marks React-host files (see
-// playground-modules.ts); everything else is a single-extension name.
+// playground-modules.ts); everything else is a single-extension name. The
+// workspace tsconfig file is the one allowed non-source name (it is a config
+// document, never a module).
 const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+(\.react)?\.tsx$/;
+const isAcceptableFileName = (name: string) =>
+	name === TSCONFIG_FILE_NAME || FILE_NAME_PATTERN.test(name);
 
 export type PlaygroundHashPayload = {
 	lang: PlaygroundLang;
@@ -81,7 +85,7 @@ export function decodePlaygroundHash(hash: string): PlaygroundHashResult {
 				if (
 					typeof entry?.n !== 'string' ||
 					typeof entry?.s !== 'string' ||
-					!FILE_NAME_PATTERN.test(entry.n) ||
+					!isAcceptableFileName(entry.n) ||
 					names.has(entry.n)
 				) {
 					return { ok: true, value: null };
@@ -89,7 +93,11 @@ export function decodePlaygroundHash(hash: string): PlaygroundHashResult {
 				names.add(entry.n);
 				files.push({ name: entry.n, source: entry.s });
 			}
-			if (typeof parsed.e !== 'string' || !names.has(parsed.e)) {
+			if (
+				typeof parsed.e !== 'string' ||
+				!names.has(parsed.e) ||
+				parsed.e === TSCONFIG_FILE_NAME
+			) {
 				return { ok: true, value: null };
 			}
 			if (totalLength(files) > MAX_PLAYGROUND_SOURCE_LENGTH) {

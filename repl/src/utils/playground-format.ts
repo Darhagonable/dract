@@ -1,6 +1,7 @@
 // Client-side Prettier for the playground's Format button. Everything loads
 // lazily on first use: `prettier/standalone` plus prettier's typescript and
-// estree plugins for `.tsx` / `.react.tsx` files.
+// estree plugins for `.tsx` / `.react.tsx` files, and the babel plugin's json
+// parser for `tsconfig.json`.
 //
 // Client-only: load via dynamic import from an event handler (never SSR).
 
@@ -25,10 +26,14 @@ export async function formatPlaygroundFile(name: string, source: string): Promis
 			import('prettier/plugins/estree'),
 		]);
 		const typescript = await import('prettier/plugins/typescript');
+		const babel = await import('prettier/plugins/babel');
+		const isJson = name.endsWith('.json');
 		const formatted = await format(source, {
 			...OPTIONS,
-			parser: 'typescript',
-			plugins: [typescript, estree],
+			// The babel plugin ships the json/jsonc parsers (the dedicated
+			// prettier/plugins/json module no longer exists in prettier 3.9).
+			parser: isJson ? 'json' : 'typescript',
+			plugins: [typescript, babel, estree],
 		});
 		return { ok: true, code: formatted };
 	} catch (error) {
