@@ -13,13 +13,17 @@
 // boundary. Multi-file graphs and third-party esm.sh imports are prepared by
 // playground-modules.ts.
 //
+// DevTools: the REAL Chrome DevTools UI runs in a SECOND iframe inside the
+// collapsible panel under the preview; the CDP relay, frontend document, and
+// boot handshake live in playground-devtools.ts. The preview iframe runs
+// chobitsu — the Chrome DevTools protocol implemented in-page (see
+// playground-sandbox.ts). Messages are plain objects; CDP strings are the
+// only strings in play, so both sides tell them apart by type alone (no
+// marker key — same stance as solid-playground).
+//
 // Client-only: load via dynamic import from an effect (never during SSR).
-import {
-	sandboxSrcdoc,
-	RUNTIME_MANIFEST_PATH,
-	PROTOCOL_KEY,
-	type RuntimeManifest,
-} from './playground-sandbox.ts';
+import { sandboxSrcdoc, RUNTIME_MANIFEST_PATH, type RuntimeManifest } from './playground-sandbox.ts';
+import { createDevtoolsRelay, type DevtoolsRelay } from './playground-devtools.ts';
 
 export type PlaygroundLang = 'tsx';
 export type PlaygroundRuntimeTarget = 'client' | 'server';
@@ -41,6 +45,12 @@ export interface RunPayload {
 export interface Preview {
 	/** Execute a compiled playground module graph and render its entry component. Never throws. */
 	run(payload: RunPayload): Promise<{ error: string | null }>;
+	/**
+	 * Lazily create the devtools frontend iframe (the real Chrome DevTools UI
+	 * served from the chii CDN build) into the devtools host and start the
+	 * CDP relay to the sandbox's chobitsu. No-op once created.
+	 */
+	ensureDevtools(): void;
 	destroy(): void;
 }
 
@@ -52,25 +62,37 @@ export const PREVIEW_RUN_TIMEOUT_MS = 10_000;
  * drives the postMessage protocol (see playground-sandbox.ts for the boundary
  * design). `onRuntimeError` reports errors thrown AFTER the initial render
  * resolves (effects, event handlers — caught by the error boundary the sandbox
- * wraps around the user component).
+ * wraps around the user component). `devtoolsHost` (optional) receives the
+ * devtools frontend iframe on the first `ensureDevtools()` call.
  */
 export function createPreview(
 	container: Element,
 	onRuntimeError: (message: string) => void,
+	devtoolsHost?: Element | null,
 ): Preview {
 	const doc = container.ownerDocument;
 	const win = doc.defaultView!;
 	const currentTheme = (): 'light' | 'dark' =>
 		doc.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
 
+	// One srcdoc serves as the page's canonical source too: the devtools
+	// Sources panel can't fetch an about:srcdoc document, so the sandbox
+	// serves this exact string for the frame's content.
+	const sandboxDoc = sandboxSrcdoc(currentTheme());
+
 	const iframe = doc.createElement('iframe');
-	// allow-scripts WITHOUT allow-same-origin: the sandbox document gets an
-	// opaque origin — no cookies, storage, or parent DOM. allow-forms only
-	// lets submit events fire (the srcdoc CSP still blocks real submission).
-	iframe.setAttribute('sandbox', 'allow-scripts allow-forms');
+	// Opaque-origin sandbox (NO allow-same-origin): no cookies, storage, or
+	// parent DOM — the boundary for arbitrary hash-shared code. The extra
+	// allow-* tokens match solid-playground: user code gets popups, modals,
+	// pointer lock, and form-submit events (a real submission only navigates
+	// the sandboxed frame itself).
+	iframe.setAttribute(
+		'sandbox',
+		'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-pointer-lock',
+	);
 	iframe.setAttribute('title', 'Playground preview');
 	iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;';
-	iframe.srcdoc = sandboxSrcdoc(currentTheme());
+	iframe.srcdoc = sandboxDoc;
 	container.appendChild(iframe);
 	const frameWindow = iframe.contentWindow;
 
@@ -84,8 +106,19 @@ export function createPreview(
 		}
 	>();
 	const send = (msg: Record<string, unknown>) => {
-		frameWindow?.postMessage({ [PROTOCOL_KEY]: true, ...msg }, '*');
+		frameWindow?.postMessage(msg, '*');
 	};
+	// The devtools relay owns the frontend iframe, the CDP relay, and the
+	// parent-driven boot handshake (see playground-devtools.ts); `send` feeds
+	// it the sandbox-bound protocol messages.
+	const devtoolsRelay: DevtoolsRelay = createDevtoolsRelay({
+		host: devtoolsHost,
+		preview: iframe,
+		pageSource: sandboxDoc,
+		send,
+		win,
+		doc,
+	});
 	const settlePending = (gen: number, result: { error: string | null }) => {
 		const entry = pending.get(gen);
 		if (!entry) return;
@@ -119,7 +152,9 @@ export function createPreview(
 				const onMessage = (event: MessageEvent) => {
 					if (destroyed || event.source !== frameWindow) return;
 					const msg = event.data;
-					if (!msg || msg[PROTOCOL_KEY] !== true) return;
+					// Protocol messages are objects; raw CDP strings (the devtools
+					// relay) pass by on the way to the devtools iframe.
+					if (!msg || typeof msg !== 'object') return;
 					switch (msg.type) {
 						case 'boot':
 							bootReceived = true;
@@ -167,10 +202,12 @@ export function createPreview(
 
 	// Keep the sandbox's theme in sync with the site's ThemeToggle (it flips
 	// `data-theme` on <html>; an opaque-origin iframe can't observe the parent).
+	// The devtools frontend follows through the relay (see onThemeChanged).
 	let themeObserver: MutationObserver | null = null;
 	if (typeof win.MutationObserver === 'function') {
 		themeObserver = new win.MutationObserver(() => {
 			send({ type: 'theme', theme: currentTheme() });
+			devtoolsRelay.onThemeChanged(currentTheme());
 		});
 		themeObserver.observe(doc.documentElement, {
 			attributes: true,
@@ -206,6 +243,9 @@ export function createPreview(
 				});
 			});
 		},
+		ensureDevtools() {
+			devtoolsRelay.ensure();
+		},
 		destroy() {
 			destroyed = true;
 			settleReady(null);
@@ -213,6 +253,7 @@ export function createPreview(
 			cleanupListener?.();
 			for (const gen of pending.keys()) settlePending(gen, { error: null });
 			iframe.remove();
+			devtoolsRelay.destroy();
 		},
 	};
 }

@@ -18,11 +18,14 @@ interface ResultPaneProps {
 	ready: boolean;
 	activeFile: string;
 	previewHostRef: RefObject<HTMLDivElement | null>;
+	devtoolsHostRef: RefObject<HTMLDivElement | null>;
 	astHostRef: RefObject<HTMLDivElement | null>;
 	outputHostRef: RefObject<HTMLDivElement | null>;
+	devtoolsOpen: boolean;
 	controller: PlaygroundController;
 	onSelectCompiledMode: PlaygroundEngine['selectCompiledMode'];
 	onSelectOutputTarget: PlaygroundEngine['selectOutputTarget'];
+	onToggleDevtools: PlaygroundEngine['toggleDevtools'];
 }
 
 export function ResultPane({
@@ -34,11 +37,14 @@ export function ResultPane({
 	ready,
 	activeFile,
 	previewHostRef,
+	devtoolsHostRef,
 	astHostRef,
 	outputHostRef,
+	devtoolsOpen,
 	controller,
 	onSelectCompiledMode,
 	onSelectOutputTarget,
+	onToggleDevtools,
 }: ResultPaneProps) {
 	return (
 		<section className={cx('pg-panel', pane !== 'result' && 'mobile-hidden')} aria-label="Result">
@@ -50,41 +56,56 @@ export function ResultPane({
 							(compiledMode === 'ast' ? ' AST · ' : ' output · ') +
 							(activeFile || '…')}
 				</span>
-				{view === 'compiled' && (
-					<div className="pg-compiled-controls">
-						<select
-							className="pg-select pg-output-select"
-							aria-label="Compiler output"
-							value={outputTarget}
-							onChange={(event) =>
-								onSelectOutputTarget(event.currentTarget.value as PlaygroundOutputTarget)
-							}
+				<div className="pg-compiled-controls">
+					{view === 'preview' && (
+						<button
+							type="button"
+							className={cx('pg-seg-btn', devtoolsOpen && 'active')}
+							aria-pressed={devtoolsOpen}
+							onClick={onToggleDevtools}
 						>
-							<option value="client">Client</option>
-							<option value="server">Server</option>
-							<option value="types">Types</option>
-						</select>
-						<div className="pg-seg pg-seg-sm" role="group" aria-label="Output format">
-							<button
-								type="button"
-								className={cx('pg-seg-btn', compiledMode === 'code' && 'active')}
-								onClick={() => onSelectCompiledMode('code')}
+							DevTools
+						</button>
+					)}
+					{view === 'compiled' && (
+						<>
+							<select
+								className="pg-select pg-output-select"
+								aria-label="Compiler output"
+								value={outputTarget}
+								onChange={(event) =>
+									onSelectOutputTarget(event.currentTarget.value as PlaygroundOutputTarget)
+								}
 							>
-								Code
-							</button>
-							<button
-								type="button"
-								className={cx('pg-seg-btn', compiledMode === 'ast' && 'active')}
-								onClick={() => onSelectCompiledMode('ast')}
-							>
-								AST
-							</button>
-						</div>
-					</div>
-				)}
+								<option value="client">Client</option>
+								<option value="server">Server</option>
+								<option value="types">Types</option>
+							</select>
+							<div className="pg-seg pg-seg-sm" role="group" aria-label="Output format">
+								<button
+									type="button"
+									className={cx('pg-seg-btn', compiledMode === 'code' && 'active')}
+									onClick={() => onSelectCompiledMode('code')}
+								>
+									Code
+								</button>
+								<button
+									type="button"
+									className={cx('pg-seg-btn', compiledMode === 'ast' && 'active')}
+									onClick={() => onSelectCompiledMode('ast')}
+								>
+									AST
+								</button>
+							</div>
+						</>
+					)}
+				</div>
 			</div>
 			<div className={cx('pg-result', view !== 'preview' && 'hidden')}>
 				<div className="pg-preview" ref={previewHostRef} />
+				<div className={cx('pg-devtools', !devtoolsOpen && 'collapsed')} aria-hidden={!devtoolsOpen}>
+					<div className="pg-devtools-host" ref={devtoolsHostRef} />
+				</div>
 				{gated && <ConsentOverlay ready={ready} onApprove={() => controller.approveRun?.()} />}
 			</div>
 			<div className={cx('pg-compiled', view !== 'compiled' && 'hidden')}>

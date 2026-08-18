@@ -50,10 +50,12 @@ export function Playground() {
 		entryFile,
 		compiledMode,
 		outputTarget,
+		devtoolsOpen,
 		sourceHostRef,
 		outputHostRef,
 		astHostRef,
 		previewHostRef,
+		devtoolsHostRef,
 		controller,
 		selectView,
 		openMobilePreview,
@@ -63,6 +65,7 @@ export function Playground() {
 		setPane,
 		setInputValue,
 		setDragOverFile,
+		toggleDevtools,
 	} = engine;
 
 	return (
@@ -107,11 +110,14 @@ export function Playground() {
 					ready={ready}
 					activeFile={activeFile}
 					previewHostRef={previewHostRef}
+					devtoolsHostRef={devtoolsHostRef}
 					astHostRef={astHostRef}
 					outputHostRef={outputHostRef}
+					devtoolsOpen={devtoolsOpen}
 					controller={controller}
 					onSelectCompiledMode={selectCompiledMode}
 					onSelectOutputTarget={selectOutputTarget}
+					onToggleDevtools={toggleDevtools}
 				/>
 			</div>
 
