@@ -26,6 +26,26 @@ export interface PlaygroundExample {
 
 export const CUSTOM_EXAMPLE_ID = 'custom';
 
+/**
+ * The tsconfig.json the playground injects into any workspace that lacks one
+ * (Vue-REPL style: the config is an editable virtual file). Nothing consumes
+ * these options yet — the editor has no language service and the compiler is
+ * a syntax transform — so this is the agreed surface, not a live contract.
+ * `jsx: "preserve"` mirrors the compiler's hardcoded oxc transform mode.
+ */
+export const DEFAULT_TSCONFIG_SOURCE = `{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"jsx": "preserve",
+		"jsxImportSource": "dartsx",
+		"strict": true,
+		"skipLibCheck": true
+	}
+}
+`;
+
 interface ExampleMeta {
 	label?: string;
 	entry?: string;
