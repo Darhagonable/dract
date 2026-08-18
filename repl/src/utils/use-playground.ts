@@ -27,6 +27,12 @@ import {
 	MAX_PLAYGROUND_SOURCE_LENGTH,
 	PLAYGROUND_SOURCE_LIMIT_ERROR,
 } from './playground-hash.ts';
+import {
+	TSCONFIG_FILE_NAME,
+	isTsconfigFile,
+	parsePlaygroundTsconfig,
+	type PlaygroundFile,
+} from './playground-modules.ts';
 import * as pgExamples from './playground-examples.ts';
 
 const { EXAMPLES, CUSTOM_EXAMPLE_ID, DEFAULT_EXAMPLE_ID } = pgExamples;
@@ -99,6 +105,13 @@ export interface PlaygroundController {
 	syncOutput?: () => void;
 	revealAst?: () => void;
 	ensureDevtools?: () => void;
+	/**
+	 * The workspace's parsed tsconfig.json (Vue-REPL `getTsConfig` contract):
+	 * the raw parsed JSON, or null when missing or malformed. Nothing consumes
+	 * it yet — it is the agreed surface for compiler options once a
+	 * type-checking or emit layer lands.
+	 */
+	getTsConfig?: () => Record<string, unknown> | null;
 }
 
 export interface PlaygroundEngine {
@@ -311,6 +324,12 @@ export function usePlayground(): PlaygroundEngine {
 
 			let currentExampleId: string = initial ? CUSTOM_EXAMPLE_ID : DEFAULT_EXAMPLE_ID;
 			let workspace: Workspace = cloneWorkspace(pgExamples.DEFAULT_WORKSPACE);
+			// Vue-REPL-style tsconfig: a workspace always carries its config file,
+			// even when a hash payload (or the defaults) did not include one.
+			const ensureTsconfig = () => {
+				if (workspace.files.some((file: PlaygroundFile) => file.name === TSCONFIG_FILE_NAME)) return;
+				workspace.files.push({ name: TSCONFIG_FILE_NAME, source: pgExamples.DEFAULT_TSCONFIG_SOURCE });
+			};
 			// A hash payload is someone else's code — display + compile it, but
 			// gate EXECUTION behind the consent overlay's Run button. Two payloads
 			// carry nothing new and stay ungated: one byte-equal to the default
@@ -348,6 +367,7 @@ export function usePlayground(): PlaygroundEngine {
 					setGated(true);
 				}
 			}
+			ensureTsconfig();
 			let currentFile = workspace.entry;
 
 			const fileSource = (name: string): string =>
@@ -424,7 +444,11 @@ export function usePlayground(): PlaygroundEngine {
 				const cached = runtimeCache.get(name);
 				if (cached && cached.source === source) return cached;
 				let entry: CodeEntry;
-				if (pgModules.isReactHostFile(name)) {
+				if (isTsconfigFile(name)) {
+					// A config file has no compile step — its "compiled output"
+					// is the file itself.
+					entry = { source, code: source, ast: null, map: null, error: null };
+				} else if (pgModules.isReactHostFile(name)) {
 					const compiled = pgModules.peekCompiledFile({ name, source });
 					entry = compiled
 						? compiled.ok
@@ -908,7 +932,10 @@ export function usePlayground(): PlaygroundEngine {
 					]),
 					EditorView.lineWrapping,
 					EditorState.tabSize.of(2),
-					shikiHighlight('tsx'),
+					// JSON files (the workspace tsconfig) get Shiki's json grammar;
+					// everything else highlights as tsx. Each file owns its EditorState,
+					// so the language is fixed per state, not per editor.
+					shikiHighlight(currentFile.endsWith('.json') ? 'json' : 'tsx'),
 					sharedTheme,
 					mappedField,
 					crossHover('source'),
@@ -980,7 +1007,15 @@ export function usePlayground(): PlaygroundEngine {
 				const example = pgExamples.getExample(id);
 				if (!example) return;
 				currentExampleId = id;
+				// The visitor's tsconfig survives an example switch — it is
+				// workspace state, not example content (Vue-REPL behavior).
+				const tsconfig = workspace.files.find(
+					(file: PlaygroundFile) => file.name === TSCONFIG_FILE_NAME,
+				);
 				workspace = pgExamples.exampleWorkspace(example);
+				if (tsconfig && !workspace.files.some((file: PlaygroundFile) => file.name === TSCONFIG_FILE_NAME)) {
+					workspace.files.push({ name: tsconfig.name, source: tsconfig.source });
+				}
 				currentFile = workspace.entry;
 				editorStates.clear();
 				runtimeCache.clear();
@@ -1039,7 +1074,10 @@ export function usePlayground(): PlaygroundEngine {
 
 			controllerRef.current.removeFile = (name) => {
 				if (disposed || workspace.files.length <= 1) return;
-				if (name === workspace.entry) return;
+				// The entry is the workspace root and the tsconfig is injected
+				// state — neither can be deleted (the config file is re-added by
+				// the next boot's ensureTsconfig).
+				if (name === workspace.entry || isTsconfigFile(name)) return;
 				const index = workspace.files.findIndex((file: { name: string }) => file.name === name);
 				if (index < 0) return;
 				const wasCurrent = name === currentFile;
@@ -1077,8 +1115,9 @@ export function usePlayground(): PlaygroundEngine {
 				const file = workspace.files.find(
 					(candidate: { name: string }) => candidate.name === oldName,
 				);
-				// The entry file is the workspace root — its name is fixed.
-				if (!file || file.name === workspace.entry) return;
+				// The entry file is the workspace root — its name is fixed. The
+				// tsconfig file is injected state keyed by name — also fixed.
+				if (!file || file.name === workspace.entry || isTsconfigFile(file.name)) return;
 				const trimmed = nextName.trim();
 				if (!trimmed || trimmed === oldName) return;
 				// Svelte-REPL-style deconflict: keep the base name, suffix a
@@ -1177,6 +1216,7 @@ export function usePlayground(): PlaygroundEngine {
 				if (disposed) return;
 				preview.ensureDevtools();
 			};
+			controllerRef.current.getTsConfig = () => parsePlaygroundTsconfig(workspace.files);
 			controllerRef.current.revealAst = () => {
 				if (disposed || !activeAstEntry()) return;
 				astPreview.reveal(sourceView.state.selection.main.head, true);
@@ -1201,6 +1241,7 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.syncOutput = undefined;
 			controllerRef.current.revealAst = undefined;
 			controllerRef.current.ensureDevtools = undefined;
+			controllerRef.current.getTsConfig = undefined;
 			window.clearTimeout(compileDebounceId);
 			window.clearTimeout(hashDebounceId);
 			sourceView?.destroy();
