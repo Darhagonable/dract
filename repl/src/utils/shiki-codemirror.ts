@@ -31,7 +31,7 @@ function getHighlighter(): Promise<Highlighter> {
 	if (!highlighterPromise) {
 		highlighterPromise = createHighlighter({
 			themes: [PLAYGROUND_SHIKI_THEMES.light, PLAYGROUND_SHIKI_THEMES.dark],
-			langs: ['javascript', 'typescript', 'jsx', 'tsx', 'css'],
+			langs: ['javascript', 'typescript', 'jsx', 'tsx', 'css', 'json'],
 		});
 	}
 	return highlighterPromise;
