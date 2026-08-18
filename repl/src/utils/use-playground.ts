@@ -98,6 +98,7 @@ export interface PlaygroundController {
 	approveRun?: () => void;
 	syncOutput?: () => void;
 	revealAst?: () => void;
+	ensureDevtools?: () => void;
 }
 
 export interface PlaygroundEngine {
@@ -123,6 +124,9 @@ export interface PlaygroundEngine {
 	outputHostRef: RefObject<HTMLDivElement | null>;
 	astHostRef: RefObject<HTMLDivElement | null>;
 	previewHostRef: RefObject<HTMLDivElement | null>;
+	devtoolsHostRef: RefObject<HTMLDivElement | null>;
+	/** Whether the devtools bottom panel (hosting the chii frontend) is open. */
+	devtoolsOpen: boolean;
 	controller: PlaygroundController;
 	selectView: (next: 'preview' | 'compiled') => void;
 	openMobilePreview: () => void;
@@ -132,6 +136,7 @@ export interface PlaygroundEngine {
 	setPane: (pane: 'editor' | 'result') => void;
 	setInputValue: (value: string) => void;
 	setDragOverFile: (file: string | null) => void;
+	toggleDevtools: () => void;
 }
 
 export function usePlayground(): PlaygroundEngine {
@@ -169,6 +174,10 @@ export function usePlayground(): PlaygroundEngine {
 	const outputHostRef = useRef<HTMLDivElement | null>(null);
 	const astHostRef = useRef<HTMLDivElement | null>(null);
 	const previewHostRef = useRef<HTMLDivElement | null>(null);
+	const devtoolsHostRef = useRef<HTMLDivElement | null>(null);
+	// Whether the devtools panel under the preview is open. The frontend iframe
+	// itself is created lazily on the first open (multi-MB CDN payload).
+	const [devtoolsOpen, setDevtoolsOpen] = useState(false);
 	// The boot closure runs once, so it can't read the view STATE — this ref
 	// mirrors it (updated by the same handlers that set state) for the
 	// closure's output-refresh path.
@@ -208,6 +217,14 @@ export function usePlayground(): PlaygroundEngine {
 		setOutputTarget(target);
 		resultModeRef.current.target = target;
 		controllerRef.current.syncOutput?.();
+	};
+	// Opening the panel lazily creates the devtools frontend iframe (the boot
+	// handshake with the sandbox's chobitsu is handled inside createPreview).
+	const toggleDevtools = () => {
+		setDevtoolsOpen((open) => {
+			if (!open) controllerRef.current.ensureDevtools?.();
+			return !open;
+		});
 	};
 	// Reveal only after the mobile result panel has committed as visible;
 	// scrollIntoView cannot position a node while its panel is display:none.
@@ -375,7 +392,7 @@ export function usePlayground(): PlaygroundEngine {
 
 			preview = pg.createPreview(previewHost, (message: string) => {
 				if (!disposed) setError(message);
-			});
+			}, devtoolsHostRef.current);
 
 			const replaceDoc = (view: any, doc: string) => {
 				view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } });
@@ -1156,6 +1173,10 @@ export function usePlayground(): PlaygroundEngine {
 				clearMappedIn(sourceView);
 				clearMappedIn(outputView);
 			};
+			controllerRef.current.ensureDevtools = () => {
+				if (disposed) return;
+				preview.ensureDevtools();
+			};
 			controllerRef.current.revealAst = () => {
 				if (disposed || !activeAstEntry()) return;
 				astPreview.reveal(sourceView.state.selection.main.head, true);
@@ -1179,6 +1200,7 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.approveRun = undefined;
 			controllerRef.current.syncOutput = undefined;
 			controllerRef.current.revealAst = undefined;
+			controllerRef.current.ensureDevtools = undefined;
 			window.clearTimeout(compileDebounceId);
 			window.clearTimeout(hashDebounceId);
 			sourceView?.destroy();
@@ -1211,6 +1233,8 @@ export function usePlayground(): PlaygroundEngine {
 		outputHostRef,
 		astHostRef,
 		previewHostRef,
+		devtoolsHostRef,
+		devtoolsOpen,
 		controller: controllerRef.current,
 		selectView,
 		openMobilePreview,
@@ -1220,5 +1244,6 @@ export function usePlayground(): PlaygroundEngine {
 		setPane,
 		setInputValue,
 		setDragOverFile,
+		toggleDevtools,
 	};
 }

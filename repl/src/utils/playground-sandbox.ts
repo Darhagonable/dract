@@ -1,16 +1,15 @@
 // The playground preview's SECURITY BOUNDARY. User code from the editor (and,
 // critically, from shareable `location.hash` payloads) executes inside an
-// `<iframe sandbox="allow-scripts allow-forms">` built from this srcdoc — an
+// `<iframe sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox
+// allow-forms allow-modals allow-pointer-lock">` built from this srcdoc — an
 // OPAQUE origin with no access to the website's window, DOM, cookies, or
-// storage. The CSP blocks all network use EXCEPT module loads from esm.sh
-// (`script-src … https://esm.sh`) — a deliberate, documented relaxation that
-// powers third-party imports (`import { createStore } from 'zustand/vanilla'`
-// → rewritten to an esm.sh URL by playground-modules.ts). Everything else
-// stays blocked: no fetch/XHR (`default-src 'none'` covers `connect-src`), no
-// form submission, no navigation targets. The consent gate for hash-shared
-// links is unchanged, and compilation is pure string work in the parent, so no
-// esm.sh traffic can happen before the user consents to running shared code.
-// The parent page never imports user modules itself.
+// storage, and no CSP of its own (same stance as solid-playground: the code
+// gets website-level capabilities — fetch, popups, external scripts — but
+// never same-origin privileges; the parent page is untouchable either way).
+// The consent gate for hash-shared links is unchanged, and compilation is pure
+// string work in the parent, so no esm.sh traffic can happen before the user
+// consents to running shared code. The parent page never imports user modules
+// itself.
 //
 // Module plumbing: an opaque-origin iframe cannot use the parent's blob: URLs
 // (blob resolution is same-origin) and cross-origin module fetches would need
@@ -27,6 +26,13 @@
 //   parent → iframe  { type: 'theme', theme }    'light' | 'dark' — keeps the
 //                                                preview canvas aligned with
 //                                                the site's ThemeToggle
+//   parent → iframe  { type: 'devtools', data }  raw CDP message string from
+//                                                the devtools frontend
+//   parent → iframe  { type: 'devtools-boot', pageSource }
+//                                                frontend iframe loaded — run
+//                                                the CDP boot sequence; the
+//                                                srcdoc is what the Sources
+//                                                panel shows for the frame
 //   iframe → parent  { type: 'boot' }            bootstrap script is listening
 //   iframe → parent  { type: 'ready', error? }   runtime imported (or failed)
 //   iframe → parent  { type: 'result', gen, error }
@@ -35,6 +41,18 @@
 //                                                handlers / effects; gen lets
 //                                                the parent drop late errors
 //                                                from a superseded run
+//
+// DevTools: chobitsu (the Chrome DevTools protocol implemented in-page — see
+// playground.ts for the parent half) runs inside the sandbox and mirrors the
+// page to the REAL Chrome DevTools frontend, which the parent hosts in a
+// sibling iframe. The two speak raw CDP message STRINGS over the parent's
+// relay (strings, so the parent's protocol handling ignores them — protocol
+// messages are objects). Before chobitsu loads, a shim makes the opaque
+// origin bearable: storage access throws there (in-memory stand-ins) and
+// chobitsu's URL fallback reads `parent.location` across the boundary (a fake
+// `window.parent` exposing only location + a forwarding postMessage). Like
+// solid-playground, neither side verifies `event.source` — only the parent
+// page can postMessage into the iframe, and the relay checks sources itself.
 //
 // Import resolution inside the iframe: the bootstrap blob-ifies the runtime
 // chunks dependencies-first, then installs a SINGLE import map — as a classic
@@ -45,16 +63,12 @@
 // it). User modules keep those specifiers bare; sibling-file imports arrive as
 // `__pg_module:<name>__` tokens the bootstrap swaps for blob URLs.
 //
-// Every message carries `__dartsxPlayground: true` and both sides verify
-// `event.source` identity, so unrelated frames can't speak the protocol.
-// `allow-forms` (+ CSP `form-action 'none'`) lets `<form action={fn}>` demos
-// fire submit events without permitting a real submission/navigation.
+// `allow-forms` lets `<form action={fn}>` demos fire submit events; a real
+// submission navigates only the sandboxed frame itself (opaque origin), same
+// as solid-playground.
 
 /** Where the runtime chunk manifest JSON is served/emitted. */
 export const RUNTIME_MANIFEST_PATH = '/playground-runtime.json';
-
-/** Marker every protocol message carries (both directions). */
-export const PROTOCOL_KEY = '__dartsxPlayground';
 
 /**
  * React version pinned into the sandbox import map. Keep aligned with the
@@ -76,18 +90,79 @@ export function moduleToken(name: string): string {
 	return `__pg_module:${name}__`;
 }
 
+// The devtools FRONTEND is the real Chrome DevTools UI, loaded by the parent
+// from the chii CDN build (see playground.ts). Its in-page backend, chobitsu,
+// loads here from the same CDN pin solid-playground uses — the srcdoc has no
+// CSP, so no vendoring is needed.
+const CHOBITSU_URL = 'https://cdn.jsdelivr.net/npm/chobitsu@1.8.6/dist/chobitsu.min.js';
+
+// Runs BEFORE chobitsu (and the bootstrap). The opaque-origin sandbox has no
+// usable localStorage/sessionStorage (access throws), and chobitsu's URL
+// fallback reads `parent.location` across the boundary — both must be shimmed
+// for its Resources/Sources panels (the same shim solid-playground runs).
+const SANDBOX_SHIM = `
+(() => {
+	const make = () => {
+		const m = new Map();
+		return {
+			getItem: (k) => (m.has(k) ? m.get(k) : null),
+			setItem: (k, v) => { m.set(k, String(v)); },
+			removeItem: (k) => { m.delete(k); },
+			clear: () => { m.clear(); },
+			key: (i) => Array.from(m.keys())[i] ?? null,
+			get length() { return m.size; },
+		};
+	};
+	Object.defineProperty(window, 'localStorage', { value: make(), configurable: true });
+	Object.defineProperty(window, 'sessionStorage', { value: make(), configurable: true });
+	const realParent = window.parent;
+	window.parent = {
+		location: { href: location.href, origin: location.origin || 'about:srcdoc' },
+		postMessage: (msg, target, transfer) => realParent.postMessage(msg, target, transfer),
+	};
+})();
+`;
+
 // Kept as a plain string (not a function that's stringified) so esbuild/terser
 // renaming can't corrupt it, and indented for readability in devtools. This is
 // a CLASSIC script (dynamic import() only) so the import map it writes is
 // guaranteed to precede the first module load.
 const BOOTSTRAP = `
-const KEY = ${JSON.stringify(PROTOCOL_KEY)};
 const REACT_VERSION = ${JSON.stringify(PLAYGROUND_REACT_VERSION)};
 const TOKEN = /__pg_module:([\\w.-]+)__/g;
-const post = (msg) => window.parent.postMessage({ [KEY]: true, ...msg }, '*');
+const post = (msg) => window.parent.postMessage(msg, '*');
 const errText = (e) => (e instanceof Error && e.message) || String(e);
 const toBlobUrl = (code) =>
 	URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+
+// ── DevTools (chobitsu ↔ chii frontend) ──────────────────────────────────
+// chobitsu (loaded above in the srcdoc) implements the Chrome DevTools
+// protocol for THIS document; the real DevTools frontend lives in a sibling
+// iframe in the parent and relays raw CDP message strings through it. Like
+// solid-playground, only the parent can postMessage into this frame, so the
+// messages are trusted as-is and dispatched on content alone.
+const postRaw = (message) => window.parent.postMessage(message, '*');
+let chobitsuId = 0;
+// chii stamps the messages it synthesizes with 'tmp' ids so its own response
+// filter can distinguish them; responses to THOSE must not reach the frontend
+// (it never saw the request).
+const sendToChobitsu = (message) => {
+	message.id = 'tmp' + ++chobitsuId;
+	chobitsu.sendRawMessage(JSON.stringify(message));
+};
+chobitsu.setOnMessage((message) => {
+	if (message.includes('"id":"tmp')) return;
+	postRaw(message);
+});
+// What the frontend's Sources panel shows for the frame — the parent sends the
+// srcdoc itself with the boot message (the page cannot be fetched, it is
+// about:srcdoc).
+let pageSource = '';
+const pageDomain = chobitsu.domain('Page');
+if (pageDomain) {
+	pageDomain.getResourceContent = (params) =>
+		Promise.resolve({ base64Encoded: false, content: params.frameId === '1' ? pageSource : '' });
+}
 
 let dartsxRuntime = null;
 let generation = 0;
@@ -114,9 +189,38 @@ window.addEventListener('error', (event) => {
 });
 
 window.addEventListener('message', async (event) => {
-	if (event.source !== window.parent) return;
 	const msg = event.data;
-	if (!msg || msg[KEY] !== true) return;
+	if (!msg || typeof msg !== 'object') return;
+
+	if (msg.type === 'devtools' && typeof msg.data === 'string') {
+		chobitsu.sendRawMessage(msg.data);
+		return;
+	}
+
+	if (msg.type === 'devtools-boot') {
+		// The frontend iframe has loaded (parent-driven so no boot message is
+		// lost racing the frontend's initial load — see playground.ts).
+		if (typeof msg.pageSource === 'string') pageSource = msg.pageSource;
+		const frame = {
+			id: '1',
+			mimeType: 'text/html',
+			securityOrigin: parent.location.origin,
+			url: parent.location.href,
+		};
+		postRaw(JSON.stringify({ method: 'Page.frameNavigated', params: { frame, type: 'Navigation' } }));
+		sendToChobitsu({ method: 'Network.enable' });
+		postRaw(JSON.stringify({ method: 'Runtime.executionContextsCleared' }));
+		sendToChobitsu({ method: 'Runtime.enable' });
+		sendToChobitsu({ method: 'Debugger.enable' });
+		sendToChobitsu({ method: 'DOMStorage.enable' });
+		sendToChobitsu({ method: 'DOM.enable' });
+		sendToChobitsu({ method: 'CSS.enable' });
+		sendToChobitsu({ method: 'Overlay.enable' });
+		postRaw(JSON.stringify({ method: 'DOM.documentUpdated' }));
+		sendToChobitsu({ method: 'Page.enable' });
+		postRaw(JSON.stringify({ method: 'Page.loadEventFired' }));
+		return;
+	}
 
 	if (msg.type === 'theme') {
 		if (msg.theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
@@ -165,6 +269,7 @@ window.addEventListener('message', async (event) => {
 		// Blob-ify the user module graph (arrives dependencies-first), swapping
 		// sibling-file tokens for the blob URLs created so far.
 		// The PREVIOUS run's URLs can be revoked now; this run's stay alive.
+		document.getElementById('appsrc')?.remove();
 		for (const url of liveUrls) URL.revokeObjectURL(url);
 		const moduleUrls = Object.create(null);
 		const created = [];
@@ -176,6 +281,18 @@ window.addEventListener('message', async (event) => {
 			moduleUrls[name] = url;
 			created.push(url);
 			if (name === msg.entry) entryUrl = url;
+		}
+		// Mirror solid-playground's DOM: the entry is attached as a real
+		// #appsrc module script (visible in the devtools Elements tree). The
+		// dynamic import below joins the SAME module-map entry, so the element
+		// does not double-execute — and the import keeps the exports reachable
+		// for findComponent/mounting.
+		if (entryUrl) {
+			const script = document.createElement('script');
+			script.id = 'appsrc';
+			script.type = 'module';
+			script.src = entryUrl;
+			document.body.appendChild(script);
 		}
 		let mod;
 		try {
@@ -236,20 +353,29 @@ post({ type: 'boot' });
 `;
 
 /**
- * The full srcdoc for the preview iframe. The CSP allows exactly what the
- * bootstrap needs — inline classic script + import map + blob modules + module
- * loads from esm.sh + inline styles (dartsx's `$.style` writes `<style>`
- * tags) — and nothing else: no fetch/XHR, no form submission, no plugins.
+ * The full srcdoc for the preview iframe. No CSP (solid-playground stance):
+ * the sandbox's opaque origin is the security boundary; the document gets
+ * ordinary website-level capabilities (fetch, popups, external scripts) but
+ * never same-origin privileges.
  *
  * `theme` sets the initial canvas; later flips arrive as `theme` protocol
  * messages (the bootstrap toggles `data-theme` on the sandbox's own root).
+ *
+ * Script order matters: the storage/parent shim must precede chobitsu (it
+ * reads both at init), and chobitsu precedes the bootstrap so the CDP relay
+ * is ready before the first protocol message. All three live in <head> (like
+ * solid-playground) so the devtools Elements tree shows a clean body: just
+ * the preview's `#root`, plus the entry `#appsrc` module script appended at
+ * run time; none of the head scripts touch the body at parse time (the
+ * bootstrap only reads `#root` when a `run` message arrives, after parse).
  */
 export function sandboxSrcdoc(theme: 'dark' | 'light' = 'dark'): string {
 	return `<!doctype html>
 <html${theme === 'light' ? ' data-theme="light"' : ''}>
 <head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: https://esm.sh; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link href="https://ga.jspm.io/npm:modern-normalize@3.0.1/modern-normalize.css" rel="stylesheet" />
 <style>
 	:root { color-scheme: dark; }
 	:root[data-theme='light'] { color-scheme: light; }
@@ -265,10 +391,12 @@ export function sandboxSrcdoc(theme: 'dark' | 'light' = 'dark'): string {
 		color: #1c2027;
 	}
 </style>
+<script>${SANDBOX_SHIM}</script>
+<script src="${CHOBITSU_URL}"></script>
+<script>${BOOTSTRAP}</script>
 </head>
 <body>
 <div id="root"></div>
-<script>${BOOTSTRAP}</script>
 </body>
 </html>`;
 }
