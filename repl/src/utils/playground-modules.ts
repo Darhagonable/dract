@@ -33,6 +33,37 @@ export interface PlaygroundFile {
 	source: string;
 }
 
+/**
+ * The workspace's tsconfig file (Vue-REPL style): a plain virtual file the
+ * visitor can edit. Nothing consumes its options yet — the editor has no
+ * language service and the compiler is a syntax transform — but the file is
+ * the agreed surface for compiler options once a type-checking or emit layer
+ * lands.
+ */
+export const TSCONFIG_FILE_NAME = 'tsconfig.json';
+
+export function isTsconfigFile(name: string): boolean {
+	return name === TSCONFIG_FILE_NAME;
+}
+
+/**
+ * Parse the workspace's tsconfig.json, mirroring the Vue REPL's `getTsConfig`
+ * contract: the raw parsed JSON, or null when the file is missing or malformed
+ * (a broken config must never block the playground).
+ */
+export function parsePlaygroundTsconfig(files: PlaygroundFile[]): Record<string, unknown> | null {
+	const file = files.find((candidate) => candidate.name === TSCONFIG_FILE_NAME);
+	if (!file) return null;
+	try {
+		const parsed: unknown = JSON.parse(file.source);
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: null;
+	} catch {
+		return null;
+	}
+}
+
 export interface ModuleGraph {
 	ok: true;
 	entry: string;
@@ -89,7 +120,7 @@ async function ensureCompiled(files: PlaygroundFile[]): Promise<void> {
 		compileErrors.delete(name);
 	}
 	for (const file of files) {
-		if (isReactHostFile(file.name)) continue;
+		if (isReactHostFile(file.name) || isTsconfigFile(file.name)) continue;
 		projectFiles.add(file.name);
 	}
 
@@ -282,6 +313,12 @@ export async function buildModuleGraph(
 	if (!files.some((f) => f.name === entry)) {
 		return { ok: false, error: `Entry file "${entry}" does not exist.` };
 	}
+	if (isTsconfigFile(entry)) {
+		return {
+			ok: false,
+			error: `"${TSCONFIG_FILE_NAME}" is a config file — pick a .tsx/.ts source file as the entry.`,
+		};
+	}
 	const names = new Set(files.map((f) => f.name));
 	if (names.size !== files.length) {
 		return { ok: false, error: 'Playground file names must be unique.' };
@@ -303,6 +340,11 @@ export async function buildModuleGraph(
 				if (!out.ok) return { ok: false, error: out.error };
 				for (const diagnostic of out.warnings) warnings.push({ file: file.name, diagnostic });
 				rewriteAndRecord(file.name, out.code, names, rewritten, siblingDeps, parse);
+				continue;
+			}
+			if (isTsconfigFile(file.name)) {
+				// Config files are workspace documents, not modules — nothing to
+				// compile, rewrite, or execute.
 				continue;
 			}
 			const output = getModuleOutput(file.name);
@@ -337,7 +379,10 @@ export async function buildModuleGraph(
 		order.push(name);
 	};
 	visit(entry, []);
-	for (const file of files) visit(file.name, []);
+	for (const file of files) {
+		// Config files are not modules — unreferenced and unexecutable.
+		if (!isTsconfigFile(file.name)) visit(file.name, []);
+	}
 	if (cycle) {
 		return {
 			ok: false,
