@@ -12,7 +12,7 @@
 // APIs), so it runs in the browser exactly as it does in the Vite plugin.
 //
 // Specifier policy (the parent-side half of the sandbox security boundary —
-// see playground-sandbox.ts for the CSP that backs it):
+// see playground-sandbox.ts for the sandbox that backs it):
 //   ./File[.ext]        → sibling file, rewritten to a `__pg_module:<name>__`
 //                         token the sandbox swaps for a blob URL
 //   dartsx family       → left bare; the sandbox import map resolves them
@@ -231,7 +231,7 @@ function rewriteAndRecord(
 		const record = imports[i];
 		// `n` is the decoded specifier for static and simple dynamic imports;
 		// undefined for computed dynamic imports like import(someVar) — those
-		// resolve at runtime where the sandbox CSP is the backstop.
+		// resolve at runtime in the sandbox.
 		const specifier = record.n;
 		if (specifier === undefined || record.s < 0) continue;
 		// Static import spans exclude the quotes; dynamic import spans (d > -1)
