@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { analyzeUnusedCss } from '../src/unused-css';
+import { analyzeUnusedCss } from 'unused-css';
 
 const samplesDir = path.join(__dirname, 'unused-css', 'samples');
 

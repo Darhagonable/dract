@@ -15,6 +15,11 @@ import dartsx, { type DarTsxTransformContext } from '@dartsx/vite-plugin';
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;
 
+/** Plugin hooks are plain functions at runtime; Vite's ObjectHook type just doesn't expose `.call`. */
+function hookCall(hook: object, ctx: unknown, ...args: unknown[]): unknown {
+	return (hook as (...args: unknown[]) => unknown).call(ctx, ...args);
+}
+
 const samples = readdirSync(SAMPLES_DIR, { withFileTypes: true })
 	.filter((d) => d.isDirectory())
 	.map((d) => d.name)
@@ -71,7 +76,9 @@ async function compileMultiFile(dir: string, files: string[]): Promise<Map<strin
 	for (let pass = 0; pass < 2; pass++) {
 		for (const filename of files) {
 			const abs = filePaths.get(filename)!;
-			const result = await plugin.transform.call(ctx, readFileSync(abs, 'utf-8'), abs);
+			const result = await hookCall(plugin.transform!, ctx, readFileSync(abs, 'utf-8'), abs) as
+				| { code: string }
+				| undefined;
 			if (result && typeof result === 'object' && 'code' in result) {
 				outputs.set(filename.replace(/\.[^.]+$/, '.js'), result.code);
 			} else if (pass === 0) {

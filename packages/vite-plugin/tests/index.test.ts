@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import dartsx from '../src/index';
+import dartsx from 'index';
+
+/** Plugin hooks are plain functions at runtime; Vite's ObjectHook type just doesn't expose `.call`. */
+function hookCall(hook: object, ctx: unknown, ...args: unknown[]): unknown {
+	return (hook as (...args: unknown[]) => unknown).call(ctx, ...args);
+}
 
 describe('dartsx vite plugin', () => {
 	it('transforms DarTsx JSX files in JavaScript projects', async () => {
@@ -9,7 +14,7 @@ describe('dartsx vite plugin', () => {
 			throw new Error('Expected vite plugin transform hook');
 		}
 
-		const result = await transform.call({
+		const result = await hookCall(transform, {
 			resolve: async () => null,
 			error(message: string) {
 				throw new Error(message);
@@ -28,7 +33,7 @@ describe('dartsx vite plugin', () => {
 			throw new Error('Expected vite plugin transform hook');
 		}
 
-		const result = await transform.call({
+		const result = await hookCall(transform, {
 			resolve: async () => null,
 			error(message: string) {
 				throw new Error(message);

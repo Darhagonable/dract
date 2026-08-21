@@ -2,8 +2,8 @@
 	"compilerOptions": {
 		"strict": true,
 		"target": "ESNext",
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"sourceMap": true,
@@ -11,6 +11,6 @@
 		"rootDir": "tests",
 		"types": ["node"]
 	},
-	"include": ["tests"],
+	"include": ["tests/*.test.ts"],
 	"exclude": ["tests/fixture"]
 }

@@ -6,7 +6,7 @@ export default defineConfig({
 			'packages/dartsx/vitest.*.config.ts',
 			'packages/typescript-plugin',
 			'packages/vite-plugin',
-			'packages/vscode-extension',
+			// 'packages/vscode-extension',
 			'toolkit/query',
 		],
 	},
