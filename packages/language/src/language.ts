@@ -18,9 +18,11 @@ import type { } from '@volar/typescript';
 import { forEachEmbeddedCode } from '@volar/language-core';
 import { preprocess, isDarTsxFile } from 'dartsx/compiler/preprocess';
 import { skipBracedExpression } from './unused-css';
-import * as fs from 'fs';
 
 type IScriptSnapshot = import('@volar/language-core').IScriptSnapshot;
+
+/** File content reader. Injected so the package stays free of Node imports. */
+export type ReadFileSync = (filePath: string) => string;
 
 // ── Virtual Code ───────────────────────────────────────────────────
 
@@ -487,7 +489,7 @@ function skipString(source: string, start: number): number {
 
 // ── Language Plugin ────────────────────────────────────────────────
 
-export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirtualCode> {
+export function getDarTsxLanguagePlugin<T = any>(options: { readFileSync?: ReadFileSync } = {}): LanguagePlugin<T, DarTsxVirtualCode> {
 	return {
 		getLanguageId(scriptId: T) {
 			const fileName = typeof scriptId === 'string'
@@ -503,12 +505,16 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 			// Read file content to determine if it's DarTsx.
 			// Only claim files that actually contain DarTsx syntax.
 			// Non-DarTsx .tsx files must be left to native TS handling.
+			// When no readFileSync is provided, no files are claimed
+			// (identical to a failed read).
+			const read = options.readFileSync;
+			if (!read) return undefined;
 			try {
 				// Strip file:// URI scheme if present
 				const filePath = fileName.startsWith('file://')
 					? decodeURIComponent(fileName.slice(7))
 					: fileName;
-				const content = fs.readFileSync(filePath, 'utf-8');
+				const content = read(filePath);
 				if (isDarTsxFile(content)) {
 					return 'dartsx';
 				}

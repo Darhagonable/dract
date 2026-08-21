@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import * as ts from 'typescript';
 import * as path from 'path';
+import * as fs from 'fs';
 import { proxyCreateProgram } from '@volar/typescript/lib/node/proxyCreateProgram';
 import { getDarTsxLanguagePlugin } from '../src/language';
 
@@ -22,7 +23,7 @@ function createDarTsxProgram(tsconfigPath: string) {
 	const proxied = proxyCreateProgram(
 		ts,
 		ts.createProgram,
-		() => [getDarTsxLanguagePlugin()],
+		() => [getDarTsxLanguagePlugin({ readFileSync: (filePath) => fs.readFileSync(filePath, 'utf-8') })],
 	);
 
 	const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);

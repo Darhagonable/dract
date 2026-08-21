@@ -65,12 +65,13 @@
 		]
 	},
 	"scripts": {
-		"build": "tsdown",
+		"build": "tsdown && node scripts/sync-grammars.mjs",
 		"check": "tsc --noEmit",
 		"test": "vitest run",
 		"package": "vsce package --no-dependencies"
 	},
 	"dependencies": {
+		"@dartsx/language": "workspace:*",
 		"@volar/language-server": "~2.4.28",
 		"@dartsx/typescript-plugin": "workspace:*",
 		"volar-service-css": "0.0.71",

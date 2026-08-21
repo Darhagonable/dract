@@ -4,7 +4,7 @@ export default defineConfig({
 	entry: {
 		index: 'src/index.ts',
 	},
-	format: 'cjs',
+	format: ['esm', 'cjs'],
 	fixedExtension: false,
 	deps: {
 		neverBundle: ['typescript'],

@@ -4,6 +4,7 @@ import { vsCodeWorker } from 'vitest-environment-vscode';
 export default defineProject({
 	test: {
 		include: ['tests/*.test.ts'],
+		globalSetup: ['./scripts/sync-grammars.mjs'],
 		pool: vsCodeWorker({
 			version: 'stable',
 			reuseWorker: true,

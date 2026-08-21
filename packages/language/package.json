@@ -1,0 +1,29 @@
+{
+	"name": "@dartsx/language",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		},
+		"./syntaxes/*": "./syntaxes/*"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@volar/language-core": "~2.4.28",
+		"@volar/typescript": "~2.4.28",
+		"dartsx": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^25.9.3",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.9"
+	}
+}

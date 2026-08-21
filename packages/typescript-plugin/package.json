@@ -8,14 +8,6 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"default": "./dist/index.js"
-		},
-		"./language": {
-			"types": "./dist/language.d.ts",
-			"default": "./dist/language.js"
-		},
-		"./unused-css": {
-			"types": "./dist/unused-css.d.ts",
-			"default": "./dist/unused-css.js"
 		}
 	},
 	"scripts": {
@@ -27,6 +19,7 @@
 		"typescript": "^6.0.3"
 	},
 	"dependencies": {
+		"@dartsx/language": "workspace:*",
 		"@volar/language-core": "~2.4.28",
 		"@volar/typescript": "~2.4.28"
 	},

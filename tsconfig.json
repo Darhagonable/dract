@@ -17,6 +17,7 @@
 	},
 	"references": [
 		{ "path": "packages/dartsx" },
+		{ "path": "packages/language" },
 		{ "path": "packages/vite-plugin" }
 	]
 }

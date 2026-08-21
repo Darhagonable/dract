@@ -1,4 +1,5 @@
 dist/
+syntaxes/
 *.tsbuildinfo
 test/**/*.js
 test/**/*.js.map

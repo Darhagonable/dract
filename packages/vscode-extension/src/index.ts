@@ -10,6 +10,7 @@
 
 import * as vscode from 'vscode';
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
+import { isDarTsxFile } from '@dartsx/language';
 
 let client: LanguageClient | undefined;
 
@@ -21,14 +22,6 @@ const semanticLegend = new vscode.SemanticTokensLegend([
 	'property',
 	'string',
 ]);
-
-function isDarTsxContent(content: string): boolean {
-	return /\bcomponent\s+\w+\s*\(/.test(content)
-		|| /\bstate\s+\w+\s*=/.test(content)
-		|| /\bderived\s+\w+\s*=/.test(content)
-		|| /\brender\s*\(/.test(content)
-		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(content);
-}
 
 function tokenTypeIndex(type: 'keyword' | 'function' | 'variable' | 'parameter' | 'property' | 'string'): number {
 	return semanticLegend.tokenTypes.indexOf(type);
@@ -60,7 +53,7 @@ function addRegexTokens(
 class DarTsxSemanticTokensProvider implements vscode.DocumentSemanticTokensProvider {
 	provideDocumentSemanticTokens(document: vscode.TextDocument): vscode.ProviderResult<vscode.SemanticTokens> {
 		const text = document.getText();
-		if (!isDarTsxContent(text)) {
+		if (!isDarTsxFile(text)) {
 			return new vscode.SemanticTokensBuilder(semanticLegend).build();
 		}
 

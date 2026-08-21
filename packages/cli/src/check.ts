@@ -10,17 +10,8 @@ import * as ts from 'typescript';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { proxyCreateProgram } from '@volar/typescript/lib/node/proxyCreateProgram.js';
-import { getDarTsxLanguagePlugin } from '@dartsx/typescript-plugin/language';
-import { analyzeUnusedCss } from '@dartsx/typescript-plugin/unused-css';
+import { getDarTsxLanguagePlugin, analyzeUnusedCss, ALWAYS_SUPPRESS } from '@dartsx/language';
 import { findSuppressZones, isDarTsxFile } from 'dartsx/compiler/preprocess';
-
-// Errors always suppressed in DarTsx files — false positives from custom syntax transforms
-// (mirrors ALWAYS_SUPPRESS in the TypeScript plugin)
-const ALWAYS_SUPPRESS = new Set([
-	1003, 1005, 1109, 1128, 1136, 1381, 1434,
-	2304, 2362, 2552, 2632, 2657, 2693, 2695, 2724, 2809,
-	6385, 7026,
-]);
 
 export interface CheckOptions {
 	cwd?: string;
@@ -60,7 +51,7 @@ export function check(options: CheckOptions = {}): CheckResult {
 	const proxied = proxyCreateProgram(
 		ts,
 		ts.createProgram,
-		() => [getDarTsxLanguagePlugin()],
+		() => [getDarTsxLanguagePlugin({ readFileSync: (filePath) => fs.readFileSync(filePath, 'utf-8') })],
 	);
 
 	const host = ts.createCompilerHost(parsed.options);
