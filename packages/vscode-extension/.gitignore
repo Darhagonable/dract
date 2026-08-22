@@ -1,4 +1,5 @@
 dist/
+out/
 *.tsbuildinfo
 test/**/*.js
 test/**/*.js.map
