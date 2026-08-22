@@ -19,7 +19,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerSharedFeatures(context);
 
 	// Start the Volar language server for CSS features in <style> blocks
-	const serverModule = require.resolve('./server');
+	const serverModule = require.resolve('./server.cjs');
 	client = new LanguageClient(
 		'dartsx',
 		'DarTsx Language Server',

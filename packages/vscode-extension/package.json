@@ -4,6 +4,7 @@
 	"description": "DarTsx language support — syntax highlighting, diagnostics, completions, and more.",
 	"version": "0.0.1",
 	"publisher": "dartsx",
+	"type": "module",
 	"engines": {
 		"vscode": "^1.85.0"
 	},
@@ -16,8 +17,8 @@
 		"onLanguage:typescript",
 		"onLanguage:typescriptreact"
 	],
-	"main": "./dist/main.js",
-	"browser": "./dist/browser.js",
+	"main": "./dist/main.cjs",
+	"browser": "./dist/browser.cjs",
 	"contributes": {
 		"typescriptServerPlugins": [
 			{
@@ -68,7 +69,7 @@
 		"build": "tsdown",
 		"check": "tsc --noEmit",
 		"test": "vitest run",
-		"package": "node scripts/package.mts"
+		"package": "node scripts/package.ts"
 	},
 	"dependencies": {
 		"@dartsx/typescript-plugin": "workspace:*",

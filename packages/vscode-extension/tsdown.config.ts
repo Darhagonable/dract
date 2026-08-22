@@ -7,7 +7,7 @@ export default defineConfig([
 			server: 'src/server.ts',
 		},
 		format: 'cjs',
-		fixedExtension: false,
+		fixedExtension: true,
 		deps: {
 			neverBundle: ['vscode'],
 		},
@@ -18,7 +18,7 @@ export default defineConfig([
 		},
 		format: 'cjs',
 		platform: 'browser',
-		fixedExtension: false,
+		fixedExtension: true,
 		deps: {
 			neverBundle: ['vscode'],
 		},

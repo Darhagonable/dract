@@ -46,7 +46,6 @@ function createVsixManifest(manifest: PackageManifest): Record<string, unknown> 
 		private: _private,
 		scripts: _scripts,
 		devDependencies: _devDependencies,
-		type: _type,
 		...extensionManifest
 	} = manifest;
 
