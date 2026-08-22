@@ -68,7 +68,7 @@
 		"build": "tsdown",
 		"check": "tsc --noEmit",
 		"test": "vitest run",
-		"package": "node scripts/package.mjs"
+		"package": "node scripts/package.mts"
 	},
 	"dependencies": {
 		"@dartsx/typescript-plugin": "workspace:*",

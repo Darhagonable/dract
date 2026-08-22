@@ -27,11 +27,19 @@ const outDir = join(packageDir, 'out');
 
 const VSCODE_EXTENSION_NAME = 'vscode-extension';
 
-function readManifest() {
+interface PackageManifest {
+	name: string;
+	publisher: string;
+	version: string;
+	dependencies?: Record<string, string>;
+	[key: string]: unknown;
+}
+
+function readManifest(): PackageManifest {
 	return JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
 }
 
-function createVsixManifest(manifest) {
+function createVsixManifest(manifest: PackageManifest): Record<string, unknown> {
 	const {
 		// npm-only fields that must not leak into the VSIX manifest
 		name: _npmName,
@@ -87,7 +95,7 @@ async function main() {
 		cwd: stageDir,
 		packagePath: join(outDir, `dartsx-${version}.vsix`),
 		dependencies: false,
-		noUpdatePackageJson: true,
+		updatePackageJson: false,
 		gitTagVersion: false,
 		followSymlinks: true,
 		allowMissingRepository: true,
