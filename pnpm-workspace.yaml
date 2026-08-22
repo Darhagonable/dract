@@ -5,7 +5,9 @@ packages:
   - website
 
 allowBuilds:
+  '@vscode/vsce-sign': true
   core-js: false
   esbuild: true
+  keytar: true
 
 minimumReleaseAge: 0
