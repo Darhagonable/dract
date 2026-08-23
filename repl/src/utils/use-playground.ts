@@ -42,6 +42,7 @@ import {
 import { linter, lintGutter } from '@codemirror/lint';
 import { darkHighlightStyle, darkTheme, lightHighlightStyle, lightTheme } from './themes.ts';
 import { codeFolding, foldGutter, syntaxHighlighting } from '@codemirror/language';
+import { shikiHighlight } from './shiki-codemirror.ts';
 import { createPreview, type PlaygroundOutputTarget, type Preview } from './playground.ts';
 import { mappingFromSourceMap, type CodeMapping } from './playground-mapping.ts';
 import {
@@ -1079,7 +1080,11 @@ export function usePlayground(): PlaygroundEngine {
 					// Lezer highlight style; lsp-client also reads that facet when
 					// rendering code fences inside hover/completion tooltips.
 					theme.of(themeExtensions()),
+					// DarTsx TextMate highlighting (our VS Code extension's injection
+					// grammars via Shiki) — paints what the Lezer TSX grammar cannot
+					// see (component/state/derived/render/bind, <style> blocks).
 					editorTypography,
+					shikiHighlight(json ? 'json' : 'tsx'),
 							// Language features ride along only on source files — the tsconfig
 							// document stays a plain JSON viewer.
 							...(json || !tsSession
@@ -1161,6 +1166,7 @@ export function usePlayground(): PlaygroundEngine {
 						// TSX language so compiled output gets Lezer highlighting too.
 						outputTheme.of(themeExtensions()),
 						editorTypography,
+						shikiHighlight('tsx'),
 						typescript({ jsx: true }),
 						mappedField,
 						crossHover('output'),

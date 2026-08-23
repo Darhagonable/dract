@@ -107,6 +107,37 @@
 			::selection {
 				background: rgba(255, 65, 90, 0.45);
 			}
+			/* Editor chrome + token colors live in themes.ts (solid-repl's
+			   architecture). ON TOP of that, the DarTsx TextMate highlighting
+			   (shiki-codemirror.ts, our VS Code extension's injection grammars)
+			   paints .cm-shiki mark decorations carrying --shiki-light/--shiki-dark
+			   custom properties; these rules pick the active one per theme.
+			   Specificity is deliberately above a bare class: StyleModule sheets
+			   from themes.ts are injected into <head> AFTER this block, so a bare
+			   `.cm-shiki` would lose same-element ties. */
+			.shiki,
+			.shiki span,
+			.cm-editor span.cm-shiki {
+				color: var(--shiki-dark);
+			}
+			:root[data-theme='light'] .shiki,
+			:root[data-theme='light'] .shiki span,
+			:root[data-theme='light'] .cm-editor span.cm-shiki {
+				color: var(--shiki-light);
+			}
+			/* Neutralize the Lezer highlight style's own token painting inside
+			   editor lines: themes.ts must KEEP its syntaxHighlighting facet
+			   mounted (lsp-client resolves hover-tooltip code fences through it),
+			   but its tree-highlighter plugin also paints spans with generated
+			   StyleModule classes (prefix ͼ = U+037C). Those compete with the
+			   TextMate (.cm-shiki) marks above — two palettes on one screen.
+			   This rule strips Lezer colors from every non-shiki span in editor
+			   content; spans nested inside a .cm-shiki mark inherit its TextMate
+			   color, bare ones fall back to the line color. Tooltip fences live
+			   outside .cm-content and keep their Lezer colors. */
+			.cm-content span:not(.cm-shiki)[class*='ͼ'] {
+				color: inherit !important;
+			}
 			#repl-theme-toggle {
 				position: fixed;
 				bottom: 12px;
