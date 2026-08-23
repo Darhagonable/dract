@@ -26,7 +26,7 @@
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
 import { Project, type ModuleOutput } from 'dartsx/compiler';
-import { moduleToken } from './playground-sandbox.ts';
+import { moduleToken, PLAYGROUND_REACT_VERSION } from './playground-sandbox.ts';
 
 export interface PlaygroundFile {
 	name: string;
@@ -72,6 +72,12 @@ export interface ModuleGraph {
 	modules: { name: string; code: string }[];
 	/** DarTsx emits no diagnostics yet — always empty. */
 	warnings: { file: string; diagnostic: never }[];
+	/**
+	 * External packages the graph resolves through esm.sh (bare ids, verbatim
+	 * URLs, and the react family), as specifier → resolved URL — the input the
+	 * TypeScript worker's type acquisition fetches declaration files from.
+	 */
+	externals: Record<string, string>;
 }
 
 export interface ModuleGraphFailure {
@@ -182,6 +188,24 @@ export function isReactHostFile(name: string): boolean {
 	return name.endsWith('.react.tsx');
 }
 
+/**
+ * The esm.sh URL a bare specifier resolves through (the sandbox import map
+ * pins the react family to the workspace catalog's REACT_VERSION so every
+ * entry shares one build — mirror that here so acquired types match what
+ * actually executes).
+ */
+function esmShUrlFor(specifier: string): string {
+	const reactPin = (pkg: string, rest: string) =>
+		`https://esm.sh/${pkg}@${PLAYGROUND_REACT_VERSION}${rest}?external=dartsx`;
+	if (specifier === 'react' || specifier.startsWith('react/')) {
+		return reactPin('react', specifier.slice('react'.length));
+	}
+	if (specifier === 'react-dom' || specifier.startsWith('react-dom/')) {
+		return reactPin('react-dom', specifier.slice('react-dom'.length));
+	}
+	return `https://esm.sh/${specifier}?external=dartsx`;
+}
+
 const SIBLING_EXTENSIONS = ['', '.tsx', '.react.tsx', '.ts'];
 
 // React-host files bypass the Project: sucrase strips types and
@@ -243,6 +267,7 @@ function rewriteAndRecord(
 	names: Set<string>,
 	rewritten: Map<string, string>,
 	siblingDeps: Map<string, string[]>,
+	externals: Map<string, string>,
 	parse: typeof import('es-module-lexer').parse,
 ): void {
 	let imports;
@@ -283,19 +308,27 @@ function rewriteAndRecord(
 		} else if (specifier.startsWith('../') || specifier.startsWith('/')) {
 			throw new Error(`${name}: "${specifier}" — only sibling "./File" imports are supported.`);
 		} else if (IMPORT_MAP_SPECIFIERS.has(specifier)) {
-			// Left bare — the sandbox import map owns these.
+			// Left bare — the sandbox import map owns these. The react family
+			// resolves to esm.sh there; record the resolved URL so the TypeScript
+			// worker can acquire types for it too.
+			if (specifier.startsWith('react')) {
+				externals.set(specifier, esmShUrlFor(specifier));
+			}
 		} else if (specifier.startsWith('dartsx/')) {
 			throw new Error(
 				`${name}: "${specifier}" is not available in the playground (only "dartsx" and its runtime subpaths are).`,
 			);
 		} else if (specifier.startsWith('https://esm.sh/')) {
 			// Already an esm.sh URL — allowed verbatim.
+			externals.set(specifier, specifier);
 		} else if (/^(https?:)?\/\//.test(specifier) || specifier.includes(':')) {
 			throw new Error(
 				`${name}: "${specifier}" — only https://esm.sh/ URLs are supported for URL imports.`,
 			);
 		} else {
-			replaceWith(`https://esm.sh/${specifier}?external=dartsx`);
+			const url = esmShUrlFor(specifier);
+			externals.set(specifier, url);
+			replaceWith(url);
 		}
 	}
 	rewritten.set(name, code);
@@ -331,6 +364,7 @@ export async function buildModuleGraph(
 
 	const rewritten = new Map<string, string>();
 	const siblingDeps = new Map<string, string[]>();
+	const externals = new Map<string, string>();
 	const warnings: ModuleGraph['warnings'] = [];
 
 	for (const file of files) {
@@ -339,7 +373,7 @@ export async function buildModuleGraph(
 				const out = await compileReactHostFile(file);
 				if (!out.ok) return { ok: false, error: out.error };
 				for (const diagnostic of out.warnings) warnings.push({ file: file.name, diagnostic });
-				rewriteAndRecord(file.name, out.code, names, rewritten, siblingDeps, parse);
+				rewriteAndRecord(file.name, out.code, names, rewritten, siblingDeps, externals, parse);
 				continue;
 			}
 			if (isTsconfigFile(file.name)) {
@@ -356,7 +390,7 @@ export async function buildModuleGraph(
 						`${file.name}: not compiled — it contains no DarTsx syntax and no reactive calls target it.`,
 				};
 			}
-			rewriteAndRecord(file.name, output.js.code, names, rewritten, siblingDeps, parse);
+			rewriteAndRecord(file.name, output.js.code, names, rewritten, siblingDeps, externals, parse);
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : String(error) };
 		}
@@ -399,5 +433,6 @@ export async function buildModuleGraph(
 		entryKind: isReactHostFile(entry) ? 'react' : 'dartsx',
 		modules,
 		warnings,
+		externals: Object.fromEntries(externals),
 	};
 }
