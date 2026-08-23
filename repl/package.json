@@ -18,6 +18,7 @@
 		"@codemirror/lsp-client": "^6.2.5",
 		"@codemirror/state": "^6.7.1",
 		"@codemirror/view": "^6.43.6",
+		"@dartsx/language-service": "workspace:*",
 		"@jridgewell/sourcemap-codec": "^1.5.0",
 		"@lezer/highlight": "^1.2.3",
 		"@oxc-parser/binding-wasm32-wasi": "^0.136.0",
@@ -30,8 +31,9 @@
 		"prettier": "^3.9.6",
 		"react": "^19.2.7",
 		"react-dom": "^19.2.7",
+		"shiki": "^3.23.0",
 		"sucrase": "^3.35.1",
-		"typescript": "^5.9.3"
+		"typescript": "^6.0.3"
 	},
 	"devDependencies": {
 		"@types/node": "^25.0.0",

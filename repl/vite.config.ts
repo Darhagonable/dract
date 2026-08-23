@@ -123,6 +123,7 @@ const PREBUNDLED = [
 	'prettier/standalone',
 	'prettier/plugins/typescript',
 	'prettier/plugins/estree',
+	'@dartsx/language-service',
 ];
 
 export default defineConfig({
