@@ -953,6 +953,12 @@ export function usePlayground(): PlaygroundEngine {
 			const compileAndRun = async () => {
 				if (disposed) return;
 				const seq = ++compileSeq;
+				// Keep the TS worker's document set in lockstep with the workspace.
+				// Boot and every structural change (example switch, add/remove/
+				// rename) flow through here; typing flows through the update
+				// listener. Without this, sibling files are never opened in the
+				// worker and their imports resolve as missing modules.
+				syncTsFiles();
 				const { files: wsFiles, entry } = workspace;
 				const total = wsFiles.reduce(
 					(sum: number, file: { source: string }) => sum + file.source.length,
