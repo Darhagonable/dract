@@ -1,16 +1,18 @@
 // The playground engine: owns every piece of interactive state and the
 // imperative editor stack (CodeMirror, the compile pipeline, the sandboxed
 // preview, and the source↔output mapping). All of it boots once, in an
-// effect, via dynamic imports — so SSR renders just the static shell and
-// hydration stays clean. The components read state from this hook and drive
-// the engine through the `controller` (see PlaygroundController).
+// effect. The components read state from this hook and drive the engine
+// through the `controller` (see PlaygroundController).
 //
 // The whole pipeline runs in the browser: the `dartsx` compiler (oxc-parser/
 // oxc-transform WASM bindings + esrap — no Node APIs) compiles the virtual
 // files on a debounce, the module graph executes inside a SANDBOXED IFRAME
 // with an opaque origin (see src/utils/playground.ts + playground-modules.ts +
-// playground-sandbox.ts — never in this page), and CodeMirror highlights
-// through Shiki with the bundled TSX grammar (src/utils/shiki-codemirror.ts).
+// playground-sandbox.ts — never in this page), and CodeMirror is themed and
+// syntax-highlighted exactly like solid-repl: themes.ts paints the chrome AND
+// every token through its Lezer highlight styles (dark/lightHighlightStyle).
+// The TypeScript language layer lives in its own worker chunk (see
+// typescript-session.ts) — only its small client half is bundled here.
 //
 // Shared links are UNTRUSTED input: a hash payload is decoded into the editor
 // and compiled (source + compiled output are safe to display — compilation is
@@ -18,8 +20,30 @@
 // visitor explicitly presses "Run" on the consent overlay. Your own edits from
 // the default sources auto-run as before.
 import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
-import type { PlaygroundOutputTarget } from './playground.ts';
-import type { CodeMapping } from './playground-mapping.ts';
+import {
+	Compartment,
+	EditorState,
+	StateEffect,
+	StateField,
+	type Extension,
+	type Transaction,
+} from '@codemirror/state';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import {
+	Decoration,
+	drawSelection,
+	EditorView,
+	highlightActiveLine,
+	keymap,
+	lineNumbers,
+	type DecorationSet,
+	type ViewUpdate,
+} from '@codemirror/view';
+import { linter, lintGutter } from '@codemirror/lint';
+import { darkHighlightStyle, darkTheme, lightHighlightStyle, lightTheme } from './themes.ts';
+import { codeFolding, foldGutter, syntaxHighlighting } from '@codemirror/language';
+import { createPreview, type PlaygroundOutputTarget, type Preview } from './playground.ts';
+import { mappingFromSourceMap, type CodeMapping } from './playground-mapping.ts';
 import {
 	decodePlaygroundHash,
 	encodePlaygroundHash,
@@ -28,11 +52,21 @@ import {
 	PLAYGROUND_SOURCE_LIMIT_ERROR,
 } from './playground-hash.ts';
 import {
+	buildModuleGraph,
+	compileError,
+	getModuleOutput,
+	isReactHostFile,
+	peekCompiledFile,
 	TSCONFIG_FILE_NAME,
 	isTsconfigFile,
 	parsePlaygroundTsconfig,
+	type ModuleGraph,
+	type ModuleGraphFailure,
 	type PlaygroundFile,
 } from './playground-modules.ts';
+import { createAstPreview, type AstPreviewController } from './playground-ast.ts';
+import { createTypescriptSession, type TypescriptSession } from './typescript-session.ts';
+import { typescript, typescriptLspExtras, typescriptLspTheme } from './typescript-lsp.ts';
 import * as pgExamples from './playground-examples.ts';
 
 const { EXAMPLES, CUSTOM_EXAMPLE_ID, DEFAULT_EXAMPLE_ID } = pgExamples;
@@ -266,13 +300,16 @@ export function usePlayground(): PlaygroundEngine {
 		if (!sourceHost || !outputHost || !astHost || !previewHost) return;
 
 		let disposed = false;
-		let sourceView: any;
-		let outputView: any;
-		let astPreview: any;
-		let preview: any = null;
+		let sourceView!: EditorView;
+		let outputView!: EditorView;
+		let astPreview!: AstPreviewController;
+		let preview!: Preview;
+		let tsSessionInstance: TypescriptSession | null = null;
+		let themeObserverRef: MutationObserver | null = null;
+		let themeDebounceRef = 0;
 		let compileDebounceId = 0;
 		let hashDebounceId = 0;
-		// Validate the URL payload before loading CodeMirror, Shiki, or the
+		// Validate the URL payload before booting the editor stack or the
 		// compiler. Oversized input is ignored in favor of the bounded defaults.
 		const rawHash = window.location.hash.slice(1);
 		const hashResult = decodePlaygroundHash(rawHash);
@@ -281,45 +318,13 @@ export function usePlayground(): PlaygroundEngine {
 		if (initialDiagnostic) setError(initialDiagnostic);
 
 		(async () => {
-			let stateMod: any, commandsMod: any, viewMod: any, shikiMod: any, pg: any, pgModules: any, pgAst: any, pgMapping: any;
-			try {
-				[stateMod, commandsMod, viewMod, shikiMod, pg, pgModules, pgAst, pgMapping] = await Promise.all([
-					import('@codemirror/state'),
-					import('@codemirror/commands'),
-					import('@codemirror/view'),
-					import('./shiki-codemirror.ts'),
-					import('./playground.ts'),
-					import('./playground-modules.ts'),
-					import('./playground-ast.ts'),
-					import('./playground-mapping.ts'),
-				]);
-			} catch (bootError) {
-				// A load failure after unmount (e.g. a test env torn down mid-import)
-				// must not become an unhandled rejection; while mounted, surface it.
-				if (!disposed) {
-					setError(bootError instanceof Error ? bootError.message : String(bootError));
-				}
-				return;
-			}
 			if (disposed) return;
 
-			const { EditorState, Compartment, StateEffect, StateField } = stateMod;
-			const { history, defaultKeymap, historyKeymap, indentWithTab } = commandsMod;
-			const {
-				EditorView,
-				keymap,
-				lineNumbers,
-				highlightActiveLine,
-				drawSelection,
-				Decoration,
-			} = viewMod;
-			const { shikiHighlight } = shikiMod;
-
-			type Workspace = { files: { name: string; source: string }[]; entry: string };
+			type Workspace = { files: PlaygroundFile[]; entry: string };
 
 			const cloneWorkspace = (workspace: Workspace): Workspace => ({
 				entry: workspace.entry,
-				files: workspace.files.map((file: { name: string; source: string }) => ({ ...file })),
+				files: workspace.files.map((file) => ({ ...file })),
 			});
 
 			let currentExampleId: string = initial ? CUSTOM_EXAMPLE_ID : DEFAULT_EXAMPLE_ID;
@@ -353,8 +358,8 @@ export function usePlayground(): PlaygroundEngine {
 				const fallback = pgExamples.DEFAULT_WORKSPACE;
 				const isDefault =
 					initial.files.length === 1 && initial.entry === fallback.entry &&
-						initial.files[0].name === fallback.files[0].name &&
-						initial.files[0].source === fallback.files[0].source;
+					initial.files[0].name === fallback.files[0].name &&
+					initial.files[0].source === fallback.files[0].source;
 				const own = readOwnHash();
 				if (isDefault) {
 					currentExampleId = DEFAULT_EXAMPLE_ID;
@@ -371,50 +376,176 @@ export function usePlayground(): PlaygroundEngine {
 			let currentFile = workspace.entry;
 
 			const fileSource = (name: string): string =>
-				workspace.files.find((file: { name: string }) => file.name === name)?.source ?? '';
+				workspace.files.find((file) => file.name === name)?.source ?? '';
 
 			const publishWorkspaceState = () => {
 				setExampleId(currentExampleId);
-				setFiles(workspace.files.map((file: { name: string }) => file.name));
+				setFiles(workspace.files.map((file) => file.name));
 				setActiveFile(currentFile);
 				setEntryFile(workspace.entry);
 			};
 
-			// Theme-variable canvas: the same custom properties the rest of the
-			// site swaps per `data-theme`, so both editors follow the ThemeToggle
-			// live (token colors flip through the dual-theme .cm-shiki rules).
-			const sharedTheme = EditorView.theme({
-				'&': {
-					height: '100%',
-					backgroundColor: 'var(--code-bg)',
-					color: 'var(--text)',
-					fontSize: '0.85rem',
-				},
+			// ── Editor theming, exactly solid-repl's architecture ────────────
+			// themes.ts owns everything: per-theme editor chrome (darkTheme /
+			// lightTheme) plus the Lezer highlight styles (dark/lightHighlightStyle)
+			// that paint ALL editor tokens — there is no Shiki here. The active
+			// pair is mounted through Compartments and reconfigured when the
+			// page's data-theme flips (see the MutationObserver below).
+			const isDark = (): boolean =>
+				document.documentElement.getAttribute('data-theme') !== 'light';
+			const themeExtensions = (): Extension[] => [
+				isDark() ? darkTheme : lightTheme,
+				syntaxHighlighting(isDark() ? darkHighlightStyle : lightHighlightStyle, { fallback: true }),
+			];
+			// Typography from the pre-themes.ts editor (kept deliberately): the
+			// site's denser 0.85rem size, its mono stack, and roomier content
+			// padding. Mounted AFTER the theme compartment so it overrides
+			// themes.ts's scroller/content rules.
+			const editorTypography = EditorView.theme({
+				'&': { fontSize: '0.85rem' },
 				'.cm-scroller': {
 					overflow: 'auto',
-					fontFamily: 'ui-monospace, SFMono-Regular, \'SF Mono\', Menlo, Consolas, \'Liberation Mono\', monospace',
+					fontFamily:
+						'ui-monospace, SFMono-Regular, \'SF Mono\', Menlo, Consolas, \'Liberation Mono\', monospace',
 				},
 				'.cm-content': { padding: '1rem 0.25rem 1.25rem' },
-				'.cm-gutters': {
-					backgroundColor: 'var(--code-bg)',
-					color: 'var(--text-secondary)',
-					border: 'none',
-					opacity: '0.7',
-				},
-				'.cm-activeLine, .cm-activeLineGutter': {
-					backgroundColor: 'var(--surface)',
-				},
-				'.cm-selectionBackground': {
-					backgroundColor: 'rgba(56, 139, 253, 0.35) !important',
-				},
-				'.cm-cursor': { borderLeftColor: 'var(--text)' },
 			});
+			// The repl's theme toggle lives in main.ts and only flips the
+			// data-theme attribute — observe it rather than threading React state.
+			// (The observer/debounce live on effect-level refs so unmount can
+			// reach them.)
+			const outputTheme = new Compartment();
+			let sourceEntry: EditorEntry | null = null;
+			const applyTheme = () => {
+				const ext = themeExtensions();
+				if (sourceEntry) sourceView?.dispatch({ effects: sourceEntry.theme.reconfigure(ext) });
+				outputView?.dispatch({ effects: outputTheme.reconfigure(ext) });
+			};
+			themeObserverRef = new MutationObserver(() => {
+				window.clearTimeout(themeDebounceRef);
+				themeDebounceRef = window.setTimeout(() => {
+					if (!disposed) applyTheme();
+				}, 0);
+			});
+			themeObserverRef.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-			preview = pg.createPreview(previewHost, (message: string) => {
+			preview = createPreview(previewHost, (message: string) => {
 				if (!disposed) setError(message);
 			}, devtoolsHostRef.current);
 
-			const replaceDoc = (view: any, doc: string) => {
+			// ── TypeScript intellisense (LSP over a worker) ─────────────────
+			// One session for every file's EditorState: the worker runs the TS
+			// language service against preprocessed DarTsx (see ts-worker.ts),
+			// lsp-client renders hover/completions/signature/jump-to-def, and the
+			// linter paints diagnostics. Everything below no-ops if the session
+			// failed to spawn — the playground stays fully usable without it.
+			const uriFor = (name: string): string => `file:///playground/${name}`;
+			let tsSession: TypescriptSession | null = null;
+			try {
+				tsSession = createTypescriptSession();
+				tsSessionInstance = tsSession;
+			} catch {
+				tsSession = null;
+			}
+			// Re-run pending lints when types/config change underneath — the lint
+			// inputs changed without any document edit.
+			const relint = StateEffect.define<null>();
+			const forceRelint = () => {
+				if (!tsSession) return;
+				for (const target of [sourceView, outputView]) {
+					target?.dispatch({ effects: relint.of(null) });
+				}
+			};
+			const lintExtension: Extension[] = tsSession
+				? [
+					linter(
+						(view) => {
+							if (!tsSession || isTsconfigFile(currentFile)) return [];
+							return tsSession.getDiagnostics(uriFor(currentFile), view);
+						},
+						{
+							delay: 400,
+							needsRefresh: (update: ViewUpdate) =>
+								update.transactions.some((tr: Transaction) =>
+									tr.effects.some((e) => e.is(relint)),
+								),
+						},
+					),
+					lintGutter(),
+				]
+				: [];
+			// didOpen/didChange bookkeeping — mirrors solid-repl's tab sync. The
+			// worker dedupes identical texts, so liberal syncing is cheap.
+			const registeredTsSources = new Map<string, string>();
+			const syncTsFiles = () => {
+				if (!tsSession || disposed) return;
+				const liveNames = new Set(workspace.files.map((file: PlaygroundFile) => file.name));
+				for (const name of [...registeredTsSources.keys()]) {
+					if (!liveNames.has(name)) {
+						tsSession.worker.postMessage({
+							method: 'textDocument/didClose',
+							params: { textDocument: { uri: uriFor(name) } },
+						});
+						registeredTsSources.delete(name);
+					}
+				}
+				for (const file of workspace.files) {
+					// The tsconfig is a config document, not a module; .react.tsx files
+					// run through the Sucrase pipeline and would get FALSE diagnostics
+					// against dartsx JSX types — skip both rather than mislead.
+					if (isTsconfigFile(file.name) || isReactHostFile(file.name)) continue;
+					if (registeredTsSources.get(file.name) === file.source) continue;
+					const isOpen = registeredTsSources.has(file.name);
+					registeredTsSources.set(file.name, file.source);
+					tsSession.worker.postMessage(
+						isOpen
+							? {
+								method: 'textDocument/didChange',
+								params: {
+									textDocument: { uri: uriFor(file.name), version: 0 },
+									contentChanges: [{ text: file.source }],
+								},
+							}
+							: {
+								method: 'textDocument/didOpen',
+								params: {
+									textDocument: { uri: uriFor(file.name), languageId: 'typescript', version: 0, text: file.source },
+								},
+							},
+					);
+				}
+			};
+			// Type acquisition input: the externals map from the last successful
+			// graph build, synced only when it actually changes.
+			let lastExternals = '';
+			const syncTypesFor = (graph: { externals?: Record<string, string> } | null) => {
+				if (!tsSession || !graph?.externals) return;
+				const fingerprint = JSON.stringify(graph.externals);
+				if (fingerprint === lastExternals) return;
+				lastExternals = fingerprint;
+				void tsSession.syncTypes(graph.externals).then((changed: boolean) => {
+					if (changed && !disposed) forceRelint();
+				}).catch(() => { });
+			};
+			// The visitor-editable tsconfig drives the service's compiler options.
+			let lastTsconfig = '';
+			let tsconfigSyncTimer = 0;
+			const scheduleTsconfigSync = () => {
+				if (!tsSession) return;
+				window.clearTimeout(tsconfigSyncTimer);
+				tsconfigSyncTimer = window.setTimeout(() => {
+					if (disposed || !tsSession) return;
+					const config = parsePlaygroundTsconfig(workspace.files);
+					const fingerprint = JSON.stringify(config);
+					if (fingerprint === lastTsconfig) return;
+					lastTsconfig = fingerprint;
+					void tsSession.syncTsconfig(config).then(() => {
+						if (!disposed) forceRelint();
+					}).catch(() => { });
+				}, 300);
+			};
+
+			const replaceDoc = (view: EditorView, doc: string) => {
 				view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } });
 			};
 
@@ -448,22 +579,22 @@ export function usePlayground(): PlaygroundEngine {
 					// A config file has no compile step — its "compiled output"
 					// is the file itself.
 					entry = { source, code: source, ast: null, map: null, error: null };
-				} else if (pgModules.isReactHostFile(name)) {
-					const compiled = pgModules.peekCompiledFile({ name, source });
+				} else if (isReactHostFile(name)) {
+					const compiled = peekCompiledFile({ name, source });
 					entry = compiled
 						? compiled.ok
-						? { source, code: compiled.code, ast: null, map: null, error: null }
-						: {
+							? { source, code: compiled.code, ast: null, map: null, error: null }
+							: {
 								source,
 								code: '// Compiled output failed:\n// ' + compiled.error,
 								ast: null,
 								map: null,
 								error: compiled.error,
 							}
-					// A missed cache hit here means the graph hasn't compiled
-					// since the file was edited — but the placeholder cannot
-					// outlive the compile that replaces it.
-					: {
+						// A missed cache hit here means the graph hasn't compiled
+						// since the file was edited — but the placeholder cannot
+						// outlive the compile that replaces it.
+						: {
 							source,
 							code: '// Compiled output appears after the next compile.',
 							ast: null,
@@ -471,23 +602,23 @@ export function usePlayground(): PlaygroundEngine {
 							error: null,
 						};
 				} else {
-					const output = pgModules.getModuleOutput(name);
-					const error = pgModules.compileError(name);
+					const output = getModuleOutput(name);
+					const error = compileError(name);
 					entry = output
 						? {
-								source,
-								code: output.js.code,
-								ast: output.ast,
-								map: output.js.map,
-								error: null,
-							}
+							source,
+							code: output.js.code,
+							ast: output.ast,
+							map: output.js.map,
+							error: null,
+						}
 						: {
-								source,
-								code: '// Compilation failed:\n// ' + (error ?? 'unknown error'),
-								ast: null,
-								map: null,
-								error,
-							};
+							source,
+							code: '// Compilation failed:\n// ' + (error ?? 'unknown error'),
+							ast: null,
+							map: null,
+							error,
+						};
 				}
 				runtimeCache.set(name, entry);
 				return entry;
@@ -515,27 +646,27 @@ export function usePlayground(): PlaygroundEngine {
 			// output marks orphaned — visibly so when a broken edit means no
 			// recompile ever replaces the output doc — and setState doc swaps
 			// produce no transaction at all).
-			const setMapped = StateEffect.define();
+			const setMapped = StateEffect.define<DecorationSet>();
 			const mappedMark = Decoration.mark({ class: 'cm-mapped' });
-			const mappedField = StateField.define({
+			const mappedField = StateField.define<DecorationSet>({
 				create: () => Decoration.none,
-				update(value: any, tr: any) {
+				update(value, tr: Transaction) {
 					for (const effect of tr.effects) if (effect.is(setMapped)) return effect.value;
 					// Any edit (or an output refresh) invalidates the offsets.
 					return tr.docChanged ? Decoration.none : value;
 				},
-				provide: (field: any) => EditorView.decorations.from(field),
+				provide: (field) => EditorView.decorations.from(field),
 			});
 			// Per-keystroke safe: one O(1) field-size read, and a transaction is
 			// dispatched only when marks actually exist to clear.
-			const clearMappedIn = (targetView: any) => {
+			const clearMappedIn = (targetView: EditorView) => {
 				if (targetView.state.field(mappedField, false)?.size) {
 					targetView.dispatch({ effects: setMapped.of(Decoration.none) });
 				}
 			};
 			// Does the view already show exactly `ranges` (sorted, as the mapping
 			// and AST paths produce them)?
-			const sameMarks = (targetView: any, ranges: { from: number; to: number }[]) => {
+			const sameMarks = (targetView: EditorView, ranges: { from: number; to: number }[]) => {
 				const current = targetView.state.field(mappedField, false);
 				if (!current || current.size !== ranges.length) return false;
 				let index = 0;
@@ -566,7 +697,7 @@ export function usePlayground(): PlaygroundEngine {
 			// mousemove stream costs one property read.
 			const buildMapping = (entry: CodeEntry, target: PlaygroundOutputTarget) => {
 				if (target !== 'client' || !entry.map) return null;
-				return pgMapping.mappingFromSourceMap(entry.source, entry.code, entry.map);
+				return mappingFromSourceMap(entry.source, entry.code, entry.map);
 			};
 			const activeMapping = () => {
 				if (
@@ -575,7 +706,7 @@ export function usePlayground(): PlaygroundEngine {
 				const shown = lastShownEntry;
 				if (
 					!shown || shown.entry.source !== fileSource(currentFile) ||
-						shown.entry.code !== lastShownOutput
+					shown.entry.code !== lastShownOutput
 				) return null;
 				const mapping = buildMapping(shown.entry, shown.target);
 				if (mapping) shown.entry.mapping = mapping;
@@ -591,17 +722,17 @@ export function usePlayground(): PlaygroundEngine {
 			};
 
 			const revealRanges = (
-				targetView: any,
+				targetView: EditorView,
 				ranges: { from: number; to: number }[],
 				scroll: boolean,
 			) => {
 				const limit = targetView.state.doc.length;
 				const clamped = ranges.map(
-					(range: { from: number; to: number }) => ({
+					(range) => ({
 						from: range.from,
 						to: Math.min(range.to, limit),
 					}),
-				).filter((range: { from: number; to: number }) => range.from >= 0 && range.from < range.to);
+				).filter((range) => range.from >= 0 && range.from < range.to);
 				if (clamped.length === 0) {
 					// Same contract as an unmapped position: no lingering marks.
 					clearMappedIn(targetView);
@@ -612,30 +743,25 @@ export function usePlayground(): PlaygroundEngine {
 				// on any doc change), so comparing against it is always safe and
 				// costs one pass over the handful of ranges shown.
 				if (!scroll && sameMarks(targetView, clamped)) return;
-				const effects = [
-					setMapped.of(
-						Decoration.set(
-							clamped.map(
-								(range: { from: number; to: number }) => mappedMark.range(range.from, range.to),
-							),
-						),
+				const marks = setMapped.of(
+					Decoration.set(
+						clamped.map((range) => mappedMark.range(range.from, range.to)),
 					),
-				];
+				);
 				// Jump to the DEFINITION when one of the mapped ranges is a declared
 				// name: a directive arm maps both to `function __case$0(…)` and to
 				// where that name is handed to the runtime, and the implementation is
 				// what you want to read. Every range still gets a mark either way.
 				if (scroll) {
 					const declared =
-						clamped.find(
-							(range: { from: number; to: number }) => DECLARATION_BEFORE.test(
-								targetView.state.doc.sliceString(Math.max(0, range.from - 12), range.from),
-							),
-						) ??
-							clamped[0];
-					effects.push(EditorView.scrollIntoView(declared.from, { y: 'center' }));
+						clamped.find((range) => DECLARATION_BEFORE.test(
+							targetView.state.doc.sliceString(Math.max(0, range.from - 12), range.from),
+						)) ?? clamped[0];
+					const scrollEffect = EditorView.scrollIntoView(declared.from, { y: 'center' });
+					targetView.dispatch({ effects: [marks, scrollEffect] });
+				} else {
+					targetView.dispatch({ effects: marks });
 				}
-				targetView.dispatch({ effects });
 			};
 
 			const mappedPair = (side: 'source' | 'output', offset: number) => {
@@ -670,17 +796,17 @@ export function usePlayground(): PlaygroundEngine {
 				revealRanges(sourceView, [range], scroll);
 			};
 
-			astPreview = pgAst.createAstPreview(astHost, {
+			astPreview = createAstPreview(astHost, {
 				onNodeRange: revealAstRange,
 			});
 
 			const crossNavigate = (side: 'source' | 'output') => EditorView.updateListener.of((
-				update: any,
+				update: ViewUpdate,
 			) => {
 				if (!update.selectionSet || update.docChanged) return;
 				// Only user-driven cursor moves navigate — programmatic dispatches
 				// (doc replacement, highlight effects) must not feed back.
-				if (!update.transactions.some((tr: any) => tr.isUserEvent('select'))) return;
+				if (!update.transactions.some((tr) => tr.isUserEvent('select'))) return;
 				if (resultModeRef.current.view !== 'compiled') return;
 				const offset = update.state.selection.main.head;
 				if (resultModeRef.current.mode === 'ast') {
@@ -696,7 +822,7 @@ export function usePlayground(): PlaygroundEngine {
 			// Hovering either document highlights the corresponding ranges without moving its scroll
 			// position; clicking/cursor movement above additionally reveals them.
 			const crossHover = (side: 'source' | 'output') => EditorView.domEventObservers({
-				mousemove(event: MouseEvent, view: any) {
+				mousemove(event: MouseEvent, view: EditorView) {
 					if (resultModeRef.current.view !== 'compiled') return;
 					const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
 					if (resultModeRef.current.mode === 'ast') {
@@ -715,7 +841,7 @@ export function usePlayground(): PlaygroundEngine {
 					// that stale event harmless from the instant Inspect is clicked.
 					if (
 						side === 'source' && paneRef.current === 'result' &&
-							window.matchMedia('(max-width: 980px)').matches
+						window.matchMedia('(max-width: 980px)').matches
 					) return;
 					clearMappedPair();
 					astPreview.clear();
@@ -752,8 +878,7 @@ export function usePlayground(): PlaygroundEngine {
 
 			const showOutput = (): string | null => {
 				// The compiled pane is not visible: skip entirely — no types
-				// generation, no doc replacement, and (the dominant cost) no Shiki
-				// re-tokenize of the output document. syncOutput re-runs this when
+				// generation and no doc replacement. syncOutput re-runs this when
 				// the pane is revealed, so it refreshes exactly once, on demand.
 				if (resultModeRef.current.view !== 'compiled') return null;
 				if (resultModeRef.current.mode === 'ast') {
@@ -778,7 +903,7 @@ export function usePlayground(): PlaygroundEngine {
 						}
 					} else {
 						clearMappedPair();
-						const message = pgModules.isReactHostFile(currentFile)
+						const message = isReactHostFile(currentFile)
 							? 'AST trace covers Octane-owned .tsx files. React-host files use the separate Sucrase pipeline.'
 							: 'AST generation failed. Fix the source to generate a new tree.';
 						astPreview.setUnavailable(message, currentFile);
@@ -836,7 +961,7 @@ export function usePlayground(): PlaygroundEngine {
 					setError(PLAYGROUND_SOURCE_LIMIT_ERROR);
 					return;
 				}
-				const graph = await pgModules.buildModuleGraph(wsFiles, entry);
+				const graph = await buildModuleGraph(wsFiles, entry);
 				if (disposed || seq !== compileSeq) return;
 				// The compiled pane describes the active source file, independently
 				// of whether another workspace file prevents the runnable module
@@ -849,6 +974,9 @@ export function usePlayground(): PlaygroundEngine {
 				}
 				lastGraphError = '';
 				setError(outputError || '');
+				// New externals in the graph → fetch their declaration files and
+				// re-lint once the worker's environment is rebuilt.
+				syncTypesFor(graph);
 				// While a shared payload is gated, everything except EXECUTION
 				// happens — the visitor can inspect source and compiled output.
 				if (executionGated) return;
@@ -893,94 +1021,129 @@ export function usePlayground(): PlaygroundEngine {
 			};
 
 			// One writable EditorView; each file keeps its own EditorState (undo
-			// history included), keyed per file.
-			const editorStates = new Map<string, any>();
+			// history included), keyed per file. Each entry carries its theme
+			// Compartment so a restored state can be re-themed to the CURRENT
+			// page theme (it may have been created under the other one).
+			interface EditorEntry {
+				state: EditorState;
+				theme: Compartment;
+				json: boolean;
+			}
+			const editorStates = new Map<string, EditorEntry>();
 			const stateKey = (name: string) => name;
 
-			const makeEditorState = (name: string, doc: string) => EditorState.create({
-				doc,
-				extensions: [
-					EditorState.changeFilter.of((transaction: any) => {
-						if (!transaction.docChanged) return true;
-						const others = workspace.files.reduce(
-							(sum: number, file: { name: string; source: string }) => file.name === currentFile
-								? sum
-								: sum + file.source.length,
-							0,
-						);
-						if (others + transaction.newDoc.length <= MAX_PLAYGROUND_SOURCE_LENGTH) {
-							return true;
-						}
-						setError(PLAYGROUND_SOURCE_LIMIT_ERROR);
-						return false;
+			const makeEditorEntry = (name: string, doc: string): EditorEntry => {
+				const theme = new Compartment();
+				const json = isTsconfigFile(name);
+				return {
+					theme,
+					json,
+					state: EditorState.create({
+						doc,
+						extensions: [
+							EditorState.changeFilter.of((transaction: Transaction) => {
+								if (!transaction.docChanged) return true;
+								const others = workspace.files.reduce(
+									(sum, file) => file.name === currentFile
+										? sum
+										: sum + file.source.length,
+									0,
+								);
+								if (others + transaction.newDoc.length <= MAX_PLAYGROUND_SOURCE_LENGTH) {
+									return true;
+								}
+								setError(PLAYGROUND_SOURCE_LIMIT_ERROR);
+								return false;
+							}),
+							lineNumbers(),
+							foldGutter(),
+							codeFolding(),
+							history(),
+							drawSelection(),
+							highlightActiveLine(),
+							keymap.of([
+								{
+									key: 'Mod-Shift-f',
+									run: () => {
+										controllerRef.current.formatActive?.();
+										return true;
+									},
+								},
+								...defaultKeymap,
+								...historyKeymap,
+								indentWithTab,
+							]),
+							EditorView.lineWrapping,
+							EditorState.tabSize.of(2),
+					// Solid-repl parity: themes.ts paints ALL tokens through the
+					// Lezer highlight style; lsp-client also reads that facet when
+					// rendering code fences inside hover/completion tooltips.
+					theme.of(themeExtensions()),
+					editorTypography,
+							// Language features ride along only on source files — the tsconfig
+							// document stays a plain JSON viewer.
+							...(json || !tsSession
+								? []
+								: [
+									typescript({ jsx: true }),
+									tsSession.client.plugin(uriFor(name), 'typescript'),
+									typescriptLspExtras,
+									typescriptLspTheme,
+								]),
+							lintExtension,
+							mappedField,
+							crossHover('source'),
+							crossNavigate('source'),
+							EditorView.updateListener.of((update: ViewUpdate) => {
+								if (!update.docChanged) return;
+								// The source half of the pair changed — orphan any marks still
+								// shown in the output (this field self-clears; a failed
+								// recompile would otherwise leave the output's marks forever).
+								clearMappedIn(outputView);
+								if (resultModeRef.current.mode === 'ast') {
+									astPreview.setUnavailable('Waiting for the next successful compile…', currentFile);
+									lastShownAst = null;
+								}
+								const next = update.state.doc.toString();
+								const file = workspace.files.find(
+									(candidate) => candidate.name === currentFile,
+								);
+								if (file) file.source = next;
+								// Any edit means the buffer no longer matches the example.
+								if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
+									currentExampleId = CUSTOM_EXAMPLE_ID;
+									setExampleId(CUSTOM_EXAMPLE_ID);
+								}
+								scheduleCompile();
+								syncTsFiles();
+								if (isTsconfigFile(currentFile)) scheduleTsconfigSync();
+								updateHash();
+							}),
+						],
 					}),
-					lineNumbers(),
-					history(),
-					drawSelection(),
-					highlightActiveLine(),
-					keymap.of([
-						{
-							key: 'Mod-Shift-f',
-							run: () => {
-								controllerRef.current.formatActive?.();
-								return true;
-							},
-						},
-						...defaultKeymap,
-						...historyKeymap,
-						indentWithTab,
-					]),
-					EditorView.lineWrapping,
-					EditorState.tabSize.of(2),
-					// JSON files (the workspace tsconfig) get Shiki's json grammar;
-					// everything else highlights as tsx. Each file owns its EditorState,
-					// so the language is fixed per state, not per editor.
-					shikiHighlight(currentFile.endsWith('.json') ? 'json' : 'tsx'),
-					sharedTheme,
-					mappedField,
-					crossHover('source'),
-					crossNavigate('source'),
-					EditorView.updateListener.of((update: any) => {
-						if (!update.docChanged) return;
-						// The source half of the pair changed — orphan any marks still
-						// shown in the output (this field self-clears; a failed
-						// recompile would otherwise leave the output's marks forever).
-						clearMappedIn(outputView);
-						if (resultModeRef.current.mode === 'ast') {
-							astPreview.setUnavailable('Waiting for the next successful compile…', currentFile);
-							lastShownAst = null;
-						}
-						const next = update.state.doc.toString();
-						const file = workspace.files.find(
-							(candidate: { name: string }) => candidate.name === currentFile,
-						);
-						if (file) file.source = next;
-						// Any edit means the buffer no longer matches the example.
-						if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
-							currentExampleId = CUSTOM_EXAMPLE_ID;
-							setExampleId(CUSTOM_EXAMPLE_ID);
-						}
-						scheduleCompile();
-						updateHash();
-					}),
-				],
-			});
+				};
+			};
 
 			const openFile = (name: string) => {
-				editorStates.set(stateKey(currentFile), sourceView.state);
+				editorStates.set(stateKey(currentFile), sourceEntry!);
 				currentFile = name;
 				const existing = editorStates.get(stateKey(name));
-				sourceView.setState(existing ?? makeEditorState(name, fileSource(name)));
-				// setState fires no transaction: a restored state may carry marks
-				// from an old pair, and the output's marks belong to the old file.
+				sourceEntry = existing ?? makeEditorEntry(name, fileSource(name));
+				sourceView.setState(sourceEntry.state);
+				// setState fires no transaction: re-theme the restored state (it
+				// may have been created under the other page theme), and a
+				// restored state may carry marks from an old pair — clear them,
+				// along with the output's marks which belong to the old file.
+				sourceView.dispatch({ effects: sourceEntry.theme.reconfigure(themeExtensions()) });
 				clearMappedIn(sourceView);
 				clearMappedIn(outputView);
 				setActiveFile(name);
 				showOutput();
 			};
 
+			sourceEntry = makeEditorEntry(currentFile, fileSource(currentFile));
 			sourceView = new EditorView({
-				state: makeEditorState(currentFile, fileSource(currentFile)),
+				state: sourceEntry.state,
 				parent: sourceHost,
 			});
 
@@ -989,11 +1152,16 @@ export function usePlayground(): PlaygroundEngine {
 					doc: OUTPUT_PLACEHOLDER,
 					extensions: [
 						lineNumbers(),
+						foldGutter(),
+						codeFolding(),
 						EditorState.readOnly.of(true),
 						EditorView.editable.of(false),
 						EditorView.lineWrapping,
-						shikiHighlight('tsx'),
-						sharedTheme,
+						// Solid-repl's output pane runs the same theme pair and the
+						// TSX language so compiled output gets Lezer highlighting too.
+						outputTheme.of(themeExtensions()),
+						editorTypography,
+						typescript({ jsx: true }),
 						mappedField,
 						crossHover('output'),
 						crossNavigate('output'),
@@ -1021,7 +1189,8 @@ export function usePlayground(): PlaygroundEngine {
 				runtimeCache.clear();
 				lastShownEntry = null;
 				lastShownAst = null;
-				sourceView.setState(makeEditorState(currentFile, fileSource(currentFile)));
+				sourceEntry = makeEditorEntry(currentFile, fileSource(currentFile));
+				sourceView.setState(sourceEntry.state);
 				clearMappedIn(sourceView);
 				clearMappedIn(outputView);
 				// Picking an example is the visitor's own action — never gated.
@@ -1035,7 +1204,7 @@ export function usePlayground(): PlaygroundEngine {
 
 			controllerRef.current.selectFile = (name) => {
 				if (disposed || name === currentFile) return;
-				if (!workspace.files.some((file: { name: string }) => file.name === name)) return;
+				if (!workspace.files.some((file) => file.name === name)) return;
 				openFile(name);
 			};
 
@@ -1044,7 +1213,7 @@ export function usePlayground(): PlaygroundEngine {
 			// the visitor decides what it becomes.
 			const NEW_FILE_SOURCE = '// New file — replace this with your code.';
 			const nextFileName = () => {
-				const names = new Set(workspace.files.map((file: { name: string }) => file.name));
+				const names = new Set(workspace.files.map((file) => file.name));
 				let index = 1;
 				let name = 'File.tsx';
 				while (names.has(name)) name = `File-${++index}.tsx`;
@@ -1078,7 +1247,7 @@ export function usePlayground(): PlaygroundEngine {
 				// state — neither can be deleted (the config file is re-added by
 				// the next boot's ensureTsconfig).
 				if (name === workspace.entry || isTsconfigFile(name)) return;
-				const index = workspace.files.findIndex((file: { name: string }) => file.name === name);
+				const index = workspace.files.findIndex((file) => file.name === name);
 				if (index < 0) return;
 				const wasCurrent = name === currentFile;
 				// Drop the file's undo history along with the file itself.
@@ -1093,7 +1262,9 @@ export function usePlayground(): PlaygroundEngine {
 					const next = workspace.files[Math.min(index, workspace.files.length - 1)];
 					const existing = editorStates.get(stateKey(next.name));
 					currentFile = next.name;
-					sourceView.setState(existing ?? makeEditorState(currentFile, fileSource(currentFile)));
+					sourceEntry = existing ?? makeEditorEntry(currentFile, fileSource(currentFile));
+					sourceView.setState(sourceEntry.state);
+					sourceView.dispatch({ effects: sourceEntry.theme.reconfigure(themeExtensions()) });
 					// setState fires no transaction: the old file's marks are stale.
 					clearMappedIn(sourceView);
 				}
@@ -1113,7 +1284,7 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.renameFile = (oldName, nextName) => {
 				if (disposed || !oldName || !nextName) return;
 				const file = workspace.files.find(
-					(candidate: { name: string }) => candidate.name === oldName,
+					(candidate) => candidate.name === oldName,
 				);
 				// The entry file is the workspace root — its name is fixed. The
 				// tsconfig file is injected state keyed by name — also fixed.
@@ -1124,7 +1295,7 @@ export function usePlayground(): PlaygroundEngine {
 				// counter before the first extension (or at the end).
 				let name = trimmed;
 				let counter = 1;
-				while (workspace.files.some((candidate: { name: string }) => candidate.name === name)) {
+				while (workspace.files.some((candidate) => candidate.name === name)) {
 					name = trimmed.replace(/(\.|$)/, `${counter++}$1`);
 				}
 				file.name = name;
@@ -1160,10 +1331,10 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.moveFile = (fromName, toName) => {
 				if (disposed || fromName === toName) return;
 				const fromIndex = workspace.files.findIndex(
-					(file: { name: string }) => file.name === fromName,
+					(file) => file.name === fromName,
 				);
 				const toIndex = workspace.files.findIndex(
-					(file: { name: string }) => file.name === toName,
+					(file) => file.name === toName,
 				);
 				if (fromIndex < 0 || toIndex < 0) return;
 				const [file] = workspace.files.splice(fromIndex, 1);
@@ -1223,6 +1394,9 @@ export function usePlayground(): PlaygroundEngine {
 			};
 
 			publishWorkspaceState();
+			// Seed the TypeScript worker with the workspace + its compiler
+			// options; the first compileAndRun below also feeds it externals.
+			scheduleTsconfigSync();
 			void compileAndRun();
 			if (initialDiagnostic) setError(initialDiagnostic);
 			setReady(true);
@@ -1244,6 +1418,9 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.getTsConfig = undefined;
 			window.clearTimeout(compileDebounceId);
 			window.clearTimeout(hashDebounceId);
+			window.clearTimeout(themeDebounceRef);
+			themeObserverRef?.disconnect();
+			tsSessionInstance?.dispose();
 			sourceView?.destroy();
 			outputView?.destroy();
 			astPreview?.destroy();
