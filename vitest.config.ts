@@ -8,6 +8,7 @@ export default defineConfig({
 			'packages/vite-plugin',
 			'packages/vscode-extension',
 			'toolkit/query',
+			'repl',
 		],
 	},
 });

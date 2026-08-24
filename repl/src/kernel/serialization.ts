@@ -24,7 +24,10 @@ export const PLAYGROUND_SOURCE_LIMIT_ERROR = `Source is limited to ${MAX_PLAYGRO
 // Single-extension source names only. The
 // workspace tsconfig file is the one allowed non-source name (it is a config
 // document, never a module).
-const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+\.tsx$/;
+// Single-extension source names only (.tsx/.ts — the bundler resolves
+// sibling imports for both). The workspace tsconfig file is the one allowed
+// non-source name (it is a config document, never a module).
+const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+\.tsx?$/;
 const isAcceptableFileName = (name: string) =>
 	name === TSCONFIG_FILE_NAME || FILE_NAME_PATTERN.test(name);
 
@@ -126,5 +129,69 @@ export function decodePlaygroundHash(hash: string): PlaygroundHashResult {
 	} catch {
 		// A malformed unrelated fragment is not a playground payload.
 		return { ok: true, value: null };
+	}
+}
+
+// sessionStorage record of the last hash THIS tab wrote (plus the example it
+// came from). A payload matching it is the visitor's own work surviving a
+// reload or route remount — restored without the shared-code consent gate.
+// sessionStorage is same-origin and per-tab, so a link someone sends can never
+// pre-seed it.
+const OWN_HASH_STORAGE_KEY = 'octane-playground-own-hash';
+
+/**
+ * Shared-link persistence policy: reading the current URL's payload,
+ * recognizing this tab's own work, and writing the workspace back into the
+ * URL. The caller decides WHEN (debounce, consent gating) — this owns HOW
+ * (encoding, history, sessionStorage).
+ */
+export class ShareLink {
+	/** Decode and validate the current URL hash (call once at boot). */
+	decode(hash: string): PlaygroundHashResult {
+		return decodePlaygroundHash(hash);
+	}
+
+	readCurrentHash(): string {
+		return window.location.hash.slice(1);
+	}
+
+	/** This tab's own last-written hash + example, or null. */
+	readOwn(): { hash: string; exampleId: string } | null {
+		try {
+			const stored = window.sessionStorage.getItem(OWN_HASH_STORAGE_KEY);
+			if (!stored) return null;
+			const parsed = JSON.parse(stored);
+			return typeof parsed?.hash === 'string' && typeof parsed?.exampleId === 'string'
+				? parsed
+				: null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Does `hash` match what THIS tab last wrote? */
+	isOwnWork(hash: string): boolean {
+		return this.readOwn()?.hash === hash;
+	}
+
+	/**
+	 * Write the workspace into the URL (replaceState — only the hash on the
+	 * current entry changes; the router observes it through its history
+	 * wrapper without remounting the route) and remember it as this tab's own
+	 * work so a reload doesn't re-gate it. No-op when over budget.
+	 */
+	publish(payload: PlaygroundHashPayload, exampleId: string): void {
+		const encoded = encodePlaygroundHash(payload);
+		if (!encoded) return;
+		window.history.replaceState(null, '', '#' + encoded);
+		try {
+			window.sessionStorage.setItem(
+				OWN_HASH_STORAGE_KEY,
+				JSON.stringify({ hash: encoded, exampleId }),
+			);
+		} catch {
+			// Storage full/unavailable — sharing still works, only the
+			// reload-without-consent nicety is lost.
+		}
 	}
 }
