@@ -332,7 +332,7 @@ export function usePlayground(): PlaygroundEngine {
 			// even when a hash payload (or the defaults) did not include one.
 			const ensureTsconfig = () => {
 				if (workspace.files.some((file: PlaygroundFile) => file.name === TSCONFIG_FILE_NAME)) return;
-				workspace.files.push({ name: TSCONFIG_FILE_NAME, source: pgExamples.DEFAULT_TSCONFIG_SOURCE });
+				workspace.files.push({ name: TSCONFIG_FILE_NAME, source: pgExamples.SHARED_TSCONFIG_SOURCE });
 			};
 			// A hash payload is someone else's code — display + compile it, but
 			// gate EXECUTION behind the consent overlay's Run button. Two payloads

@@ -1,18 +1,14 @@
-// Curated playground examples. Every example is a folder under
-// repl/examples/<group>/<example>/ — one real file per source, plus a
-// meta.json with `{ "label", "entry" }` (entry defaults to the first file).
-// Group folders carry their own meta.json label; the tree is loaded at build
-// time with Vite's import.meta.glob, so examples are authored as plain files
-// on disk, not template literals.
+// Curated playground examples, loaded at build time with Vite's
+// import.meta.glob
 //
-// The examples are written in DarTsx (the language this playground will
-// compile once it moves off octane) — each demonstrates one API surface,
-// not a whole app.
+// entry defaults to "App.tsx". Example ids are folder names. Every folder on
+// disk must be listed in meta.json (and vice versa) — mismatches throw at load
+// time so authoring mistakes surface immediately.
 import type { PlaygroundFile } from './playground-modules.ts';
 
 export interface ExampleWorkspace {
 	files: PlaygroundFile[];
-	/** Module the sandbox imports and renders. Defaults to the first file. */
+	/** Module the sandbox imports and renders. Defaults to "App.tsx". */
 	entry: string;
 }
 
@@ -25,30 +21,14 @@ export interface PlaygroundExample {
 }
 
 export const CUSTOM_EXAMPLE_ID = 'custom';
+export const TSCONFIG_FILE_NAME = 'tsconfig.json';
+export const DEFAULT_ENTRY_FILE = 'App.tsx';
 
-/**
- * The tsconfig.json the playground injects into any workspace that lacks one
- * (Vue-REPL style: the config is an editable virtual file). Nothing consumes
- * these options yet — the editor has no language service and the compiler is
- * a syntax transform — so this is the agreed surface, not a live contract.
- * `jsx: "preserve"` mirrors the compiler's hardcoded oxc transform mode.
- */
-export const DEFAULT_TSCONFIG_SOURCE = `{
-	"compilerOptions": {
-		"target": "ESNext",
-		"module": "ESNext",
-		"moduleResolution": "Bundler",
-		"jsx": "preserve",
-		"jsxImportSource": "dartsx",
-		"strict": true,
-		"skipLibCheck": true
-	}
-}
-`;
-
-interface ExampleMeta {
-	label?: string;
-	entry?: string;
+interface MetaFile {
+	groups?: {
+		label?: string;
+		examples?: { path?: string; label?: string; entry?: string }[];
+	}[];
 }
 
 /** Every file under repl/examples/, keyed by path relative to this module. */
@@ -58,65 +38,80 @@ const rawFiles = import.meta.glob('../../examples/**/*', {
 	import: 'default',
 }) as Record<string, string>;
 
-const EXAMPLES: PlaygroundExample[] = [];
-const groupLabels = new Map<string, string>();
-const filesByExample = new Map<string, { dir: string; files: PlaygroundFile[]; meta: ExampleMeta | null }>();
+function throwError(message: string): never {
+	throw new Error(message);
+}
+
+/** Shared tsconfig seed - copied into every workspace as an editable tab. */
+export const SHARED_TSCONFIG_SOURCE =
+	rawFiles['../../examples/tsconfig.json'] ??
+	throwError('examples/tsconfig.json is missing - it seeds every workspace.');
+void SHARED_TSCONFIG_SOURCE;
+
+/** Sources grouped by directory path relative to repl/examples/. */
+const sourcesByPath = new Map<string, PlaygroundFile[]>();
+const onDisk = new Set<string>();
 
 for (const [path, source] of Object.entries(rawFiles)) {
 	const rel = path.replace('../../examples/', '');
-	const [groupDir, ...rest] = rel.split('/');
-	if (rest.length === 0 || !groupDir) continue;
-	if (rest.length === 1) {
-		if (rest[0] === 'meta.json') {
-			try {
-				groupLabels.set(groupDir, JSON.parse(source).label as string);
-			} catch {
-				// A malformed group meta.json is ignored; the folder name labels the group.
-			}
-		}
-		continue;
-	}
-	const [exampleDir, ...fileParts] = rest;
-	if (fileParts.length !== 1) continue;
-	const key = `${groupDir}/${exampleDir}`;
-	let bucket = filesByExample.get(key);
-	if (!bucket) {
-		bucket = { dir: exampleDir, files: [], meta: null };
-		filesByExample.set(key, bucket);
-	}
-	if (fileParts[0] === 'meta.json') {
-		try {
-			bucket.meta = JSON.parse(source) as ExampleMeta;
-		} catch {
-			// Malformed example meta.json — fall back to folder-name labels.
-		}
-	} else {
-		bucket.files.push({ name: fileParts[0], source });
-	}
+	const slash = rel.indexOf('/');
+	if (slash === -1) continue; // root-level meta.json / tsconfig.json / stray files
+	const dir = '/' + rel.slice(0, slash);
+	const name = rel.slice(slash + 1);
+	onDisk.add(dir);
+	if (!sourcesByPath.has(dir)) sourcesByPath.set(dir, []);
+	sourcesByPath.get(dir)!.push({ name, source });
 }
 
-for (const [key, bucket] of filesByExample) {
-	const [groupDir] = key.split('/');
-	const meta = bucket.meta ?? {};
-	const files = [...bucket.files].sort((a, b) => a.name.localeCompare(b.name));
-	if (files.length === 0) continue;
-	const label = meta.label ?? bucket.dir.replace(/^\d+-/, '').replace(/-/g, ' ');
-	EXAMPLES.push({
-		id: bucket.dir.replace(/^\d+-/, ''),
-		label,
-		group: groupLabels.get(groupDir) ?? groupDir.replace(/^\d+-/, '').replace(/-/g, ' '),
-		workspace: {
-			entry: meta.entry ?? files[0].name,
-			files,
-		},
-	});
+let meta: MetaFile;
+try {
+	meta = JSON.parse(rawFiles['../../examples/meta.json'] ?? '') as MetaFile;
+} catch {
+	throwError('examples/meta.json is missing or malformed.');
+}
+
+function buildExamples(metaFile: MetaFile): PlaygroundExample[] {
+	const examples: PlaygroundExample[] = [];
+	for (const group of metaFile.groups ?? []) {
+		const groupLabel = group.label ?? 'Examples';
+		for (const spec of group.examples ?? []) {
+			if (!spec.path) {
+				throwError(`examples/meta.json has an example without a path in group "${groupLabel}".`);
+			}
+			const id = spec.path;
+			const files = sourcesByPath.get(id);
+			if (!files || files.length === 0) {
+				throwError(
+					`examples/meta.json lists "${id}", but no such folder exists under repl/examples/.`,
+				);
+			}
+			examples.push({
+				id,
+				label: spec.label ?? id,
+				group: groupLabel,
+				workspace: {
+					files: [...files].sort((a, b) => a.name.localeCompare(b.name)),
+					entry: spec.entry ?? DEFAULT_ENTRY_FILE,
+				},
+			});
+		}
+	}
+	return examples;
+}
+
+const EXAMPLES = buildExamples(meta);
+
+for (const id of onDisk) {
+	if (!EXAMPLES.some((example) => example.id === id)) {
+		throwError(`Folder repl/examples/${id}/ is not listed in examples/meta.json.`);
+	}
 }
 
 if (EXAMPLES.length === 0) {
-	throw new Error('No playground examples found under repl/examples/ — check the example folder tree.');
+	throwError('No playground examples found under repl/examples/ - check meta.json.');
 }
 
-/** All examples in dropdown order (group folders first, then example folders). */
+/** All examples in dropdown order. */
 export { EXAMPLES };
 
 export function getExample(id: string): PlaygroundExample | undefined {
@@ -131,8 +126,6 @@ export function exampleWorkspace(example: PlaygroundExample): ExampleWorkspace {
 	};
 }
 
-/** The workspace the playground boots with (first example in the first group). */
-export const DEFAULT_EXAMPLE_ID = EXAMPLES[0].id;
-export const DEFAULT_WORKSPACE: ExampleWorkspace = exampleWorkspace(
-	getExample(DEFAULT_EXAMPLE_ID)!,
-);
+/** The workspace the playground boots with (first example of the first group). */
+export const DEFAULT_EXAMPLE_ID = EXAMPLES[0]!.id;
+export const DEFAULT_WORKSPACE: ExampleWorkspace = exampleWorkspace(getExample(DEFAULT_EXAMPLE_ID)!);
