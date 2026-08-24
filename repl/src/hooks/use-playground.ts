@@ -15,7 +15,7 @@ import {
 } from '../engine/create-engine.ts';
 
 export type { PlaygroundCommands } from '../engine/create-engine.ts';
-export { OUTPUT_TARGET_LABEL } from '../engine/create-engine.ts';
+export { OUTPUT_TARGET_LABEL } from '../engine/output-pane.ts';
 
 export interface PlaygroundEngine {
 	view: 'preview' | 'compiled';
