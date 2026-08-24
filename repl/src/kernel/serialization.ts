@@ -1,5 +1,10 @@
-import type { PlaygroundLang } from './playground.ts';
-import { TSCONFIG_FILE_NAME, type PlaygroundFile } from './playground-modules.ts';
+// Shared-link serialization: encode/decode the workspace into a
+// `location.hash` payload, with strict input bounds — a hash is UNTRUSTED
+// input. Decoding happens before the editor/highlighter stack loads; decoded
+// source is safe to display and compile (pure string work) but never executes
+// until the visitor consents (see ConsentOverlay / kernel commands).
+import type { PlaygroundLang, PlaygroundFile } from './types.ts';
+import { TSCONFIG_FILE_NAME } from './types.ts';
 
 /** Total source budget across ALL files in a workspace. */
 export const MAX_PLAYGROUND_SOURCE_LENGTH = 20_000;

@@ -1,10 +1,10 @@
 // The left panel: the file tab strip (with its add button and loading hint)
 // above the CodeMirror source editor host. The editor itself is mounted into
-// the host div by the engine's boot effect (see use-playground.ts).
+// the host div by the engine's boot effect (see hooks/use-playground.ts).
 import type { MutableRefObject, RefObject } from 'react';
 import { cx } from '../utils/cx.ts';
 import { FileTabs } from './FileTabs.tsx';
-import type { PlaygroundController } from '../utils/use-playground.ts';
+import type { PlaygroundCommands } from '../hooks/use-playground.ts';
 
 interface EditorPaneProps {
 	pane: 'editor' | 'result';
@@ -17,7 +17,7 @@ interface EditorPaneProps {
 	renameInputRef: RefObject<HTMLInputElement | null>;
 	draggingFileRef: MutableRefObject<string | null>;
 	sourceHostRef: RefObject<HTMLDivElement | null>;
-	controller: PlaygroundController;
+	controller: PlaygroundCommands;
 	onSetInputValue: (value: string) => void;
 	onSetDragOverFile: (file: string | null) => void;
 }

@@ -1,16 +1,16 @@
 // The page's toolbar: the Examples dropdown, the Format button, and the
 // desktop Preview/Compiled view switch. All of it is presentational — actions
-// route through the engine's controller (see use-playground.ts).
+// route through the engine's controller (see hooks/use-playground.ts).
 import { cx } from '../utils/cx.ts';
-import { EXAMPLE_GROUPS } from '../utils/example-groups.ts';
-import type { PlaygroundController } from '../utils/use-playground.ts';
+import { EXAMPLE_GROUPS } from '../kernel/examples.ts';
+import type { PlaygroundCommands } from '../hooks/use-playground.ts';
 
 interface PlaygroundToolbarProps {
 	ready: boolean;
 	formatting: boolean;
 	exampleId: string;
 	view: 'preview' | 'compiled';
-	controller: PlaygroundController;
+	controller: PlaygroundCommands;
 	onSelectView: (next: 'preview' | 'compiled') => void;
 }
 

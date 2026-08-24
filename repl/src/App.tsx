@@ -6,27 +6,29 @@
 // Hovering or selecting source reveals the corresponding AST node where the
 // parser has a span; hovering a tree node highlights its origin document. In
 // code form the Client target maps BOTH ways — through the compile's source
-// map, widened with verified text matches (see playground-mapping.ts).
+// map, widened with verified text matches (features/ast-inspector/mapping.ts).
 //
-// All engine state and the editor stack live in use-playground.ts (a hook);
-// this page composes presentational components over it:
+// This page is the composition root: it creates nothing itself but mounts
+// <Playground/>, which boots the framework-free engine
+// (engine/create-engine.ts) through the thin React adapter
+// (hooks/use-playground.ts) and composes presentational components over it:
 // PlaygroundToolbar (examples + format + view switch), EditorPane (file tabs
 // + source editor host), ResultPane (preview or compiled output hosts), and
 // the mobile bottom toggle. Editors, panels, and the preview canvas all
 // follow the site's light/dark theme. A workspace is a set of virtual files
-// with an entry. The Examples dropdown loads curated workspaces from
-// repl/examples/ (src/utils/playground-examples.ts); the file tabs manage the
-// file set (add/delete), and editing any file flips it to "Custom". The
-// active workspace persists into `location.hash` (debounced) so playground
-// states are shareable links, and the Format button runs client-side
-// Prettier (src/utils/playground-format.ts).
+// with an entry, owned by kernel/workspace.ts. The Examples dropdown loads
+// curated workspaces from repl/examples/ (kernel/examples.ts); the file tabs
+// manage the file set (add/delete), and editing any file flips it to
+// "Custom". The active workspace persists into `location.hash` (debounced) so
+// playground states are shareable links, and the Format button runs
+// client-side Prettier (features/formatter/format.ts).
 import { useTitle } from './utils/use-title.ts';
 import { cx } from './utils/cx.ts';
 import { EditorPane } from './components/EditorPane.tsx';
 import { MobileToggle } from './components/MobileToggle.tsx';
 import { PlaygroundToolbar } from './components/PlaygroundToolbar.tsx';
 import { ResultPane } from './components/ResultPane.tsx';
-import { usePlayground } from './utils/use-playground.ts';
+import { usePlayground } from './hooks/use-playground.ts';
 import './components/playground.css';
 
 export function Playground() {

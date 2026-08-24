@@ -1,29 +1,29 @@
 // Playground engine — compiles and executes TSRX/TS/TSX in the browser.
 //
-// Compilation now happens through the Project (see playground-modules.ts):
+// Compilation happens through the kernel Compiler (see ../compiler.ts):
 // it owns the cross-file graph, so imported state stays a signal across module
 // boundaries, and it is pure JS/WASM (oxc-parser + oxc-transform wasm bindings
 // + esrap printer, no Node APIs). This module keeps the EXECUTION side: the
 // compiled modules RUN inside a sandboxed iframe with an opaque origin (see
-// playground-sandbox.ts) — never in the website's own page. Hash-shared
+// the sandbox srcdoc generator) — never in the website's own page. Hash-shared
 // playground links carry arbitrary code, so the page it runs in must have no
 // same-origin storage, cookies, or DOM to steal. The parent fetches the dartsx
 // runtime chunk manifest (served by the playgroundRuntime() vite plugin) and
 // hands it to the iframe, which builds blob modules on its own side of the
 // boundary. Multi-file graphs and third-party esm.sh imports are prepared by
-// playground-modules.ts.
+// the kernel bundler (../bundler.ts).
 //
 // DevTools: the REAL Chrome DevTools UI runs in a SECOND iframe inside the
 // collapsible panel under the preview; the CDP relay, frontend document, and
-// boot handshake live in playground-devtools.ts. The preview iframe runs
+// boot handshake live in devtools-relay.ts. The preview iframe runs
 // chobitsu — the Chrome DevTools protocol implemented in-page (see
-// playground-sandbox.ts). Messages are plain objects; CDP strings are the
+// the sandbox srcdoc generator). Messages are plain objects; CDP strings are the
 // only strings in play, so both sides tell them apart by type alone (no
 // marker key — same stance as solid-playground).
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { sandboxSrcdoc, type RuntimeManifest } from './playground-sandbox.ts';
-import { createDevtoolsRelay, type DevtoolsRelay } from './playground-devtools.ts';
+import { sandboxSrcdoc, type RuntimeManifest } from './sandbox-srcdoc.ts';
+import { createDevtoolsRelay, type DevtoolsRelay } from './devtools-relay.ts';
 import runtimeManifest from 'virtual:dartsx-runtime-manifest';
 
 export type PlaygroundLang = 'tsx';
@@ -59,7 +59,7 @@ export const PREVIEW_RUN_TIMEOUT_MS = 10_000;
 
 /**
  * A live preview bound to `container` — creates the sandboxed iframe and
- * drives the postMessage protocol (see playground-sandbox.ts for the boundary
+ * drives the postMessage protocol (see the sandbox srcdoc generator for the boundary
  * design). `onRuntimeError` reports errors thrown AFTER the initial render
  * resolves (effects, event handlers — caught by the error boundary the sandbox
  * wraps around the user component). `devtoolsHost` (optional) receives the
@@ -109,7 +109,7 @@ export function createPreview(
 		frameWindow?.postMessage(msg, '*');
 	};
 	// The devtools relay owns the frontend iframe, the CDP relay, and the
-	// parent-driven boot handshake (see playground-devtools.ts); `send` feeds
+	// parent-driven boot handshake (see devtools-relay.ts); `send` feeds
 	// it the sandbox-bound protocol messages.
 	const devtoolsRelay: DevtoolsRelay = createDevtoolsRelay({
 		host: devtoolsHost,

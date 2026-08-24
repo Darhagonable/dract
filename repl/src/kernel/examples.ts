@@ -4,7 +4,8 @@
 // entry defaults to "App.tsx". Example ids are folder names. Every folder on
 // disk must be listed in meta.json (and vice versa) — mismatches throw at load
 // time so authoring mistakes surface immediately.
-import type { PlaygroundFile } from './playground-modules.ts';
+import type { PlaygroundFile } from './types.ts';
+import { DEFAULT_ENTRY_FILE } from './types.ts';
 
 export interface ExampleWorkspace {
 	files: PlaygroundFile[];
@@ -21,8 +22,6 @@ export interface PlaygroundExample {
 }
 
 export const CUSTOM_EXAMPLE_ID = 'custom';
-export const TSCONFIG_FILE_NAME = 'tsconfig.json';
-export const DEFAULT_ENTRY_FILE = 'App.tsx';
 
 interface MetaFile {
 	groups?: {
@@ -113,6 +112,15 @@ if (EXAMPLES.length === 0) {
 
 /** All examples in dropdown order. */
 export { EXAMPLES };
+
+// Static dropdown structure — examples grouped into <optgroup>s in
+// declaration order.
+export const EXAMPLE_GROUPS: { group: string; examples: typeof EXAMPLES }[] = [];
+for (const example of EXAMPLES) {
+	const bucket = EXAMPLE_GROUPS.find((candidate) => candidate.group === example.group);
+	if (bucket) bucket.examples.push(example);
+	else EXAMPLE_GROUPS.push({ group: example.group, examples: [example] });
+}
 
 export function getExample(id: string): PlaygroundExample | undefined {
 	return EXAMPLES.find((example) => example.id === id);
