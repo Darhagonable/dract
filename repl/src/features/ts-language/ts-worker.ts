@@ -90,6 +90,13 @@ interface Document {
 	rawToGen: [number, number][] | null;
 }
 
+/**
+ * The project filesystem: every workspace file the client has synced, keyed
+ * by playground URI. This is a projection of the Workspace — NOT an
+ * open-editor registry. Tab switches (lsp-client didOpen/didClose) never
+ * change membership; only content updates and explicit
+ * playground/removeFile do.
+ */
 const openDocs = new Map<string, Document>();
 
 const lineStarts = (doc: string): number[] => {
@@ -549,7 +556,14 @@ const handleNotification = (method: string, params: any) => {
 			return;
 		}
 		case 'textDocument/didClose':
-			removeFile(params.textDocument.uri);
+			// The environment is a PROJECT filesystem (a projection of the
+			// Workspace), not an open-document registry. The lsp-client plugin
+			// sends didClose whenever a tab switch swaps editor states — that
+			// means "no editor displaying this file", never "delete it".
+			// Deleting a workspace file is explicit: playground/removeFile.
+			return;
+		case 'playground/removeFile':
+			removeFile(params.uri);
 			return;
 		default:
 			return;
