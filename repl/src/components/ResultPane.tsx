@@ -1,12 +1,12 @@
 // The right panel: a live-preview mode (sandboxed iframe + the shared-code
 // consent gate) and a compiled mode (Client/Server/Types artifact as code or
 // an AST tree). The CodeMirror output editor and the AST tree are mounted into
-// their host divs by the engine's boot effect (see use-playground.ts).
+// their host divs by the engine's boot effect (see hooks/use-playground.ts).
 import type { RefObject } from 'react';
 import { cx } from '../utils/cx.ts';
-import { OUTPUT_TARGET_LABEL } from '../utils/use-playground.ts';
-import type { PlaygroundController, PlaygroundEngine } from '../utils/use-playground.ts';
-import type { PlaygroundOutputTarget } from '../utils/playground.ts';
+import { OUTPUT_TARGET_LABEL } from '../hooks/use-playground.ts';
+import type { PlaygroundCommands, PlaygroundEngine } from '../hooks/use-playground.ts';
+import type { PlaygroundOutputTarget } from '../kernel/runtime/preview.ts';
 import { ConsentOverlay } from './ConsentOverlay.tsx';
 
 interface ResultPaneProps {
@@ -22,7 +22,7 @@ interface ResultPaneProps {
 	astHostRef: RefObject<HTMLDivElement | null>;
 	outputHostRef: RefObject<HTMLDivElement | null>;
 	devtoolsOpen: boolean;
-	controller: PlaygroundController;
+	controller: PlaygroundCommands;
 	onSelectCompiledMode: PlaygroundEngine['selectCompiledMode'];
 	onSelectOutputTarget: PlaygroundEngine['selectOutputTarget'];
 	onToggleDevtools: PlaygroundEngine['toggleDevtools'];

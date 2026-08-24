@@ -4,12 +4,12 @@
 // (tsconfig.json) is pinned to the FAR RIGHT of the strip, separated from the
 // editable tabs like the Vue REPL's tsconfig tab: not renamable, not
 // removable, not draggable. Presentational: file operations route through the
-// engine's controller (see use-playground.ts).
+// engine's controller (see hooks/use-playground.ts).
 import type { MutableRefObject, RefObject } from 'react';
 import { cx } from '../utils/cx.ts';
-import { MAX_PLAYGROUND_FILES } from '../utils/playground-hash.ts';
-import { TSCONFIG_FILE_NAME, isTsconfigFile } from '../utils/playground-modules.ts';
-import type { PlaygroundController } from '../utils/use-playground.ts';
+import { MAX_PLAYGROUND_FILES } from '../kernel/serialization.ts';
+import { TSCONFIG_FILE_NAME, isTsconfigFile } from '../kernel/types.ts';
+import type { PlaygroundCommands } from '../hooks/use-playground.ts';
 
 interface FileTabsProps {
 	files: string[];
@@ -20,7 +20,7 @@ interface FileTabsProps {
 	ready: boolean;
 	renameInputRef: RefObject<HTMLInputElement | null>;
 	draggingFileRef: MutableRefObject<string | null>;
-	controller: PlaygroundController;
+	controller: PlaygroundCommands;
 	onSetInputValue: (value: string) => void;
 	onSetDragOverFile: (file: string | null) => void;
 }

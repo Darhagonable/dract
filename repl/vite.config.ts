@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { createRequire } from 'node:module';
 import { build as esbuildBuild } from 'esbuild';
-import type { RuntimeManifest } from './src/utils/playground-sandbox.ts';
+import type { RuntimeManifest } from './src/kernel/runtime/sandbox-srcdoc.ts';
 
 async function buildManifest(): Promise<RuntimeManifest> {
 	const require = createRequire(import.meta.url);

@@ -1,17 +1,11 @@
-// Turns the playground's virtual files into the module graph the sandbox
-// executes: compiles each file (the Project for `.tsx`/`.ts`), rewrites import
-// specifiers with es-module-lexer's exact offsets, and topo-sorts the sibling
-// graph so modules arrive at the sandbox dependencies-first.
-//
-// The Project instance lives at module scope: it OWNS the cross-file graph
-// (reactive exports, call contributions, incremental invalidation), so the
-// preview — unlike a per-file compile — gets genuinely reactive imported
-// state, and each edit recompiles exactly what it invalidates. It is pure
-// JS/WASM (oxc-parser + oxc-transform wasm bindings + esrap printer, no Node
-// APIs), so it runs in the browser exactly as it does in the Vite plugin.
+// The bundler: turns a workspace file set into the dependency-ordered module
+// graph the sandbox executes. It consumes a Compiler (never oxc directly) for
+// per-file artifacts, then rewrites import specifiers with es-module-lexer's
+// exact offsets and topo-sorts the sibling graph so modules arrive at the
+// sandbox dependencies-first.
 //
 // Specifier policy (the parent-side half of the sandbox security boundary —
-// see playground-sandbox.ts for the sandbox that backs it):
+// see the sandbox srcdoc generator for the sandbox that backs it):
 //   ./File[.ext]        → sibling file, rewritten to a `__pg_module:<name>__`
 //                         token the sandbox swaps for a blob URL
 //   dartsx family       → left bare; the sandbox import map resolves them
@@ -20,46 +14,9 @@
 //   any other bare id   → https://esm.sh/<id>?external=dartsx — `external`
 //                         makes esm.sh leave `import 'dartsx'` bare so the
 //                         import map pins bindings to the runtime singleton
-//
-// Client-only: load via dynamic import from an effect (never during SSR).
-import { Project, type ModuleOutput } from 'dartsx/compiler';
-import { moduleToken } from './playground-sandbox.ts';
-
-export interface PlaygroundFile {
-	name: string;
-	source: string;
-}
-
-/**
- * The workspace's tsconfig file (Vue-REPL style): a plain virtual file the
- * visitor can edit. Nothing consumes its options yet — the editor has no
- * language service and the compiler is a syntax transform — but the file is
- * the agreed surface for compiler options once a type-checking or emit layer
- * lands.
- */
-export const TSCONFIG_FILE_NAME = 'tsconfig.json';
-
-export function isTsconfigFile(name: string): boolean {
-	return name === TSCONFIG_FILE_NAME;
-}
-
-/**
- * Parse the workspace's tsconfig.json, mirroring the Vue REPL's `getTsConfig`
- * contract: the raw parsed JSON, or null when the file is missing or malformed
- * (a broken config must never block the playground).
- */
-export function parsePlaygroundTsconfig(files: PlaygroundFile[]): Record<string, unknown> | null {
-	const file = files.find((candidate) => candidate.name === TSCONFIG_FILE_NAME);
-	if (!file) return null;
-	try {
-		const parsed: unknown = JSON.parse(file.source);
-		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: null;
-	} catch {
-		return null;
-	}
-}
+import { moduleToken } from './runtime/sandbox-srcdoc.ts';
+import { isTsconfigFile, TSCONFIG_FILE_NAME, type PlaygroundFile } from './types.ts';
+import type { Compiler } from './compiler.ts';
 
 export interface ModuleGraph {
 	ok: true;
@@ -81,89 +38,24 @@ export interface ModuleGraphFailure {
 	error: string;
 }
 
-// ── Project ───────────────────────────────────────────────────────────────
-// The Project is the single source of truth for every `.tsx`/`.ts` file:
-// it recompiles incrementally (an edit invalidates exactly the files whose
-// inputs it changes) and hands each module's output — code, source map, and
-// the printed AST — to both the graph builder and the compiled pane. The
-// host resolves sibling imports and reads sources from the live workspace
-// file set; everything else (esm.sh URLs, bare ids) stays unresolved — the
-// same contract as the old `resolveExternal: () => null`.
-/** The workspace file set the project host reads from (synced per compile). */
-let currentFiles = new Map<string, PlaygroundFile>();
-let currentFileNames = new Set<string>();
-/** File names the project knows about, for remove() diffs. */
-const projectFiles = new Set<string>();
-/** Last compile error per file — `update` throws; errors surface per file. */
-const compileErrors = new Map<string, string>();
-
-const project = new Project({
-	css: 'injected',
-	entryPoints: [],
-	host: {
-		resolve: (specifier) => {
-			if (!specifier.startsWith('./')) return undefined;
-			const resolved = resolveSibling(specifier, currentFileNames);
-			return resolved ?? undefined;
-		},
-		readFile: (id) => currentFiles.get(id)?.source,
-	},
-});
-
-/** Bring the project up to date with the workspace's `.tsx`/`.ts` files. */
-async function ensureCompiled(files: PlaygroundFile[]): Promise<void> {
-	currentFiles = new Map(files.map((f) => [f.name, f]));
-	currentFileNames = new Set(currentFiles.keys());
-
-	for (const name of [...projectFiles]) {
-		if (currentFiles.has(name)) continue;
-		project.remove(name);
-		projectFiles.delete(name);
-		compileErrors.delete(name);
-	}
-	for (const file of files) {
-		if (isTsconfigFile(file.name)) continue;
-		projectFiles.add(file.name);
-	}
-
-	// Compile the workspace, then recompile whatever the project reports as
-	// invalidated: a module's inputs (a caller's reactive-call contributions,
-	// an importer's reactive exports) can change under it mid-pass, so its
-	// first output may be stale. Each pass recompiles only the invalidated
-	// files; the graph converges when a pass invalidates nothing.
-	let worklist = [...projectFiles];
-	while (worklist.length > 0) {
-		const next: string[] = [];
-		for (const name of worklist) {
-			const file = currentFiles.get(name);
-			if (!file) continue;
-			try {
-				const { invalidated } = await project.update(name, file.source);
-				compileErrors.delete(name);
-				for (const id of invalidated) {
-					if (projectFiles.has(id) && !next.includes(id)) next.push(id);
-				}
-			} catch (error) {
-				compileErrors.set(name, error instanceof Error ? error.message : String(error));
-			}
-		}
-		worklist = next;
-	}
-}
-
 /**
- * The project's output for one file, or null when it has none. Files whose
- * last compile threw return null too — the project keeps the previous output
- * around, but the pane must show the error, not stale code.
+ * Parse the workspace's tsconfig.json, mirroring the Vue REPL's `getTsConfig`
+ * contract: the raw parsed JSON, or null when the file is missing or malformed
+ * (a broken config must never block the playground).
  */
-export function getModuleOutput(name: string): ModuleOutput | null {
-	if (compileErrors.has(name)) return null;
-	return project.output(name);
-}
-
-/** The last compile error for one file, or null when it compiled or was never tried. */
-export function compileError(name: string): string | null {
-	return compileErrors.get(name) ?? null;
+export function parsePlaygroundTsconfig(
+	files: readonly PlaygroundFile[],
+): Record<string, unknown> | null {
+	const file = files.find((candidate) => candidate.name === TSCONFIG_FILE_NAME);
+	if (!file) return null;
+	try {
+		const parsed: unknown = JSON.parse(file.source);
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: null;
+	} catch {
+		return null;
+	}
 }
 
 /** Import specifiers the sandbox import map resolves — leave them bare. */
@@ -261,11 +153,12 @@ function rewriteAndRecord(
 }
 
 /**
- * Compile every file and produce the rewritten, dependency-ordered module
- * graph for the sandbox. Never throws.
+ * Compile every file through the compiler and produce the rewritten,
+ * dependency-ordered module graph for the sandbox. Never throws.
  */
 export async function buildModuleGraph(
-	files: PlaygroundFile[],
+	compiler: Compiler,
+	files: readonly PlaygroundFile[],
 	entry: string,
 ): Promise<ModuleGraph | ModuleGraphFailure> {
 	if (!files.some((f) => f.name === entry)) {
@@ -282,7 +175,7 @@ export async function buildModuleGraph(
 		return { ok: false, error: 'Playground file names must be unique.' };
 	}
 
-	await ensureCompiled(files);
+	await compiler.compile(files);
 
 	const { init, parse } = await import('es-module-lexer');
 	await init;
@@ -299,16 +192,16 @@ export async function buildModuleGraph(
 				// compile, rewrite, or execute.
 				continue;
 			}
-			const output = getModuleOutput(file.name);
+			const output = compiler.outputFor(file.name);
 			if (!output) {
 				return {
 					ok: false,
 					error:
-						compileError(file.name) ??
+						compiler.errorFor(file.name) ??
 						`${file.name}: not compiled — it contains no DarTsx syntax and no reactive calls target it.`,
 				};
 			}
-			rewriteAndRecord(file.name, output.js.code, names, rewritten, siblingDeps, externals, parse);
+			rewriteAndRecord(file.name, output.code, names, rewritten, siblingDeps, externals, parse);
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : String(error) };
 		}

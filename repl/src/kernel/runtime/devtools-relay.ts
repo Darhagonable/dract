@@ -2,7 +2,7 @@
 // devtools frontend, loaded from the CDN) runs in a SECOND iframe inside the
 // collapsible panel under the preview (the host). The preview iframe runs
 // chobitsu — the Chrome DevTools protocol implemented in-page (see
-// playground-sandbox.ts) — and this helper relays raw CDP message strings
+// the sandbox srcdoc generator) — and this helper relays raw CDP message strings
 // between the two frames over postMessage: preview → frontend responses,
 // frontend → preview requests (wrapped in the protocol's `devtools` message).
 // Messages are plain objects; CDP strings are the only strings in play, so
@@ -10,7 +10,7 @@
 // solid-playground). The boot sequence is parent-driven so no CDP message can
 // race the frontend's load.
 
-/** The relay's parent-side surface, owned by createPreview (see playground.ts). */
+/** The relay's parent-side surface, owned by createPreview (see preview.ts). */
 export interface DevtoolsRelay {
 	/**
 	 * Lazily create the devtools frontend iframe (the real Chrome DevTools UI
