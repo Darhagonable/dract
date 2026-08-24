@@ -1,6 +1,6 @@
 // Client-side Prettier for the playground's Format button. Everything loads
 // lazily on first use: `prettier/standalone` plus prettier's typescript and
-// estree plugins for `.tsx` / `.react.tsx` files, and the babel plugin's json
+// estree plugins for `.tsx` files, and the babel plugin's json
 // parser for `tsconfig.json`.
 //
 // Client-only: load via dynamic import from an event handler (never SSR).

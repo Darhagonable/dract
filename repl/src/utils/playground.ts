@@ -22,8 +22,9 @@
 // marker key — same stance as solid-playground).
 //
 // Client-only: load via dynamic import from an effect (never during SSR).
-import { sandboxSrcdoc, RUNTIME_MANIFEST_PATH, type RuntimeManifest } from './playground-sandbox.ts';
+import { sandboxSrcdoc, type RuntimeManifest } from './playground-sandbox.ts';
 import { createDevtoolsRelay, type DevtoolsRelay } from './playground-devtools.ts';
+import runtimeManifest from 'virtual:dartsx-runtime-manifest';
 
 export type PlaygroundLang = 'tsx';
 export type PlaygroundRuntimeTarget = 'client' | 'server';
@@ -38,7 +39,6 @@ export type PlaygroundOutputTarget = PlaygroundRuntimeTarget | 'types';
 /** The subset of a built module graph the sandbox needs to execute a run. */
 export interface RunPayload {
 	entry: string;
-	entryKind: 'dartsx' | 'react';
 	modules: { name: string; code: string }[];
 }
 
@@ -163,18 +163,9 @@ export function createPreview(
 							send({ type: 'theme', theme: currentTheme() });
 							// Sandbox is listening — hand it the runtime chunk manifest (it
 							// cannot fetch same-origin resources itself; see sandbox notes).
-							fetch(RUNTIME_MANIFEST_PATH)
-								.then((res) => {
-									if (!res.ok) throw new Error(`${RUNTIME_MANIFEST_PATH} → HTTP ${res.status}`);
-									return res.json() as Promise<RuntimeManifest>;
-								})
-								.then((manifest) => send({ type: 'init', manifest }))
-								.catch((error) =>
-									settleReady(
-										'Failed to load the preview runtime: ' +
-											(error instanceof Error ? error.message : String(error)),
-									),
-								);
+							// Synthesized by playgroundRuntime() in vite.config.ts from
+							// dartsx's built dist output.
+							send({ type: 'init', manifest: runtimeManifest });
 							break;
 						case 'ready':
 							settleReady(typeof msg.error === 'string' ? msg.error : null);
@@ -238,7 +229,6 @@ export function createPreview(
 					type: 'run',
 					gen,
 					entry: payload.entry,
-					entryKind: payload.entryKind,
 					modules: payload.modules,
 				});
 			});
