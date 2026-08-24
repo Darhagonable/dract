@@ -16,11 +16,10 @@ export const MAX_PLAYGROUND_HASH_LENGTH = Math.ceil(
 
 export const PLAYGROUND_SOURCE_LIMIT_ERROR = `Source is limited to ${MAX_PLAYGROUND_SOURCE_LENGTH} characters in the playground.`;
 
-// One optional interior `.react` segment marks React-host files (see
-// playground-modules.ts); everything else is a single-extension name. The
+// Single-extension source names only. The
 // workspace tsconfig file is the one allowed non-source name (it is a config
 // document, never a module).
-const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+(\.react)?\.tsx$/;
+const FILE_NAME_PATTERN = /^[A-Za-z0-9_-]+\.tsx$/;
 const isAcceptableFileName = (name: string) =>
 	name === TSCONFIG_FILE_NAME || FILE_NAME_PATTERN.test(name);
 

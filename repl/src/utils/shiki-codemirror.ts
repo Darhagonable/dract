@@ -47,7 +47,7 @@ import renderRaw from '@dartsx/language-service/syntaxes/dartsx.render.injection
 // exact color schemes VS Code ships, so every scope our grammars emit
 // (keywords, storage types, entities, css internals…) gets its authentic
 // VS Code color. No hand-maintained theme mapping.
-export const PLAYGROUND_SHIKI_THEMES = {
+const PLAYGROUND_SHIKI_THEMES = {
 	light: 'light-plus',
 	dark: 'dark-plus',
 } as const;

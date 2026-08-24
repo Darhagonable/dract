@@ -56,8 +56,6 @@ import {
 	buildModuleGraph,
 	compileError,
 	getModuleOutput,
-	isReactHostFile,
-	peekCompiledFile,
 	TSCONFIG_FILE_NAME,
 	isTsconfigFile,
 	parsePlaygroundTsconfig,
@@ -491,10 +489,7 @@ export function usePlayground(): PlaygroundEngine {
 					}
 				}
 				for (const file of workspace.files) {
-					// The tsconfig is a config document, not a module; .react.tsx files
-					// run through the Sucrase pipeline and would get FALSE diagnostics
-					// against dartsx JSX types — skip both rather than mislead.
-					if (isTsconfigFile(file.name) || isReactHostFile(file.name)) continue;
+					if (isTsconfigFile(file.name)) continue;
 					if (registeredTsSources.get(file.name) === file.source) continue;
 					const isOpen = registeredTsSources.has(file.name);
 					registeredTsSources.set(file.name, file.source);
@@ -580,28 +575,6 @@ export function usePlayground(): PlaygroundEngine {
 					// A config file has no compile step — its "compiled output"
 					// is the file itself.
 					entry = { source, code: source, ast: null, map: null, error: null };
-				} else if (isReactHostFile(name)) {
-					const compiled = peekCompiledFile({ name, source });
-					entry = compiled
-						? compiled.ok
-							? { source, code: compiled.code, ast: null, map: null, error: null }
-							: {
-								source,
-								code: '// Compiled output failed:\n// ' + compiled.error,
-								ast: null,
-								map: null,
-								error: compiled.error,
-							}
-						// A missed cache hit here means the graph hasn't compiled
-						// since the file was edited — but the placeholder cannot
-						// outlive the compile that replaces it.
-						: {
-							source,
-							code: '// Compiled output appears after the next compile.',
-							ast: null,
-							map: null,
-							error: null,
-						};
 				} else {
 					const output = getModuleOutput(name);
 					const error = compileError(name);
@@ -904,9 +877,8 @@ export function usePlayground(): PlaygroundEngine {
 						}
 					} else {
 						clearMappedPair();
-						const message = isReactHostFile(currentFile)
-							? 'AST trace covers Octane-owned .tsx files. React-host files use the separate Sucrase pipeline.'
-							: 'AST generation failed. Fix the source to generate a new tree.';
+						const message =
+							'AST generation failed. Fix the source to generate a new tree.';
 						astPreview.setUnavailable(message, currentFile);
 						lastShownAst = null;
 					}

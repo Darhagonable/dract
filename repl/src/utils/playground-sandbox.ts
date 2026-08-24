@@ -17,10 +17,10 @@
 // become blob modules INSIDE the iframe:
 //
 //   parent → iframe  { type: 'init', manifest }  dartsx runtime chunk manifest
-//                                                (the entries/order/files JSON
-//                                                the vite plugin serves at
-//                                                RUNTIME_MANIFEST_PATH), once
-//   parent → iframe  { type: 'run', gen, entry, entryKind, modules }
+//                                                (the entries/files JSON built
+//                                                by playgroundRuntime() in
+//                                                vite.config.ts), once
+//   parent → iframe  { type: 'run', gen, entry, modules }
 //                                                compiled user module graph in
 //                                                dependency order
 //   parent → iframe  { type: 'theme', theme }    'light' | 'dark' — keeps the
@@ -58,30 +58,18 @@
 // chunks dependencies-first, then installs a SINGLE import map — as a classic
 // (non-module) script it runs before any module load, which is baseline
 // import-map behavior in every supporting browser; no late-map mutation
-// anywhere — wiring bare `dartsx` / `dartsx/internal/client` to those blobs
-// and the react family to esm.sh (react is only fetched if something imports
-// it). User modules keep those specifiers bare; sibling-file imports arrive as
-// `__pg_module:<name>__` tokens the bootstrap swaps for blob URLs.
+// anywhere — wiring bare `dartsx` / `dartsx/internal/client` to those blobs.
+// Everything else user code imports resolves through the rewriter's esm.sh
+// URLs. Sibling-file imports arrive as `__pg_module:<name>__` tokens the
+// bootstrap swaps for blob URLs.
 //
 // `allow-forms` lets `<form action={fn}>` demos fire submit events; a real
 // submission navigates only the sandboxed frame itself (opaque origin), same
 // as solid-playground.
 
-/** Where the runtime chunk manifest JSON is served/emitted. */
-export const RUNTIME_MANIFEST_PATH = '/playground-runtime.json';
-
-/**
- * React version pinned into the sandbox import map. Keep aligned with the
- * workspace catalog's `react: ^19.2.0` pin — every map entry uses the SAME
- * version so esm.sh dedupes react/react-dom onto one internal build (the
- * React-host host and user code must share a react singleton).
- */
-export const PLAYGROUND_REACT_VERSION = '19.2.0';
-
-/** Shape of the runtime manifest built by the playgroundRuntime() vite plugin. */
+/** Shape of the runtime manifest built by playgroundRuntime() in vite.config.ts. */
 export interface RuntimeManifest {
-	entries: { dartsx: string; 'dartsx/internal/client': string };
-	order: string[];
+	entries: Record<string, string>;
 	files: Record<string, string>;
 }
 
@@ -128,7 +116,6 @@ const SANDBOX_SHIM = `
 // a CLASSIC script (dynamic import() only) so the import map it writes is
 // guaranteed to precede the first module load.
 const BOOTSTRAP = `
-const REACT_VERSION = ${JSON.stringify(PLAYGROUND_REACT_VERSION)};
 const TOKEN = /__pg_module:([\\w.-]+)__/g;
 const post = (msg) => window.parent.postMessage(msg, '*');
 const errText = (e) => (e instanceof Error && e.message) || String(e);
@@ -230,29 +217,50 @@ window.addEventListener('message', async (event) => {
 
 	if (msg.type === 'init' && !dartsxRuntime && msg.manifest) {
 		try {
-			const { entries, order, files } = msg.manifest;
-			// Blob-ify the runtime chunks dependencies-first, splicing each file's
-			// "./name.mjs" specifiers to the already-created blob URLs.
+			const { entries, files } = msg.manifest;
+			// Blob-ify the runtime chunks in TWO phases so processing order
+			// never matters:
+			//   1. raw blobs — every file gets a URL immediately
+			//   2. spliced blobs — relative specifiers (e.g.
+			//      "../../client-*.js" from the dist layout) are rewritten to
+			//      the RAW URLs, which all already exist
+			// The import map points at the spliced blobs; the raw ones just
+			// stay alive as splice targets. (A single-phase pass would need
+			// dependencies created before dependents — i.e. a topological
+			// sort.)
+			const dirname = (p) => {
+				const i = p.lastIndexOf('/');
+				return i === -1 ? '' : p.slice(0, i);
+			};
+			const normalize = (p) => {
+				const parts = [];
+				for (const seg of p.split('/')) {
+					// Empty segments matter: root-level files have no dir, and
+					// '' + '/' + spec would otherwise produce a leading '/' that
+					// never matches the manifest's keys.
+					if (seg === '..') parts.pop();
+					else if (seg !== '.' && seg !== '') parts.push(seg);
+				}
+				return parts.join('/');
+			};
+			const rawUrls = Object.create(null);
+			for (const name of Object.keys(files)) rawUrls[name] = toBlobUrl(files[name]);
 			const blobs = Object.create(null);
-			for (const name of order) {
-				const code = files[name].replace(/(["'])\\.\\/([\\w.-]+\\.mjs)\\1/g, (m, _q, dep) =>
-					blobs[dep] ? JSON.stringify(blobs[dep]) : m,
-				);
+			for (const name of Object.keys(files)) {
+				const dir = dirname(name);
+				const code = files[name].replace(/(["'])(\\.[^"'\\n]+)\\1/g, (m, _q, spec) => {
+					const target = normalize(dir + '/' + spec);
+					return rawUrls[target] ? JSON.stringify(rawUrls[target]) : m;
+				});
 				blobs[name] = toBlobUrl(code);
 			}
 			// Install the import map BEFORE the first module load (see header).
-			const esm = (path) => 'https://esm.sh/' + path;
 			const map = document.createElement('script');
 			map.type = 'importmap';
 			map.textContent = JSON.stringify({
 				imports: {
 					dartsx: blobs[entries['dartsx']],
 					'dartsx/internal/client': blobs[entries['dartsx/internal/client']],
-					react: esm('react@' + REACT_VERSION),
-					'react/jsx-runtime': esm('react@' + REACT_VERSION + '/jsx-runtime'),
-					'react/jsx-dev-runtime': esm('react@' + REACT_VERSION + '/jsx-dev-runtime'),
-					'react-dom': esm('react-dom@' + REACT_VERSION),
-					'react-dom/client': esm('react-dom@' + REACT_VERSION + '/client'),
 				},
 			});
 			document.head.appendChild(map);
@@ -322,24 +330,7 @@ window.addEventListener('message', async (event) => {
 		teardown();
 		const rootEl = document.getElementById('root');
 		try {
-			if (msg.entryKind === 'react') {
-				// React-host entry (.react.tsx files): mount with the REAL
-				// react-dom from esm.sh.
-				const [React, ReactDOMClient] = await Promise.all([
-					import('react'),
-					import('react-dom/client'),
-				]);
-				if (gen !== generation) return;
-				const reactRoot = ReactDOMClient.createRoot(rootEl, {
-					onUncaughtError: (error) =>
-						post({ type: 'runtime-error', gen: msg.gen, error: errText(error) }),
-					onCaughtError: (error) =>
-						post({ type: 'runtime-error', gen: msg.gen, error: errText(error) }),
-				});
-				reactRoot.render(React.createElement(component));
-			} else {
-				dartsxRuntime.mount(component, rootEl);
-			}
+			dartsxRuntime.mount(component, rootEl);
 		} catch (e) {
 			teardown();
 			post({ type: 'result', gen: msg.gen, error: errText(e) });
