@@ -1,9 +1,10 @@
-// Keeps the TypeScript language session in lockstep with the workspace:
-// document open/change/close bookkeeping (mirrors solid-repl's tab sync —
-// the worker dedupes identical texts, so liberal syncing is cheap), type
-// acquisition for esm.sh externals, and the visitor-editable tsconfig that
-// drives the service's compiler options. Everything no-ops when the session
-// failed to spawn — the playground stays fully usable without it.
+// Keeps the TypeScript worker's PROJECT FILESYSTEM in lockstep with the
+// Workspace: every workspace file is always present server-side, regardless
+// of which tab is active. Content flows via didOpen/didChange; deletion is an
+// explicit playground/removeFile — never textDocument/didClose, which belongs
+// to lsp-client's editor attach/detach lifecycle (tab switches) and must not
+// touch project membership. Everything no-ops when the session failed to
+// spawn — the playground stays fully usable without it.
 import { StateEffect, type Extension, type Transaction } from '@codemirror/state';
 import { linter, lintGutter } from '@codemirror/lint';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
@@ -78,9 +79,12 @@ export class TsDocumentSync {
 		const liveNames = new Set(files.map((file) => file.name));
 		for (const name of [...this.registeredTsSources.keys()]) {
 			if (!liveNames.has(name)) {
+				// Deletion is a project-level event, NOT an LSP didClose —
+				// lsp-client owns didOpen/didClose for editor attach/detach
+				// (tab switches), and the worker keeps project files regardless.
 				session.worker.postMessage({
-					method: 'textDocument/didClose',
-					params: { textDocument: { uri: uriFor(name) } },
+					method: 'playground/removeFile',
+					params: { uri: uriFor(name) },
 				});
 				this.registeredTsSources.delete(name);
 			}
