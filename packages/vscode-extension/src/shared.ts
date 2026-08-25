@@ -1,15 +1,6 @@
-/**
- * DarTsx VS Code Extension — shared activation logic
- *
- * Platform-agnostic pieces used by both the desktop (Node) and web entries.
- * Provides:
- *   - Semantic tokens for DarTsx syntax (component/state/derived/render/bind)
- *   - Status bar indicator
- */
-
 import * as vscode from 'vscode';
 
-export const semanticLegend = new vscode.SemanticTokensLegend([
+const semanticLegend = new vscode.SemanticTokensLegend([
 	'keyword',
 	'function',
 	'variable',
@@ -53,7 +44,7 @@ function addRegexTokens(
 	}
 }
 
-export class DarTsxSemanticTokensProvider implements vscode.DocumentSemanticTokensProvider {
+class DarTsxSemanticTokensProvider implements vscode.DocumentSemanticTokensProvider {
 	provideDocumentSemanticTokens(document: vscode.TextDocument): vscode.ProviderResult<vscode.SemanticTokens> {
 		const text = document.getText();
 		if (!isDarTsxContent(text)) {
@@ -103,7 +94,7 @@ export class DarTsxSemanticTokensProvider implements vscode.DocumentSemanticToke
 	}
 }
 
-export function isSupportedEditor(editor: vscode.TextEditor | undefined): boolean {
+function isSupportedEditor(editor: vscode.TextEditor | undefined): boolean {
 	const languageId = editor?.document.languageId;
 	return languageId === 'typescript'
 		|| languageId === 'typescriptreact'
