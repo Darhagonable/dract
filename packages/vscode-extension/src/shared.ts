@@ -1,17 +1,4 @@
-/**
- * DarTsx VS Code Extension
- *
- * User-facing DarTsx editor support for JS, TS, JSX, and TSX files.
- * Internally this hooks into VS Code's built-in JavaScript/TypeScript service.
- * Provides:
- *   - Syntax highlighting via TextMate grammar injection
- *   - Diagnostics, completions, hover, go-to-definition via the JS/TS language service integration
- */
-
 import * as vscode from 'vscode';
-import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
-
-let client: LanguageClient | undefined;
 
 const semanticLegend = new vscode.SemanticTokensLegend([
 	'keyword',
@@ -115,37 +102,15 @@ function isSupportedEditor(editor: vscode.TextEditor | undefined): boolean {
 		|| languageId === 'javascriptreact';
 }
 
-export function activate(context: vscode.ExtensionContext): void {
-	// Start the Volar language server for CSS features in <style> blocks
-	const serverModule = require.resolve('./server');
-	client = new LanguageClient(
-		'dartsx',
-		'DarTsx Language Server',
-		{
-			run: { module: serverModule, transport: TransportKind.ipc },
-			debug: { module: serverModule, transport: TransportKind.ipc },
-		},
-		{
-			documentSelector: [
-				{ language: 'javascript' },
-				{ language: 'javascriptreact' },
-				{ language: 'typescript' },
-				{ language: 'typescriptreact' },
-			],
-		},
-	);
-	client.start().catch(err => {
-		console.error('[DarTsx] Language server failed to start:', err);
-	});
+const jsSelector: vscode.DocumentSelector = [
+	{ language: 'javascript' },
+	{ language: 'javascriptreact' },
+];
 
-	const selector: vscode.DocumentSelector = [
-		{ language: 'javascript' },
-		{ language: 'javascriptreact' },
-	];
-
+export function registerSharedFeatures(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.languages.registerDocumentSemanticTokensProvider(
-			selector,
+			jsSelector,
 			new DarTsxSemanticTokensProvider(),
 			semanticLegend,
 		),
@@ -170,10 +135,4 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateStatusBar));
 	updateStatusBar(vscode.window.activeTextEditor);
-}
-
-export async function deactivate(): Promise<void> {
-	if (client) {
-		await client.stop();
-	}
 }

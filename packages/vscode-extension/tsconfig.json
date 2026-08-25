@@ -2,14 +2,13 @@
 	"compilerOptions": {
 		"strict": true,
 		"target": "ESNext",
-		"module": "CommonJS",
+		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"declaration": true,
 		"sourceMap": true,
-		"outDir": "dist",
-		"rootDir": "src"
 	},
-	"include": ["src"]
+	"include": ["src", "scripts", "tests"],
+	"exclude": ["tests/fixture"]
 }
