@@ -43,6 +43,8 @@ export interface PreprocessOptions {
 	 * - `typecheck`: uses `satisfies T as T`, blanks styles preserving interpolations
 	 */
 	mode?: 'compiler' | 'typecheck';
+	/** Filename recorded in the generated source map (for remapping chains). */
+	filename?: string;
 }
 
 export interface ComponentMeta {
@@ -83,15 +85,23 @@ export interface PreprocessResult {
 // ── Detection ──────────────────────────────────────────────────────
 
 /**
- * Detect whether a .tsx file contains DarTsx syntax.
+ * Detect whether a source file contains DarTsx syntax.
+ *
+ * Comments and string literals are stripped first so JSDoc, prose strings,
+ * and template literals mentioning `state`/`derived` don't cause false
+ * positives.
  */
 export function isDarTsxFile(content: string): boolean {
-	return /\bcomponent\s+\w+\s*\(/.test(content)
-		|| /\bstate\s+\w+/.test(content)
-		|| /\bderived\s+\w+/.test(content)
-		|| /\bderived\s+[{[]/.test(content)
-		|| /\brender\s*[(<]/.test(content)
-		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(content);
+	const sample = content.replace(
+		/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g,
+		() => '',
+	);
+	return /\bcomponent\s+\w+\s*\(/.test(sample)
+		|| /\bstate\s+\w+/.test(sample)
+		|| /\bderived\s+\w+/.test(sample)
+		|| /\bderived\s+[{[]/.test(sample)
+		|| /\brender\s*[(<]/.test(sample)
+		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
 }
 
 // ── Main entry point ───────────────────────────────────────────────
@@ -123,7 +133,14 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	transformHtmlDirective(ms, source);
 
 	const code = ms.toString();
-	const map = ms.generateMap({ hires: true });
+	// The map must name its source (and include it) or a remapping chain that
+	// resolves through it drops every mapping: an unnamed source resolves to
+	// null and the original positions are discarded as unmapped.
+	const map = ms.generateMap({
+		hires: true,
+		source: options.filename ?? 'input.tsx',
+		includeContent: true,
+	});
 
 	return { code, map, components, stateVars, derivedVars, renamedParams, bindParams, styleBlocks };
 }
