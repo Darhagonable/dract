@@ -414,14 +414,26 @@
 .pg-ast-host .pg-ast-bigint {
 	color: var(--syntax-number, #2f8f46);
 }
-.pg-grid:not(.ready) .cm-editor {
+.pg-grid:not(.ready) .pg-editor > * {
 	opacity: 0;
 }
-.pg-editor .cm-editor {
+.pg-editor {
+	position: relative;
+}
+.pg-editor .monaco-workbench,
+.pg-editor .workbench-part,
+.pg-editor .editor-container,
+.pg-editor .monaco-editor {
 	height: 100%;
 }
+.pg-editor .monaco-workbench {
+	--vscode-sideBar-background: var(--code-bg);
+	--vscode-editor-background: var(--code-bg);
+	--vscode-editorGutter-background: var(--code-bg);
+}
 /* Ranges revealed by source↔output position mapping. */
-.pg-editor .cm-mapped {
+.pg-mapped,
+.pg-editor .pg-mapped {
 	background: rgba(255, 234, 0, 0.42);
 	box-shadow: inset 0 0 0 1px rgba(214, 185, 0, 0.28);
 	border-radius: 2px;
@@ -562,7 +574,7 @@
 		min-width: 0;
 		padding: 0.45rem 0.9rem;
 	}
-	.pg-editor .cm-content,
+	.pg-editor .monaco-scrollable-element,
 	.pg-ast-host .pg-ast-scroll {
 		padding-bottom: 4rem;
 	}
