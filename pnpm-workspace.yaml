@@ -3,6 +3,7 @@ packages:
   - toolkit/*
   - playground
   - website
+  - repl
 
 allowBuilds:
   '@vscode/vsce-sign': true
