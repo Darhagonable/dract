@@ -2,6 +2,9 @@ import { defineProject } from 'vitest/config';
 import dartsx from '@dartsx/vite-plugin';
 
 export default defineProject({
+	resolve: {
+		tsconfigPaths: true,
+	},
 	test: {
 		name: 'dartsx',
 		projects: [

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import dartsx from '../src/index';
+import dartsx from 'index';
+
+/** Plugin hooks are plain functions at runtime; Vite's ObjectHook type just doesn't expose `.call`. */
+function hookCall(hook: object, ctx: unknown, ...args: unknown[]): unknown {
+	return (hook as (...args: unknown[]) => unknown).call(ctx, ...args);
+}
 
 /** Minimal context for `buildStart`: resolve is captured by the Project host. */
 function buildStartCtx(resolve: (specifier: string) => unknown, input: unknown) {
@@ -14,9 +19,9 @@ function buildStartCtx(resolve: (specifier: string) => unknown, input: unknown) 
 describe('dartsx vite plugin', () => {
 	it('transforms DarTsx JSX files in JavaScript projects', async () => {
 		const plugin = dartsx();
-		await plugin.buildStart!.call(buildStartCtx(() => null, undefined));
+		await hookCall(plugin.buildStart!, buildStartCtx(() => null, undefined));
 
-		const result = await plugin.transform!.call({
+		const result = await hookCall(plugin.transform!, {
 			environment: { mode: 'build' },
 		}, 'export default component Counter() { render (<div>Hello</div>) }', '/src/Counter.jsx');
 
@@ -27,9 +32,9 @@ describe('dartsx vite plugin', () => {
 
 	it('ignores plain JavaScript files without DarTsx syntax', async () => {
 		const plugin = dartsx();
-		await plugin.buildStart!.call(buildStartCtx(() => null, undefined));
+		await hookCall(plugin.buildStart!, buildStartCtx(() => null, undefined));
 
-		const result = await plugin.transform!.call({
+		const result = await hookCall(plugin.transform!, {
 			environment: { mode: 'build' },
 		}, 'export const count = 1;', '/src/plain.js');
 
@@ -45,13 +50,14 @@ describe('dartsx vite plugin', () => {
 			invalidateModule,
 		};
 
-		await plugin.buildStart!.call(
+		await hookCall(
+			plugin.buildStart!,
 			buildStartCtx(() => ({ id: formatId }), undefined),
 		);
 
 		const appSource = `import { formatCount } from './format'\n\nexport component App() {\nstate count = 0;\nrender (<p>{formatCount(count)}</p>)\n}`;
 
-		const result = await plugin.transform!.call({
+		const result = await hookCall(plugin.transform!, {
 			environment: { mode: 'dev', moduleGraph },
 		}, appSource, '/src/App.tsx');
 

@@ -9,8 +9,11 @@
 		"declaration": true,
 		"sourceMap": true,
 		"outDir": "dist",
-		"rootDir": "src",
-		"types": ["node"]
+		"rootDir": ".",
+		"types": ["node"],
+		"paths": {
+			"*": ["./src/*"]
+		}
 	},
-	"include": ["src"]
+	"include": ["src", "tests/*.test.ts"]
 }

@@ -20,8 +20,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { preprocess } from '../../src/compiler/phases/1-preprocess/index.js';
-import { lex } from '../../src/compiler/phases/1-preprocess/lexer.js';
+import { preprocess } from 'compiler/phases/1-preprocess';
+import { lex } from 'compiler/phases/1-preprocess/lexer';
 
 const DIR = join(__dirname, 'preprocessor');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;

@@ -12,8 +12,12 @@
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true,
 		"outDir": "dist",
-		"rootDir": "src",
+		"rootDir": ".",
+		"paths": {
+			"*": ["./src/*"]
+		},
+		"types": ["node"],
 		"composite": true
 	},
-	"include": ["src"]
+	"include": ["src", "tests/**/*.test.ts"]
 }
