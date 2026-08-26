@@ -1,6 +1,6 @@
 // The right panel: a live-preview mode (sandboxed iframe + the shared-code
 // consent gate) and a compiled mode (Client/Server/Types artifact as code or
-// an AST tree). The CodeMirror output editor and the AST tree are mounted into
+// an AST tree). The Monaco output editor and the AST tree are mounted into
 // their host divs by the engine's boot effect (see use-playground.ts).
 import type { RefObject } from 'react';
 import { cx } from '../utils/cx.ts';

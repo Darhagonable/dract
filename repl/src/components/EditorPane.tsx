@@ -1,6 +1,7 @@
 // The left panel: the file tab strip (with its add button and loading hint)
-// above the CodeMirror source editor host. The editor itself is mounted into
-// the host div by the engine's boot effect (see use-playground.ts).
+// above the embedded VS Code workbench hosting the source editor. The
+// workbench is mounted into the host div by the engine's boot effect (see
+// use-playground.ts).
 import type { MutableRefObject, RefObject } from 'react';
 import { cx } from '../utils/cx.ts';
 import { FileTabs } from './FileTabs.tsx';
