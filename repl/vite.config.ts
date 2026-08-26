@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite';
+import vsixPlugin from '@codingame/monaco-vscode-rollup-vsix-plugin';
 import { createRequire } from 'node:module';
 import { build as esbuildBuild } from 'esbuild';
 
@@ -112,10 +113,6 @@ function playgroundRuntime(): Plugin {
 // the dartsx compiler's transitive deps — dartsx itself is excluded below)
 // are pre-declared so no optimize pass runs mid-session.
 const PREBUNDLED = [
-	'@codemirror/commands',
-	'@codemirror/state',
-	'@codemirror/view',
-	'shiki',
 	'esrap',
 	'esrap/languages/tsx',
 	'es-module-lexer',
@@ -126,14 +123,25 @@ const PREBUNDLED = [
 ];
 
 export default defineConfig({
-	plugins: [playgroundRuntime()],
+	plugins: [
+		playgroundRuntime(),
+		// Vite and the VSIX rollup plugin can resolve different Rollup type
+		// versions; runtime is compatible, only hook context types clash.
+		vsixPlugin() as unknown as Plugin,
+	],
+
+	worker: {
+		format: 'es',
+	},
 
 	optimizeDeps: {
 		// The dartsx compiler resolves oxc-parser/oxc-transform through their
 		// browser fields to WASM bindings (fetched .wasm assets + a worker), so
 		// those packages — and the bindings themselves — must reach the browser
 		// raw instead of being esbuild-prebundled. dartsx is excluded with them
-		// so the whole compiler graph keeps its browser resolution.
+		// so the whole compiler graph keeps its browser resolution. The
+		// monaco-vscode packages stay out entirely: their workers and service
+		// wiring break when esbuild prebundles them.
 		exclude: [
 			'dartsx',
 			'oxc-parser',
@@ -141,6 +149,18 @@ export default defineConfig({
 			'@oxc-parser/binding-wasm32-wasi',
 			'@oxc-transform/binding-wasm32-wasi',
 			'@napi-rs/wasm-runtime',
+			'monaco-editor',
+			'vscode',
+			'@codingame/monaco-vscode-api',
+			'@codingame/monaco-editor-wrapper',
+			'@codingame/monaco-vscode-base-service-override',
+			'@codingame/monaco-vscode-files-service-override',
+			'@codingame/monaco-vscode-languages-service-override',
+			'@codingame/monaco-vscode-search-service-override',
+			'@codingame/monaco-vscode-textmate-service-override',
+			'@codingame/monaco-vscode-theme-defaults-default-extension',
+			'@codingame/monaco-vscode-json-default-extension',
+			'@codingame/monaco-vscode-typescript-basics-default-extension',
 		],
 		include: PREBUNDLED,
 	},

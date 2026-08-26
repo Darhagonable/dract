@@ -1,16 +1,21 @@
 // The playground engine: owns every piece of interactive state and the
-// imperative editor stack (CodeMirror, the compile pipeline, the sandboxed
-// preview, and the source↔output mapping). All of it boots once, in an
-// effect, via dynamic imports — so SSR renders just the static shell and
-// hydration stays clean. The components read state from this hook and drive
-// the engine through the `controller` (see PlaygroundController).
+// imperative editor stack (the embedded VS Code workbench, the compile
+// pipeline, the sandboxed preview, and the source↔output mapping). All of it
+// boots once, in an effect, via dynamic imports — so SSR renders just the
+// static shell and hydration stays clean. The components read state from this
+// hook and drive the engine through the `controller` (see PlaygroundController).
 //
-// The whole pipeline runs in the browser: the `dartsx` compiler (oxc-parser/
-// oxc-transform WASM bindings + esrap — no Node APIs) compiles the virtual
-// files on a debounce, the module graph executes inside a SANDBOXED IFRAME
-// with an opaque origin (see src/utils/playground.ts + playground-modules.ts +
-// playground-sandbox.ts — never in this page), and CodeMirror highlights
-// through Shiki with the bundled TSX grammar (src/utils/shiki-codemirror.ts).
+// The source editor is a real VS Code workbench running the DarTsx extension's
+// built .vsix in a browser extension host (see src/utils/workbench.ts) — the
+// same code desktop VS Code runs provides grammar highlighting, semantic
+// tokens, and diagnostics. The compiled-output editor is a plain Monaco editor
+// sharing the same services and theme.
+//
+// The whole pipeline still runs in the browser: the `dartsx` compiler (oxc-
+// parser/oxc-transform WASM bindings + esrap — no Node APIs) compiles the
+// virtual files on a debounce, the module graph executes inside a SANDBOXED
+// IFRAME with an opaque origin (see src/utils/playground.ts +
+// playground-modules.ts + playground-sandbox.ts — never in this page).
 //
 // Shared links are UNTRUSTED input: a hash payload is decoded into the editor
 // and compiled (source + compiled output are safe to display — compilation is
@@ -266,13 +271,16 @@ export function usePlayground(): PlaygroundEngine {
 		if (!sourceHost || !outputHost || !astHost || !previewHost) return;
 
 		let disposed = false;
-		let sourceView: any;
-		let outputView: any;
-		let astPreview: any;
+		let workbench: any = null;
+		let monacoApi: any = null;
+		let outputEditor: any = null;
+		let outputModel: any = null;
+		let astPreview: any = null;
 		let preview: any = null;
 		let compileDebounceId = 0;
 		let hashDebounceId = 0;
-		// Validate the URL payload before loading CodeMirror, Shiki, or the
+		let themeObserver: MutationObserver | null = null;
+		// Validate the URL payload before loading the workbench or the
 		// compiler. Oversized input is ignored in favor of the bounded defaults.
 		const rawHash = window.location.hash.slice(1);
 		const hashResult = decodePlaygroundHash(rawHash);
@@ -281,13 +289,10 @@ export function usePlayground(): PlaygroundEngine {
 		if (initialDiagnostic) setError(initialDiagnostic);
 
 		(async () => {
-			let stateMod: any, commandsMod: any, viewMod: any, shikiMod: any, pg: any, pgModules: any, pgAst: any, pgMapping: any;
+			let wbMod: any, pg: any, pgModules: any, pgAst: any, pgMapping: any;
 			try {
-				[stateMod, commandsMod, viewMod, shikiMod, pg, pgModules, pgAst, pgMapping] = await Promise.all([
-					import('@codemirror/state'),
-					import('@codemirror/commands'),
-					import('@codemirror/view'),
-					import('./shiki-codemirror.ts'),
+				[wbMod, pg, pgModules, pgAst, pgMapping] = await Promise.all([
+					import('./workbench.ts'),
 					import('./playground.ts'),
 					import('./playground-modules.ts'),
 					import('./playground-ast.ts'),
@@ -302,18 +307,7 @@ export function usePlayground(): PlaygroundEngine {
 				return;
 			}
 			if (disposed) return;
-
-			const { EditorState, Compartment, StateEffect, StateField } = stateMod;
-			const { history, defaultKeymap, historyKeymap, indentWithTab } = commandsMod;
-			const {
-				EditorView,
-				keymap,
-				lineNumbers,
-				highlightActiveLine,
-				drawSelection,
-				Decoration,
-			} = viewMod;
-			const { shikiHighlight } = shikiMod;
+			const monaco = wbMod.monaco;
 
 			type Workspace = { files: { name: string; source: string }[]; entry: string };
 
@@ -380,43 +374,128 @@ export function usePlayground(): PlaygroundEngine {
 				setEntryFile(workspace.entry);
 			};
 
-			// Theme-variable canvas: the same custom properties the rest of the
-			// site swaps per `data-theme`, so both editors follow the ThemeToggle
-			// live (token colors flip through the dual-theme .cm-shiki rules).
-			const sharedTheme = EditorView.theme({
-				'&': {
-					height: '100%',
-					backgroundColor: 'var(--code-bg)',
-					color: 'var(--text)',
-					fontSize: '0.85rem',
-				},
-				'.cm-scroller': {
-					overflow: 'auto',
-					fontFamily: 'ui-monospace, SFMono-Regular, \'SF Mono\', Menlo, Consolas, \'Liberation Mono\', monospace',
-				},
-				'.cm-content': { padding: '1rem 0.25rem 1.25rem' },
-				'.cm-gutters': {
-					backgroundColor: 'var(--code-bg)',
-					color: 'var(--text-secondary)',
-					border: 'none',
-					opacity: '0.7',
-				},
-				'.cm-activeLine, .cm-activeLineGutter': {
-					backgroundColor: 'var(--surface)',
-				},
-				'.cm-selectionBackground': {
-					backgroundColor: 'rgba(56, 139, 253, 0.35) !important',
-				},
-				'.cm-cursor': { borderLeftColor: 'var(--text)' },
-			});
-
 			preview = pg.createPreview(previewHost, (message: string) => {
 				if (!disposed) setError(message);
 			}, devtoolsHostRef.current);
 
-			const replaceDoc = (view: any, doc: string) => {
-				view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } });
+			const OUTPUT_PLACEHOLDER = '// Compiled output appears here.';
+
+			// ── Workbench + editors ──────────────────────────────────────────
+			// The workbench boots ONCE per page (VS Code services are singletons),
+			// so a remount reuses it; the output editor is ours and disposed with
+			// the effect.
+			const currentThemeIsDark = () =>
+				document.documentElement.getAttribute('data-theme') !== 'light';
+
+			// While the engine applies bulk workspace updates (example switches,
+			// renames), document-change events from those writes must not feed
+			// back into compile/hash scheduling.
+			let applyingWorkspace = false;
+			// Last content accepted under the workspace size limit, per file —
+			// an over-limit edit is reverted to this instead of being blocked
+			// pre-transaction (Monaco notifies after the fact, unlike CodeMirror's
+			// change filters).
+			const lastGood = new Map<string, string>();
+
+			const handleDocumentChanged = (name: string, text: string) => {
+				if (applyingWorkspace || disposed) return;
+				const others = workspace.files.reduce(
+					(sum: number, file: { name: string; source: string }) => file.name === name
+						? sum
+						: sum + file.source.length,
+					0,
+				);
+				if (others + text.length > MAX_PLAYGROUND_SOURCE_LENGTH) {
+					setError(PLAYGROUND_SOURCE_LIMIT_ERROR);
+					const model = monaco.editor.getModel(wbMod.projectUri(name));
+					const good = lastGood.get(name);
+					if (model && good != null && model.getValue() !== good) model.setValue(good);
+					return;
+				}
+				lastGood.set(name, text);
+				// The source half of the pair changed — orphan any marks still
+				// shown in either editor.
+				clearMappedPair();
+				if (resultModeRef.current.mode === 'ast') {
+					astPreview.setUnavailable('Waiting for the next successful compile…', currentFile);
+					lastShownAst = null;
+				}
+				const file = workspace.files.find(
+					(candidate: { name: string }) => candidate.name === name,
+				);
+				if (file) file.source = text;
+				// Any edit means the buffer no longer matches the example.
+				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
+					currentExampleId = CUSTOM_EXAMPLE_ID;
+					setExampleId(CUSTOM_EXAMPLE_ID);
+				}
+				scheduleCompile();
+				updateHash();
 			};
+
+			workbench = await wbMod.bootWorkbench({
+				container: sourceHost,
+				files: workspace.files,
+				entry: workspace.entry,
+				dark: currentThemeIsDark(),
+				onDocumentChanged: handleDocumentChanged,
+			});
+			monacoApi = wbMod.monaco;
+			if (disposed) return;
+
+			themeObserver = new MutationObserver(() => {
+				workbench.setTheme(currentThemeIsDark());
+			});
+			themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+			// The compiled-output editor: a plain Monaco editor sharing the
+			// workbench's theme/tokenization services.
+			outputModel = monaco.editor.createModel(
+				OUTPUT_PLACEHOLDER,
+				'typescript',
+				monaco.Uri.parse('dartsx-output:/client'),
+			);
+			outputEditor = monaco.editor.create(outputHost, {
+				model: outputModel,
+				readOnly: true,
+				lineNumbers: 'on',
+				minimap: { enabled: false },
+				wordWrap: 'on',
+				scrollBeyondLastLine: false,
+				automaticLayout: true,
+				renderLineHighlight: 'none',
+			});
+
+			// ── Source ↔ output position mapping ─────────────────────────────
+			// Placing the cursor in one editor highlights and reveals the mapped
+			// ranges in the other (see playground-mapping.ts for the semantics).
+			// Marks belong to the exact (source doc, output doc) PAIR they were
+			// computed against, so a change to either side clears BOTH editors.
+			const decorationsByEditor = new Map<any, any>();
+			const decorationsFor = (target: any) => {
+				let collection = decorationsByEditor.get(target);
+				if (!collection) {
+					collection = target.createDecorationsCollection([]);
+					decorationsByEditor.set(target, collection);
+				}
+				return collection;
+			};
+			const clearMappedIn = (target: any) => {
+				if (!target) return;
+				decorationsFor(target).set([]);
+			};
+
+			// The exact string the output editor currently displays. The output
+			// model is read-only and written ONLY here, so this makes both the
+			// refresh no-op check and activeMapping's staleness check a string
+			// reference compare instead of an O(doc) getValue per call.
+			let lastShownOutput = OUTPUT_PLACEHOLDER;
+			// The entry + target that produced the current document — the
+			// mapping owner for whatever the output editor displays, so per-cursor
+			// lookups never re-derive which pipeline/target the pane is on.
+			let lastShownEntry: { entry: CodeEntry; target: PlaygroundOutputTarget } | null = null;
+			// The AST currently shown, with the source it was built from.
+			let lastShownAst: { ast: unknown; source: string } | null = null;
 
 			// One compile per (file, target) feeds the compiled pane. The preview's
 			// module graph compiles through the same Project (see
@@ -493,8 +572,6 @@ export function usePlayground(): PlaygroundEngine {
 				return entry;
 			};
 
-			const OUTPUT_PLACEHOLDER = '// Compiled output appears here.';
-
 			// Server/Types have no emit yet — the code pane shows a status line
 			// and there is nothing to inspect. The AST pane gets an empty tree.
 			const placeholderEntry = (code: string): CodeEntry => ({
@@ -504,63 +581,6 @@ export function usePlayground(): PlaygroundEngine {
 				map: null,
 				error: null,
 			});
-
-			// ── Source ↔ output position mapping ─────────────────────────────
-			// Placing the cursor in one editor highlights and reveals the mapped
-			// ranges in the other (see playground-mapping.ts for the semantics).
-			// Marks are only valid for the exact (source doc, output doc) PAIR
-			// they were computed against, so a change to either side must clear
-			// BOTH editors: each field self-clears on its own doc change, and
-			// clearMappedIn handles the cross-editor half (a source edit leaves
-			// output marks orphaned — visibly so when a broken edit means no
-			// recompile ever replaces the output doc — and setState doc swaps
-			// produce no transaction at all).
-			const setMapped = StateEffect.define();
-			const mappedMark = Decoration.mark({ class: 'cm-mapped' });
-			const mappedField = StateField.define({
-				create: () => Decoration.none,
-				update(value: any, tr: any) {
-					for (const effect of tr.effects) if (effect.is(setMapped)) return effect.value;
-					// Any edit (or an output refresh) invalidates the offsets.
-					return tr.docChanged ? Decoration.none : value;
-				},
-				provide: (field: any) => EditorView.decorations.from(field),
-			});
-			// Per-keystroke safe: one O(1) field-size read, and a transaction is
-			// dispatched only when marks actually exist to clear.
-			const clearMappedIn = (targetView: any) => {
-				if (targetView.state.field(mappedField, false)?.size) {
-					targetView.dispatch({ effects: setMapped.of(Decoration.none) });
-				}
-			};
-			// Does the view already show exactly `ranges` (sorted, as the mapping
-			// and AST paths produce them)?
-			const sameMarks = (targetView: any, ranges: { from: number; to: number }[]) => {
-				const current = targetView.state.field(mappedField, false);
-				if (!current || current.size !== ranges.length) return false;
-				let index = 0;
-				let same = true;
-				current.between(0, targetView.state.doc.length, (from: number, to: number) => {
-					const range = ranges[index++];
-					if (!range || range.from !== from || range.to !== to) {
-						same = false;
-						return false;
-					}
-				});
-				return same && index === ranges.length;
-			};
-
-			// The exact string the output editor currently displays. The output
-			// view is read-only and written ONLY here, so this makes both the
-			// refresh no-op check and activeMapping's staleness check a string
-			// reference compare instead of an O(doc) toString per call.
-			let lastShownOutput = OUTPUT_PLACEHOLDER;
-			// The entry + target that produced the current document — the
-			// mapping owner for whatever the output editor displays, so per-cursor
-			// lookups never re-derive which pipeline/target the pane is on.
-			let lastShownEntry: { entry: CodeEntry; target: PlaygroundOutputTarget } | null = null;
-			// The AST currently shown, with the source it was built from.
-			let lastShownAst: { ast: unknown; source: string } | null = null;
 
 			// Built once per (entry, target) and cached on the entry, so a
 			// mousemove stream costs one property read.
@@ -590,52 +610,62 @@ export function usePlayground(): PlaygroundEngine {
 				return lastShownAst?.source === fileSource(currentFile) ? lastShownAst : null;
 			};
 
+			// Offset → Range clamped to the model; invalid ranges drop out.
+			const rangesFor = (model: any, ranges: { from: number; to: number }[]) => {
+				const limit = model.getValueLength();
+				const out: { range: any; offset: number }[] = [];
+				for (const range of ranges) {
+					const to = Math.min(range.to, limit);
+					if (range.from >= 0 && range.from < to) {
+						out.push({
+							range: new monaco.Range(
+								model.getPositionAt(range.from),
+								model.getPositionAt(to),
+							),
+							offset: range.from,
+						});
+					}
+				}
+				return out;
+			};
+
 			const revealRanges = (
-				targetView: any,
+				target: any,
 				ranges: { from: number; to: number }[],
 				scroll: boolean,
 			) => {
-				const limit = targetView.state.doc.length;
-				const clamped = ranges.map(
-					(range: { from: number; to: number }) => ({
-						from: range.from,
-						to: Math.min(range.to, limit),
-					}),
-				).filter((range: { from: number; to: number }) => range.from >= 0 && range.from < range.to);
-				if (clamped.length === 0) {
+				if (!target) return;
+				const model = target.getModel();
+				if (!model) return;
+				const mapped = rangesFor(model, ranges);
+				if (mapped.length === 0) {
 					// Same contract as an unmapped position: no lingering marks.
-					clearMappedIn(targetView);
+					clearMappedIn(target);
 					return;
 				}
-				// A pointer stream re-resolves the SAME ranges for most of its
-				// samples. The field is the single source of truth (it self-clears
-				// on any doc change), so comparing against it is always safe and
-				// costs one pass over the handful of ranges shown.
-				if (!scroll && sameMarks(targetView, clamped)) return;
-				const effects = [
-					setMapped.of(
-						Decoration.set(
-							clamped.map(
-								(range: { from: number; to: number }) => mappedMark.range(range.from, range.to),
-							),
-						),
-					),
-				];
+				decorationsFor(target).set(
+					mapped.map(({ range }) => ({ range, options: { className: 'pg-mapped' } })),
+				);
 				// Jump to the DEFINITION when one of the mapped ranges is a declared
 				// name: a directive arm maps both to `function __case$0(…)` and to
 				// where that name is handed to the runtime, and the implementation is
 				// what you want to read. Every range still gets a mark either way.
 				if (scroll) {
-					const declared =
-						clamped.find(
-							(range: { from: number; to: number }) => DECLARATION_BEFORE.test(
-								targetView.state.doc.sliceString(Math.max(0, range.from - 12), range.from),
-							),
-						) ??
-							clamped[0];
-					effects.push(EditorView.scrollIntoView(declared.from, { y: 'center' }));
+					const textBefore = (offset: number) => {
+						const start = model.getPositionAt(Math.max(0, offset - 12));
+						const end = model.getPositionAt(offset);
+						return model.getValueInRange({
+							startLineNumber: start.lineNumber,
+							startColumn: start.column,
+							endLineNumber: end.lineNumber,
+							endColumn: end.column,
+						});
+					};
+					const preferred =
+						mapped.find(({ offset }) => DECLARATION_BEFORE.test(textBefore(offset)))
+							?? mapped[0];
+					target.revealRangeInCenter(preferred.range);
 				}
-				targetView.dispatch({ effects });
 			};
 
 			const mappedPair = (side: 'source' | 'output', offset: number) => {
@@ -645,9 +675,10 @@ export function usePlayground(): PlaygroundEngine {
 					? mapping.pairFromSource(offset)
 					: mapping.pairFromGenerated(offset);
 			};
+			const sourceEditor = () => workbench.getActiveEditor() as any;
 			const clearMappedPair = () => {
-				clearMappedIn(sourceView);
-				clearMappedIn(outputView);
+				clearMappedIn(sourceEditor());
+				clearMappedIn(outputEditor);
 			};
 			const revealPair = (
 				pair: { source: { from: number; to: number }[]; output: { from: number; to: number }[] },
@@ -657,8 +688,8 @@ export function usePlayground(): PlaygroundEngine {
 				// other pane somewhere. Hover marks in place and never steals scroll,
 				// so a mapped range far from the hovered line is marked but stays
 				// where it is until you click.
-				revealRanges(sourceView, pair.source, scrollSide === 'source');
-				revealRanges(outputView, pair.output, scrollSide === 'output');
+				revealRanges(sourceEditor(), pair.source, scrollSide === 'source');
+				revealRanges(outputEditor, pair.output, scrollSide === 'output');
 			};
 			const revealAstRange = (range: { from: number; to: number } | null, scroll: boolean) => {
 				if (resultModeRef.current.mode !== 'ast') return;
@@ -666,61 +697,84 @@ export function usePlayground(): PlaygroundEngine {
 					clearMappedPair();
 					return;
 				}
-				clearMappedIn(outputView);
-				revealRanges(sourceView, [range], scroll);
+				clearMappedIn(outputEditor);
+				revealRanges(sourceEditor(), [range], scroll);
 			};
 
 			astPreview = pgAst.createAstPreview(astHost, {
 				onNodeRange: revealAstRange,
 			});
 
-			const crossNavigate = (side: 'source' | 'output') => EditorView.updateListener.of((
-				update: any,
-			) => {
-				if (!update.selectionSet || update.docChanged) return;
-				// Only user-driven cursor moves navigate — programmatic dispatches
-				// (doc replacement, highlight effects) must not feed back.
-				if (!update.transactions.some((tr: any) => tr.isUserEvent('select'))) return;
-				if (resultModeRef.current.view !== 'compiled') return;
-				const offset = update.state.selection.main.head;
-				if (resultModeRef.current.mode === 'ast') {
-					if (activeAstEntry()) astPreview.reveal(offset, true);
-					return;
-				}
-				const pair = mappedPair(side, offset);
-				// Marks reflect the CURRENT selection — an unmapped one clears.
-				if (pair) revealPair(pair, side === 'source' ? 'output' : 'source');
-				else clearMappedPair();
-			});
+			// Which side of the pair does this editor hold? Project files are the
+			// source half; our dedicated output model is the other.
+			const sideOf = (target: any): 'source' | 'output' | null => {
+				const model = target.getModel();
+				if (!model) return null;
+				if (model === outputModel) return 'output';
+				return wbMod.projectName(model.uri) ? 'source' : null;
+			};
 
-			// Hovering either document highlights the corresponding ranges without moving its scroll
-			// position; clicking/cursor movement above additionally reveals them.
-			const crossHover = (side: 'source' | 'output') => EditorView.domEventObservers({
-				mousemove(event: MouseEvent, view: any) {
+			// Hovering either document highlights the corresponding ranges without
+			// moving its scroll position; clicking/cursor movement above
+			// additionally reveals them. Listeners attach per editor control; the
+			// side is derived from the current model, so file switches need no
+			// rewiring.
+			const wiredEditors = new WeakSet<object>();
+			const wireEditor = (target: any) => {
+				if (!target || wiredEditors.has(target)) return;
+				wiredEditors.add(target);
+
+				target.onMouseMove((event: any) => {
 					if (resultModeRef.current.view !== 'compiled') return;
-					const offset = view.posAtCoords({ x: event.clientX, y: event.clientY });
+					const side = sideOf(target);
+					if (!side) return;
+					const model = target.getModel();
+					const position = event.target?.position;
+					if (!position) return;
+					const offset = model.getOffsetAt(position);
 					if (resultModeRef.current.mode === 'ast') {
-						if (offset == null || !activeAstEntry()) clearMappedPair();
+						if (!activeAstEntry()) clearMappedPair();
 						else astPreview.reveal(offset, false);
 						return;
 					}
-					const pair =
-						offset == null ? null : mappedPair(side, offset);
+					const pair = mappedPair(side, offset);
 					if (pair) revealPair(pair, null);
 					else clearMappedPair();
-				},
-				mouseleave() {
+				});
+				target.onMouseLeave(() => {
 					// The browser can deliver mouseleave before the mobile pane's
 					// display:none reaches layout. The synchronous pane ref makes
 					// that stale event harmless from the instant Inspect is clicked.
+					const side = sideOf(target);
 					if (
 						side === 'source' && paneRef.current === 'result' &&
 							window.matchMedia('(max-width: 980px)').matches
 					) return;
 					clearMappedPair();
 					astPreview.clear();
-				},
-			});
+				});
+				// Only user-driven cursor moves navigate — programmatic ones
+				// (reveals, doc replacement) must not feed back. Monaco exposes the
+				// reason; NotSet covers the programmatic bulk.
+				target.onDidChangeCursorPosition((event: any) => {
+					if (event.reason === monaco.editor.CursorChangeReason.NotSet) return;
+					if (resultModeRef.current.view !== 'compiled') return;
+					const side = sideOf(target);
+					if (!side) return;
+					const model = target.getModel();
+					const offset = model.getOffsetAt(event.position);
+					if (resultModeRef.current.mode === 'ast') {
+						if (activeAstEntry()) astPreview.reveal(offset, true);
+						return;
+					}
+					const pair = mappedPair(side, offset);
+					// Marks reflect the CURRENT selection — an unmapped one clears.
+					if (pair) revealPair(pair, side === 'source' ? 'output' : 'source');
+					else clearMappedPair();
+				});
+			};
+			monaco.editor.onDidCreateEditor(wireEditor);
+			for (const candidate of monaco.editor.getEditors()) wireEditor(candidate);
 
 			const astEntry = (): { ast: unknown; source: string; label: string; notice: string; error: string | null } | null => {
 				const target = resultModeRef.current.target;
@@ -751,10 +805,9 @@ export function usePlayground(): PlaygroundEngine {
 			};
 
 			const showOutput = (): string | null => {
-				// The compiled pane is not visible: skip entirely — no types
-				// generation, no doc replacement, and (the dominant cost) no Shiki
-				// re-tokenize of the output document. syncOutput re-runs this when
-				// the pane is revealed, so it refreshes exactly once, on demand.
+				// The compiled pane is not visible: skip entirely. syncOutput re-runs
+				// this when the pane is revealed, so it refreshes exactly once, on
+				// demand.
 				if (resultModeRef.current.view !== 'compiled') return null;
 				if (resultModeRef.current.mode === 'ast') {
 					const target = resultModeRef.current.target;
@@ -795,16 +848,9 @@ export function usePlayground(): PlaygroundEngine {
 				// between them clears the pair even when the cached document
 				// needs no replacement.
 				//
-				// A refresh that lands on the SAME artifact must leave marks alone.
-				// This runs from compileAndRun AFTER its awaited buildModuleGraph, so
-				// the initial compile completes a few hundred ms after the pane is
-				// interactive — long enough for a pointer to be resting on a mapped
-				// keyword. Clearing unconditionally wiped that highlight while the
-				// pointer never moved, and mousemove is the only thing that restores
-				// it, so the mark stayed gone until the reader jiggled the mouse.
-				// Identity is the conservative test: entries are cached per (file,
-				// target, source), and any miss yields a fresh object that falls back
-				// to clearing.
+				// A refresh that lands on the SAME artifact must leave marks alone:
+				// identity is the conservative test (entries are cached per
+				// (file, target, source); any miss yields a fresh object).
 				const sameArtifact = output === lastShownEntry?.entry && code === lastShownOutput;
 				if (!sameArtifact) {
 					clearMappedPair();
@@ -814,12 +860,20 @@ export function usePlayground(): PlaygroundEngine {
 				setError(output.error || lastGraphError);
 				lastShownEntry = { entry: output, target };
 				if (typeof code !== 'string' || code === lastShownOutput) return output.error;
-				replaceDoc(outputView, code);
+				applyingWorkspace = true;
+				try {
+					outputModel.setValue(code);
+					monaco.editor.setModelLanguage?.(
+						outputModel,
+						isTsconfigFile(currentFile) ? 'json' : 'typescript',
+					);
+				} finally {
+					applyingWorkspace = false;
+				}
 				lastShownOutput = code;
 				// The output half of the pair changed — source marks were computed
-				// against the previous artifact (the output field self-cleared via
-				// its own doc change just now).
-				clearMappedIn(sourceView);
+				// against the previous artifact.
+				clearMappedIn(sourceEditor());
 				return output.error;
 			};
 
@@ -892,115 +946,46 @@ export function usePlayground(): PlaygroundEngine {
 				}, HASH_DEBOUNCE_MS);
 			};
 
-			// One writable EditorView; each file keeps its own EditorState (undo
-			// history included), keyed per file.
-			const editorStates = new Map<string, any>();
-			const stateKey = (name: string) => name;
+			// Reflect a full workspace replacement (example switch) in the FS and
+			// models: update surviving documents, register newcomers, delete the
+			// rest. Undo history resets here deliberately — the original engine
+			// also dropped per-file states on an example switch.
+			const syncWorkbenchToWorkspace = async () => {
+				applyingWorkspace = true;
+				try {
+					const nextNames = new Set(workspace.files.map((f: { name: string }) => f.name));
+					for (const file of workspace.files) {
+						registerWorkspaceFile(file.name, file.source);
+						lastGood.set(file.name, file.source);
+						const model = monaco.editor.getModel(projectUri(file.name));
+						if (model && model.getValue() !== file.source) model.setValue(file.source);
+					}
+					for (const model of monaco.editor.getModels()) {
+						const name = projectName(model.uri);
+						if (name && !nextNames.has(name)) model.dispose();
+					}
+					for (const name of [...wbMod.registeredNames]) {
+						if (!nextNames.has(name)) wbMod.unregisterWorkspaceFile(name);
+					}
+				} finally {
+					applyingWorkspace = false;
+				}
+			};
 
-			const makeEditorState = (name: string, doc: string) => EditorState.create({
-				doc,
-				extensions: [
-					EditorState.changeFilter.of((transaction: any) => {
-						if (!transaction.docChanged) return true;
-						const others = workspace.files.reduce(
-							(sum: number, file: { name: string; source: string }) => file.name === currentFile
-								? sum
-								: sum + file.source.length,
-							0,
-						);
-						if (others + transaction.newDoc.length <= MAX_PLAYGROUND_SOURCE_LENGTH) {
-							return true;
-						}
-						setError(PLAYGROUND_SOURCE_LIMIT_ERROR);
-						return false;
-					}),
-					lineNumbers(),
-					history(),
-					drawSelection(),
-					highlightActiveLine(),
-					keymap.of([
-						{
-							key: 'Mod-Shift-f',
-							run: () => {
-								controllerRef.current.formatActive?.();
-								return true;
-							},
-						},
-						...defaultKeymap,
-						...historyKeymap,
-						indentWithTab,
-					]),
-					EditorView.lineWrapping,
-					EditorState.tabSize.of(2),
-					// JSON files (the workspace tsconfig) get Shiki's json grammar;
-					// everything else highlights as tsx. Each file owns its EditorState,
-					// so the language is fixed per state, not per editor.
-					shikiHighlight(currentFile.endsWith('.json') ? 'json' : 'tsx'),
-					sharedTheme,
-					mappedField,
-					crossHover('source'),
-					crossNavigate('source'),
-					EditorView.updateListener.of((update: any) => {
-						if (!update.docChanged) return;
-						// The source half of the pair changed — orphan any marks still
-						// shown in the output (this field self-clears; a failed
-						// recompile would otherwise leave the output's marks forever).
-						clearMappedIn(outputView);
-						if (resultModeRef.current.mode === 'ast') {
-							astPreview.setUnavailable('Waiting for the next successful compile…', currentFile);
-							lastShownAst = null;
-						}
-						const next = update.state.doc.toString();
-						const file = workspace.files.find(
-							(candidate: { name: string }) => candidate.name === currentFile,
-						);
-						if (file) file.source = next;
-						// Any edit means the buffer no longer matches the example.
-						if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
-							currentExampleId = CUSTOM_EXAMPLE_ID;
-							setExampleId(CUSTOM_EXAMPLE_ID);
-						}
-						scheduleCompile();
-						updateHash();
-					}),
-				],
-			});
+			const projectUri = (name: string) => wbMod.projectUri(name);
+			const projectName = (uri: any) => wbMod.projectName(uri);
+			const registerWorkspaceFile = (name: string, source: string) =>
+				wbMod.registerWorkspaceFile(name, source);
 
-			const openFile = (name: string) => {
-				editorStates.set(stateKey(currentFile), sourceView.state);
+			const openFile = async (name: string) => {
 				currentFile = name;
-				const existing = editorStates.get(stateKey(name));
-				sourceView.setState(existing ?? makeEditorState(name, fileSource(name)));
-				// setState fires no transaction: a restored state may carry marks
-				// from an old pair, and the output's marks belong to the old file.
-				clearMappedIn(sourceView);
-				clearMappedIn(outputView);
+				await workbench.openFile(name);
+				// Marks pair with the previous (doc, doc) pair — stale now.
+				clearMappedIn(sourceEditor());
+				clearMappedIn(outputEditor);
 				setActiveFile(name);
 				showOutput();
 			};
-
-			sourceView = new EditorView({
-				state: makeEditorState(currentFile, fileSource(currentFile)),
-				parent: sourceHost,
-			});
-
-			outputView = new EditorView({
-				state: EditorState.create({
-					doc: OUTPUT_PLACEHOLDER,
-					extensions: [
-						lineNumbers(),
-						EditorState.readOnly.of(true),
-						EditorView.editable.of(false),
-						EditorView.lineWrapping,
-						shikiHighlight('tsx'),
-						sharedTheme,
-						mappedField,
-						crossHover('output'),
-						crossNavigate('output'),
-					],
-				}),
-				parent: outputHost,
-			});
 
 			controllerRef.current.selectExample = (id) => {
 				if (disposed || id === CUSTOM_EXAMPLE_ID || id === currentExampleId) return;
@@ -1016,27 +1001,30 @@ export function usePlayground(): PlaygroundEngine {
 				if (tsconfig && !workspace.files.some((file: PlaygroundFile) => file.name === TSCONFIG_FILE_NAME)) {
 					workspace.files.push({ name: tsconfig.name, source: tsconfig.source });
 				}
-				currentFile = workspace.entry;
-				editorStates.clear();
 				runtimeCache.clear();
 				lastShownEntry = null;
 				lastShownAst = null;
-				sourceView.setState(makeEditorState(currentFile, fileSource(currentFile)));
-				clearMappedIn(sourceView);
-				clearMappedIn(outputView);
 				// Picking an example is the visitor's own action — never gated.
 				executionGated = false;
 				setGated(false);
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
-				void compileAndRun();
-				updateHash();
+				void (async () => {
+					await syncWorkbenchToWorkspace();
+					if (disposed) return;
+					currentFile = workspace.entry;
+					await workbench.openFile(currentFile);
+					setActiveFile(currentFile);
+					clearMappedPair();
+					void compileAndRun();
+					updateHash();
+				})();
 			};
 
 			controllerRef.current.selectFile = (name) => {
 				if (disposed || name === currentFile) return;
 				if (!workspace.files.some((file: { name: string }) => file.name === name)) return;
-				openFile(name);
+				void openFile(name);
 			};
 
 			// Svelte-REPL-style file management. A new file is a plain comment —
@@ -1055,21 +1043,35 @@ export function usePlayground(): PlaygroundEngine {
 				if (disposed || workspace.files.length >= MAX_PLAYGROUND_FILES) return;
 				const name = nextFileName();
 				workspace.files.push({ name, source: NEW_FILE_SOURCE });
+				registerWorkspaceFile(name, NEW_FILE_SOURCE);
+				lastGood.set(name, NEW_FILE_SOURCE);
 				// Any structural change means the buffer no longer matches the
 				// example (the same flip edits perform).
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 					currentExampleId = CUSTOM_EXAMPLE_ID;
 					setExampleId(CUSTOM_EXAMPLE_ID);
 				}
-				openFile(name);
-				// The new tab's name input is live (Svelte-REPL-style) — focus
-				// it so the visitor can name the file right away.
 				setInputValue(name);
 				setFocusInputSignal((n) => n + 1);
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
-				void compileAndRun();
-				updateHash();
+				void (async () => {
+					await openFile(name);
+					void compileAndRun();
+					updateHash();
+				})();
+			};
+
+			const deleteProjectFile = async (name: string) => {
+				try {
+					const vscodeMod = await import('vscode');
+					await vscodeMod.workspace.fs.delete(projectUri(name), { useTrash: false });
+				} catch {
+					// Best effort — the model dispose below keeps the UI consistent.
+				}
+				const model = monaco.editor.getModel(projectUri(name));
+				model?.dispose();
+				wbMod.unregisterWorkspaceFile(name);
 			};
 
 			controllerRef.current.removeFile = (name) => {
@@ -1081,23 +1083,19 @@ export function usePlayground(): PlaygroundEngine {
 				const index = workspace.files.findIndex((file: { name: string }) => file.name === name);
 				if (index < 0) return;
 				const wasCurrent = name === currentFile;
-				// Drop the file's undo history along with the file itself.
-				editorStates.delete(stateKey(name));
 				workspace.files.splice(index, 1);
 				// The compile cache is keyed by file name — purge the deleted one
 				// rather than churn every key. Nothing else references them.
 				runtimeCache.delete(name);
+				lastGood.delete(name);
+				void deleteProjectFile(name);
 				if (wasCurrent) {
 					// Fall to the file that took the tab's place, wrapping to the
 					// first when the last file was deleted.
 					const next = workspace.files[Math.min(index, workspace.files.length - 1)];
-					const existing = editorStates.get(stateKey(next.name));
 					currentFile = next.name;
-					sourceView.setState(existing ?? makeEditorState(currentFile, fileSource(currentFile)));
-					// setState fires no transaction: the old file's marks are stale.
-					clearMappedIn(sourceView);
 				}
-				clearMappedIn(outputView);
+				clearMappedPair();
 				lastShownEntry = null;
 				lastShownAst = null;
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
@@ -1106,8 +1104,11 @@ export function usePlayground(): PlaygroundEngine {
 				}
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
-				void compileAndRun();
-				updateHash();
+				void (async () => {
+					await openFile(currentFile);
+					void compileAndRun();
+					updateHash();
+				})();
 			};
 
 			controllerRef.current.renameFile = (oldName, nextName) => {
@@ -1129,29 +1130,30 @@ export function usePlayground(): PlaygroundEngine {
 				}
 				file.name = name;
 				if (currentFile === oldName) currentFile = name;
-				// The file's undo history follows it to the new key.
-				const savedState = editorStates.get(oldName);
-				if (savedState) {
-					editorStates.delete(oldName);
-					editorStates.set(name, savedState);
-				}
 				// The compile cache is keyed by file name — drop the old key so
 				// the next compile repopulates it under the new name.
 				runtimeCache.delete(oldName);
+				const good = lastGood.get(oldName);
+				lastGood.delete(oldName);
+				if (good != null) lastGood.set(name, good);
+				registerWorkspaceFile(name, file.source);
+				void deleteProjectFile(oldName);
 				// A rename makes the buffer non-example, like any edit.
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 					currentExampleId = CUSTOM_EXAMPLE_ID;
 					setExampleId(CUSTOM_EXAMPLE_ID);
 				}
-				clearMappedIn(sourceView);
-				clearMappedIn(outputView);
+				clearMappedPair();
 				lastShownEntry = null;
 				lastShownAst = null;
 				setInputValue(name);
 				publishWorkspaceState();
 				window.clearTimeout(compileDebounceId);
-				void compileAndRun();
-				updateHash();
+				void (async () => {
+					await openFile(name);
+					void compileAndRun();
+					updateHash();
+				})();
 			};
 
 			// Drag-reorder: the dropped file takes the slot the dragged file
@@ -1174,18 +1176,27 @@ export function usePlayground(): PlaygroundEngine {
 
 			controllerRef.current.formatActive = () => {
 				if (disposed) return;
+				const editorInstance = sourceEditor();
+				const model = editorInstance?.getModel();
+				if (!model || !projectName(model.uri)) return;
 				setFormatting(true);
 				void (async () => {
 					try {
 						const { formatPlaygroundFile } = await import('./playground-format.ts');
-						const source = sourceView.state.doc.toString();
+						const source = model.getValue();
 						const result = await formatPlaygroundFile(currentFile, source);
 						if (disposed) return;
 						if (!result.ok) {
 							setError(result.error);
 							return;
 						}
-						if (result.code !== source) replaceDoc(sourceView, result.code);
+						if (result.code !== source) {
+							editorInstance.executeEdits('dartsx-format', [{
+								range: model.getFullModelRange(),
+								text: result.code,
+								forceMoveMarkers: false,
+							}]);
+						}
 					} finally {
 						if (!disposed) setFormatting(false);
 					}
@@ -1209,8 +1220,7 @@ export function usePlayground(): PlaygroundEngine {
 					return;
 				}
 				// Leaving the compiled view: marks pair with a pane no longer shown.
-				clearMappedIn(sourceView);
-				clearMappedIn(outputView);
+				clearMappedPair();
 			};
 			controllerRef.current.ensureDevtools = () => {
 				if (disposed) return;
@@ -1219,8 +1229,25 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.getTsConfig = () => parsePlaygroundTsconfig(workspace.files);
 			controllerRef.current.revealAst = () => {
 				if (disposed || !activeAstEntry()) return;
-				astPreview.reveal(sourceView.state.selection.main.head, true);
+				const editorInstance = sourceEditor();
+				const model = editorInstance?.getModel();
+				const position = editorInstance?.getPosition();
+				if (!model || !position) return;
+				astPreview.reveal(model.getOffsetAt(position), true);
 			};
+
+			// Mod-Shift-f formats the active source editor (the old CodeMirror
+			// keymap binding). Scoped to the workbench container so browser
+			// defaults elsewhere are untouched.
+			const keyHandler = (event: KeyboardEvent) => {
+				if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+					if (!sourceHost.contains(event.target as Node)) return;
+					event.preventDefault();
+					event.stopPropagation();
+					controllerRef.current.formatActive?.();
+				}
+			};
+			sourceHost.addEventListener('keydown', keyHandler, true);
 
 			publishWorkspaceState();
 			void compileAndRun();
@@ -1244,10 +1271,13 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.getTsConfig = undefined;
 			window.clearTimeout(compileDebounceId);
 			window.clearTimeout(hashDebounceId);
-			sourceView?.destroy();
-			outputView?.destroy();
+			themeObserver?.disconnect();
+			outputEditor?.dispose();
+			outputModel?.dispose();
 			astPreview?.destroy();
 			preview?.destroy();
+			// The workbench itself is a page-wide singleton (see workbench.ts):
+			// it survives remounts and is reused via bootPromise.
 		};
 	}, []);
 
