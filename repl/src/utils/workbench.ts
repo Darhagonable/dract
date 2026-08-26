@@ -1,35 +1,42 @@
-// Browser VS Code workbench hosting the real DarTsx extension.
+// Browser editor hosting the real DarTsx extension.
 //
 // This mirrors fengkx/beancount-lsp's playground: @codingame/monaco-vscode-api
-// boots enough of VS Code to run an extension host worker in the browser, and
-// the extension's built .vsix (copied next to this app by scripts/
-// prepare-vsix.mjs) is installed into it — so grammar highlighting, semantic
-// tokens, and diagnostics come from the exact code desktop VS Code runs.
+// boots VS Code's service layer (no workbench UI) with an extension host
+// worker, and the extension's built .vsix (copied next to this app by
+// scripts/prepare-vsix.mjs) is installed into it — so grammar highlighting,
+// semantic tokens, and diagnostics come from the exact code desktop VS Code
+// runs. The visible editors are plain Monaco editors we create ourselves and
+// attach to the container.
 //
 // Limitation inherited from the platform: typescriptServerPlugins cannot run
 // in a browser extension host, so TS-service-powered hovers/type errors stay
 // desktop-only here. The Volar CSS/HTML server is also Node-side only; its
 // web wiring is a possible follow-up.
-import '@codingame/monaco-editor-wrapper/features/workbench';
-import '@codingame/monaco-editor-wrapper/features/search';
 import '@codingame/monaco-editor-wrapper/features/extensionHostWorker';
-import '@codingame/monaco-editor-wrapper/features/viewPanels';
 import '@codingame/monaco-vscode-api/vscode/vs/editor/contrib/codelens/browser/codelensController';
 import '@codingame/monaco-vscode-api/vscode/vs/editor/contrib/suggest/browser/suggestController';
 import '@codingame/monaco-vscode-api/vscode/vs/editor/contrib/snippet/browser/snippetController2';
 
 import { whenReady as extensionVsixReady } from '../../dartsx.vsix';
-import { initialize, registerFile, updateUserConfiguration } from '@codingame/monaco-editor-wrapper';
+import {
+	createEditor,
+	createModelReference,
+	initialize,
+	registerFile,
+	updateUserConfiguration,
+} from '@codingame/monaco-editor-wrapper';
 import { getService } from '@codingame/monaco-vscode-api';
 import { IExtensionService } from '@codingame/monaco-vscode-api/services';
-import { IEditorService } from '@codingame/monaco-vscode-api/vscode/vs/workbench/services/editor/common/editorService.service';
-import type { IEditorService as IEditorServiceType } from '@codingame/monaco-vscode-api/vscode/vs/workbench/services/editor/common/editorService.service';
 import { ExtensionIdentifier } from '@codingame/monaco-vscode-api/vscode/vs/platform/extensions/common/extensions';
 import { RegisteredMemoryFile } from '@codingame/monaco-vscode-files-service-override';
 import * as vscode from 'vscode';
 import * as monaco from 'monaco-editor';
 
 export { monaco };
+// Configured editor factory: creates editors wired to the engine's services
+// (theme, configuration, keybindings). Callers outside this module (the
+// compiled-output editor) should use it too, not plain monaco.editor.create.
+export { createEditor };
 
 export const PROJECT_PATH_PREFIX = '/tmp/project/';
 export const EXTENSION_ID = 'dartsx.vscode-extension';
@@ -50,14 +57,7 @@ const LIGHT_THEME = 'Default Light Modern';
 function baseUserConfiguration(dark: boolean): string {
 	return JSON.stringify({
 		'workbench.colorTheme': dark ? DARK_THEME : LIGHT_THEME,
-		// Our own tab strip drives navigation; the workbench chrome stays out
-		// of the way so the embedded editor reads like the CodeMirror one did.
-		'workbench.editor.showTabs': false,
-		'workbench.activityBar.location': 'hidden',
-		'workbench.statusBar.visible': false,
-		'workbench.startupEditor': 'none',
 		'editor.minimap.enabled': false,
-		'breadcrumbs.enabled': false,
 		'editor.stickyScroll.enabled': false,
 	});
 }
@@ -75,6 +75,7 @@ export function unregisterWorkspaceFile(name: string): void {
 }
 
 export interface BootOptions {
+	/** Editor mount point (a single bare editor swaps models per open tab). */
 	container: HTMLElement;
 	files: { name: string; source: string }[];
 	entry: string;
@@ -90,7 +91,7 @@ export interface Workbench {
 
 let bootPromise: Promise<Workbench> | null = null;
 
-// The workbench is a page-wide singleton: initialize() may run exactly once
+// The engine is a page-wide singleton: initialize() may run exactly once
 // per document, so repeated mounts reuse the first boot.
 export function bootWorkbench(options: BootOptions): Promise<Workbench> {
 	bootPromise ??= doBoot(options);
@@ -103,7 +104,12 @@ async function doBoot(options: BootOptions): Promise<Workbench> {
 	}
 	updateUserConfiguration(baseUserConfiguration(options.dark));
 
-	await initialize({}, { container: options.container });
+	// Theme classes + theme-scoped CSS are stamped on document.body (the
+	// engine's default container): it is an ancestor of EVERY editor — the
+	// compiled-output one lives outside the mount container — and React never
+	// rewrites body's className, so the stamps survive re-renders (a
+	// React-managed container gets its classes wiped on the next render).
+	await initialize({}, {});
 	await extensionVsixReady;
 
 	try {
@@ -125,18 +131,44 @@ async function doBoot(options: BootOptions): Promise<Workbench> {
 		});
 	}
 
-	const editorService = await getService(IEditorService) as IEditorServiceType;
+	// One bare Monaco editor for every project file — no workbench chrome,
+	// just the core editor swapping models per open tab.
+	let editor: monaco.editor.IStandaloneCodeEditor | null = null;
+
+	async function ensureEditor(model: monaco.editor.ITextModel): Promise<monaco.editor.IStandaloneCodeEditor> {
+		if (editor) {
+			editor.setModel(model);
+			editor.focus();
+			return editor;
+		}
+		editor = createEditor(options.container, {
+			model,
+			lineNumbers: 'on',
+			minimap: { enabled: false },
+			scrollBeyondLastLine: false,
+			automaticLayout: true,
+			renderLineHighlight: 'none',
+			fixedOverflowWidgets: true,
+		});
+		return editor;
+	}
 
 	return {
 		async openFile(name: string) {
-			await editorService.openEditor({ resource: projectUri(name) });
+			// Model references keep the document registered with the engine's
+			// model service (and thus the extension host). References are held
+			// forever on purpose: models must survive tab switches, matching
+			// what the consumer expects from monaco.editor.getModel().
+			const uri = projectUri(name);
+			const reference = await createModelReference(uri);
+			const model = reference.object.textEditorModel ?? monaco.editor.getModel(uri);
+			if (!model) throw new Error(`[dartsx-playground] no model for ${name}`);
+			await ensureEditor(model);
 		},
 		getActiveEditor() {
-			for (const candidate of monaco.editor.getEditors()) {
-				const model = candidate.getModel();
-				if (model && projectName(model.uri)) return candidate as monaco.editor.ICodeEditor;
-			}
-			return null;
+			const model = editor?.getModel();
+			if (!model || !projectName(model.uri)) return null;
+			return editor as unknown as monaco.editor.ICodeEditor;
 		},
 		setTheme(dark: boolean) {
 			updateUserConfiguration(baseUserConfiguration(dark));
