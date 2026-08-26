@@ -156,7 +156,6 @@ export default defineConfig({
 			'@codingame/monaco-vscode-base-service-override',
 			'@codingame/monaco-vscode-files-service-override',
 			'@codingame/monaco-vscode-languages-service-override',
-			'@codingame/monaco-vscode-search-service-override',
 			'@codingame/monaco-vscode-textmate-service-override',
 			'@codingame/monaco-vscode-theme-defaults-default-extension',
 			'@codingame/monaco-vscode-json-default-extension',

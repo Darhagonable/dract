@@ -420,14 +420,8 @@
 .pg-editor {
 	position: relative;
 }
-.pg-editor .monaco-workbench,
-.pg-editor .workbench-part,
-.pg-editor .editor-container,
 .pg-editor .monaco-editor {
 	height: 100%;
-}
-.pg-editor .monaco-workbench {
-	--vscode-sideBar-background: var(--code-bg);
 	--vscode-editor-background: var(--code-bg);
 	--vscode-editorGutter-background: var(--code-bg);
 }
