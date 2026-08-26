@@ -1,0 +1,19 @@
+{
+	"name": "@dartsx/repl",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"check": "dartsx check"
+	},
+	"dependencies": {
+		"dartsx": "workspace:*"
+	},
+	"devDependencies": {
+		"@dartsx/cli": "workspace:*",
+		"@dartsx/vite-plugin": "workspace:*",
+		"vite": "^8.0.16"
+	}
+}
