@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { preprocess } from '../src/compiler/phases/1-preprocess/index.js';
+import { preprocess } from 'compiler/phases/1-preprocess';
 
 const DIR = join(__dirname, 'dartsx-to-tsx');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;

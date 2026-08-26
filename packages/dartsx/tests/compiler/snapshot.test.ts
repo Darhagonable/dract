@@ -16,6 +16,11 @@ import { Project } from '../../src/compiler';
 const SAMPLES_DIR = join(__dirname, 'samples');
 const UPDATE = !!process.env.UPDATE_SNAPSHOTS;
 
+/** Plugin hooks are plain functions at runtime; Vite's ObjectHook type just doesn't expose `.call`. */
+function hookCall(hook: object, ctx: unknown, ...args: unknown[]): unknown {
+	return (hook as (...args: unknown[]) => unknown).call(ctx, ...args);
+}
+
 const samples = readdirSync(SAMPLES_DIR, { withFileTypes: true })
 	.filter((d) => d.isDirectory())
 	.map((d) => d.name)

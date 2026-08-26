@@ -145,7 +145,7 @@ describe('Project', () => {
 	});
 
 	it('recompiles without reactive import info after a module is removed', async () => {
-		const files = {
+		const files: Record<string, string> = {
 			[STORE]: `export state count = 0;`,
 			[APP]: `import { count } from './store'\n\nexport component App() {\nrender (<p>{count}</p>)\n}`,
 		};

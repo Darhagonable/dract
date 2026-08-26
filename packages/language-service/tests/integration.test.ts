@@ -11,7 +11,7 @@ import * as ts from 'typescript';
 import * as path from 'path';
 import * as fs from 'fs';
 import { proxyCreateProgram } from '@volar/typescript/lib/node/proxyCreateProgram';
-import { getDarTsxLanguagePlugin } from '../src/language';
+import { getDarTsxLanguagePlugin } from 'language';
 
 const ROOT = path.resolve(__dirname, '../../..');
 

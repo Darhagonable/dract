@@ -6,7 +6,7 @@ export default defineConfig({
 			'packages/dartsx',
 			'packages/language-service',
 			'packages/vite-plugin',
-			'packages/vscode-extension',
+			// 'packages/vscode-extension',
 			'toolkit/query',
 		],
 	},

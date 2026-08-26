@@ -2,6 +2,9 @@ import { defineProject } from 'vitest/config';
 import { vsCodeWorker } from 'vitest-environment-vscode';
 
 export default defineProject({
+	resolve: {
+		tsconfigPaths: true,
+	},
 	test: {
 		include: ['tests/*.test.ts'],
 		fileParallelism: false,

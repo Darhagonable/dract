@@ -8,6 +8,9 @@
 		"skipLibCheck": true,
 		"declaration": true,
 		"sourceMap": true,
+		"paths": {
+			"*": ["./src/*"]
+		}
 	},
 	"include": ["src", "scripts", "tests"],
 	"exclude": ["tests/fixture"]
