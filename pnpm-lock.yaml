@@ -195,6 +195,22 @@ importers:
         specifier: ^8.0.16
         version: 8.0.16(@types/node@25.9.3)(jiti@2.7.0)
 
+  repl:
+    dependencies:
+      dartsx:
+        specifier: workspace:*
+        version: link:../packages/dartsx
+    devDependencies:
+      '@dartsx/cli':
+        specifier: workspace:*
+        version: link:../packages/cli
+      '@dartsx/vite-plugin':
+        specifier: workspace:*
+        version: link:../packages/vite-plugin
+      vite:
+        specifier: ^8.0.16
+        version: 8.0.16(@types/node@25.9.3)(jiti@2.7.0)
+
   toolkit/query:
     dependencies:
       dartsx:
