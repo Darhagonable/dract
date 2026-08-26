@@ -218,9 +218,6 @@ importers:
       '@codingame/monaco-vscode-languages-service-override':
         specifier: ^35.0.3
         version: 35.0.3
-      '@codingame/monaco-vscode-search-service-override':
-        specifier: ^35.0.3
-        version: 35.0.3
       '@codingame/monaco-vscode-textmate-service-override':
         specifier: ^35.0.3
         version: 35.0.3

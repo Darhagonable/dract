@@ -448,14 +448,15 @@ export function usePlayground(): PlaygroundEngine {
 			});
 			themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-			// The compiled-output editor: a plain Monaco editor sharing the
-			// workbench's theme/tokenization services.
 			outputModel = monaco.editor.createModel(
 				OUTPUT_PLACEHOLDER,
 				'typescript',
 				monaco.Uri.parse('dartsx-output:/client'),
 			);
-			outputEditor = monaco.editor.create(outputHost, {
+			// The compiled-output editor: shares the engine's theme and
+			// configuration services (createEditor wires them; plain
+			// monaco.editor.create would render unthemed).
+			outputEditor = wbMod.createEditor(outputHost, {
 				model: outputModel,
 				readOnly: true,
 				lineNumbers: 'on',
@@ -1249,6 +1250,9 @@ export function usePlayground(): PlaygroundEngine {
 			};
 			sourceHost.addEventListener('keydown', keyHandler, true);
 
+			// The core editor mounts lazily on first open — boot opens the
+			// entry so the editor exists before the UI reports ready.
+			await openFile(currentFile);
 			publishWorkspaceState();
 			void compileAndRun();
 			if (initialDiagnostic) setError(initialDiagnostic);
