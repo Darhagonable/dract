@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from 'vite';
 import vsixPlugin from '@codingame/monaco-vscode-rollup-vsix-plugin';
 import { createRequire } from 'node:module';
+import { readFileSync, readdirSync } from 'node:fs';
+import * as path from 'node:path';
 import { build as esbuildBuild } from 'esbuild';
 
 // The playground executes user code in a sandboxed iframe with an OPAQUE
@@ -113,6 +115,12 @@ function playgroundRuntime(): Plugin {
 // the dartsx compiler's transitive deps — dartsx itself is excluded below)
 // are pre-declared so no optimize pass runs mid-session.
 const PREBUNDLED = [
+	// CJS root of the language service: prebundled to ESM for dev (the raw
+	// file is CommonJS and cannot be served to the browser as-is). Safe to
+	// inline: its only dartsx import is compiler/preprocess, which is pure
+	// JS — the oxc/WASM compiler graph the playground uses is a separate,
+	// still-raw chain.
+	'@dartsx/language-service',
 	'esrap',
 	'esrap/languages/tsx',
 	'es-module-lexer',
@@ -122,9 +130,72 @@ const PREBUNDLED = [
 	'prettier/plugins/estree',
 ];
 
+// Feeds the language worker's virtual FS (src/language/virtual-fs.ts): TS's
+// default libs + the dartsx runtime's .d.ts as a path → text JSON map, served
+// per request in dev and emitted as an asset in build (same pattern as
+// playgroundRuntime above). import.meta.glob can't do this (node_modules is
+// ignored) and virtual modules don't reach Vite's worker sub-builds, so the
+// worker fetches this JSON at boot.
+const LANG_FS_PATH = '/dartsx-lang-fs.json';
+
+function languageTypesFs(): Plugin {
+	let cache: string | null = null;
+
+	function collect(): string {
+		if (cache !== null) return cache;
+		const require = createRequire(import.meta.url);
+		const files: Record<string, string> = {};
+
+		// exports maps hide ./package.json, so resolve a real entry and walk up.
+		const tsLibDir = path.dirname(require.resolve('typescript'));
+		for (const name of readdirSync(tsLibDir)) {
+			if (/^lib[^/]*\.d\.ts$/.test(name)) {
+				files[`/node_modules/typescript/lib/${name}`] = readFileSync(path.join(tsLibDir, name), 'utf8');
+			}
+		}
+
+		// pnpm symlinks the workspace dep: repl/node_modules/dartsx → the
+		// built package, whose dist/** d.ts + manifest are exactly what a
+		// project importing 'dartsx' should resolve.
+		const dartsxRoot = path.resolve(path.dirname(require.resolve('dartsx')), '../../..');
+		files['/node_modules/dartsx/package.json'] = readFileSync(path.join(dartsxRoot, 'package.json'), 'utf8');
+		for (const name of readdirSync(path.join(dartsxRoot, 'dist'), { recursive: true })) {
+			const rel = typeof name === 'string' ? name : name.join('/');
+			if (rel.endsWith('.d.ts') || rel.endsWith('.d.mts')) {
+				files[`/node_modules/dartsx/dist/${rel.replaceAll('\\', '/')}`] = readFileSync(
+					path.join(dartsxRoot, 'dist', ...rel.split(/[\\/]/)),
+					'utf8',
+				);
+			}
+		}
+
+		cache = JSON.stringify(files);
+		return cache;
+	}
+
+	return {
+		name: 'dartsx-language-types-fs',
+		configureServer(server) {
+			server.middlewares.use(LANG_FS_PATH, (_req, res, next) => {
+				res.setHeader('Content-Type', 'application/json; charset=utf-8');
+				res.end(collect());
+			});
+		},
+		generateBundle() {
+			if (this.environment.name !== 'client') return;
+			this.emitFile({
+				type: 'asset',
+				fileName: LANG_FS_PATH.slice(1),
+				source: collect(),
+			});
+		},
+	};
+}
+
 export default defineConfig({
 	plugins: [
 		playgroundRuntime(),
+		languageTypesFs(),
 		// Vite and the VSIX rollup plugin can resolve different Rollup type
 		// versions; runtime is compatible, only hook context types clash.
 		vsixPlugin() as unknown as Plugin,
@@ -144,6 +215,9 @@ export default defineConfig({
 		// wiring break when esbuild prebundles them.
 		exclude: [
 			'dartsx',
+			// ESM-syntax .js in a CJS-typed package: serve raw like the
+			// monaco stack rather than letting esbuild mis-detect it.
+			'@volar/monaco',
 			'oxc-parser',
 			'oxc-transform',
 			'@oxc-parser/binding-wasm32-wasi',

@@ -112,9 +112,8 @@ export interface PlaygroundController {
 	ensureDevtools?: () => void;
 	/**
 	 * The workspace's parsed tsconfig.json (Vue-REPL `getTsConfig` contract):
-	 * the raw parsed JSON, or null when missing or malformed. Nothing consumes
-	 * it yet — it is the agreed surface for compiler options once a
-	 * type-checking or emit layer lands.
+	 * the raw parsed JSON, or null when missing or malformed. The language
+	 * worker (see src/language/) rebuilds with these compilerOptions.
 	 */
 	getTsConfig?: () => Record<string, unknown> | null;
 }
@@ -279,7 +278,11 @@ export function usePlayground(): PlaygroundEngine {
 		let preview: any = null;
 		let compileDebounceId = 0;
 		let hashDebounceId = 0;
+		let tsconfigReloadId = 0;
 		let themeObserver: MutationObserver | null = null;
+		// The language worker client (hover/diagnostics/completions) — created
+		// after the workbench boots, disposed with the effect.
+		let langService: import('../language/index.ts').DartsxLanguageService | null = null;
 		// Validate the URL payload before loading the workbench or the
 		// compiler. Oversized input is ignored in favor of the bounded defaults.
 		const rawHash = window.location.hash.slice(1);
@@ -367,6 +370,14 @@ export function usePlayground(): PlaygroundEngine {
 			const fileSource = (name: string): string =>
 				workspace.files.find((file: { name: string }) => file.name === name)?.source ?? '';
 
+			// The worker consumes the tsconfig's compilerOptions object (it
+			// feeds ts.convertCompilerOptionsFromJson directly).
+			const compilerOptions = (): Record<string, unknown> | null => {
+				const parsed = parsePlaygroundTsconfig(workspace.files);
+				const options = (parsed as { compilerOptions?: Record<string, unknown> } | null)?.compilerOptions;
+				return options && typeof options === 'object' ? options : null;
+			};
+
 			const publishWorkspaceState = () => {
 				setExampleId(currentExampleId);
 				setFiles(workspace.files.map((file: { name: string }) => file.name));
@@ -424,6 +435,15 @@ export function usePlayground(): PlaygroundEngine {
 					(candidate: { name: string }) => candidate.name === name,
 				);
 				if (file) file.source = text;
+				// tsconfig edits recreate the language worker (debounced) —
+				// vue-repl's reloadLanguageTools pattern: dispose, rebuild
+				// with fresh compiler options, re-register providers.
+				if (isTsconfigFile(name)) {
+					window.clearTimeout(tsconfigReloadId);
+					tsconfigReloadId = window.setTimeout(() => {
+						if (!disposed) createLanguageService();
+					}, 500);
+				}
 				// Any edit means the buffer no longer matches the example.
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
 					currentExampleId = CUSTOM_EXAMPLE_ID;
@@ -442,6 +462,30 @@ export function usePlayground(): PlaygroundEngine {
 			});
 			monacoApi = wbMod.monaco;
 			if (disposed) return;
+
+			// TypeScript features run in the language worker, off the UI
+			// thread (see src/language/). Same DarTsx transform + filters as
+			// the desktop tsserver plugin; the tsconfig drives its options.
+			// vue-repl wiring (@volar/monaco) over our worker transport.
+			let langMod: typeof import('../language/index.ts') | null = null;
+			const projectModelUris = () =>
+				monaco.editor.getModels()
+					.filter((model: any) => projectName(model.uri) !== null)
+					.map((model: any) => model.uri);
+			const createLanguageService = () => {
+				langService?.dispose();
+				langService = langMod?.createDartsxLanguageService(
+					projectModelUris,
+					() => compilerOptions(),
+				) ?? null;
+			};
+			try {
+				langMod = await import('../language/index.ts');
+				if (disposed) return;
+				createLanguageService();
+			} catch (langError) {
+				console.warn('[dartsx-playground] language service unavailable', langError);
+			}
 
 			themeObserver = new MutationObserver(() => {
 				workbench.setTheme(currentThemeIsDark());
@@ -958,6 +1002,9 @@ export function usePlayground(): PlaygroundEngine {
 					for (const file of workspace.files) {
 						registerWorkspaceFile(file.name, file.source);
 						lastGood.set(file.name, file.source);
+						// A model per file keeps cross-file type checking live
+						// across the switch (see workbench.ts).
+						await wbMod.ensureWorkspaceModel(file.name);
 						const model = monaco.editor.getModel(projectUri(file.name));
 						if (model && model.getValue() !== file.source) model.setValue(file.source);
 					}
@@ -1045,6 +1092,7 @@ export function usePlayground(): PlaygroundEngine {
 				const name = nextFileName();
 				workspace.files.push({ name, source: NEW_FILE_SOURCE });
 				registerWorkspaceFile(name, NEW_FILE_SOURCE);
+				void wbMod.ensureWorkspaceModel(name);
 				lastGood.set(name, NEW_FILE_SOURCE);
 				// Any structural change means the buffer no longer matches the
 				// example (the same flip edits perform).
@@ -1138,6 +1186,7 @@ export function usePlayground(): PlaygroundEngine {
 				lastGood.delete(oldName);
 				if (good != null) lastGood.set(name, good);
 				registerWorkspaceFile(name, file.source);
+				void wbMod.ensureWorkspaceModel(name);
 				void deleteProjectFile(oldName);
 				// A rename makes the buffer non-example, like any edit.
 				if (currentExampleId !== CUSTOM_EXAMPLE_ID) {
@@ -1275,7 +1324,10 @@ export function usePlayground(): PlaygroundEngine {
 			controllerRef.current.getTsConfig = undefined;
 			window.clearTimeout(compileDebounceId);
 			window.clearTimeout(hashDebounceId);
+			window.clearTimeout(tsconfigReloadId);
 			themeObserver?.disconnect();
+			langService?.dispose();
+			langService = null;
 			outputEditor?.dispose();
 			outputModel?.dispose();
 			astPreview?.destroy();

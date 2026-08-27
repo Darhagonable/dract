@@ -8,10 +8,11 @@
 // runs. The visible editors are plain Monaco editors we create ourselves and
 // attach to the container.
 //
-// Limitation inherited from the platform: typescriptServerPlugins cannot run
-// in a browser extension host, so TS-service-powered hovers/type errors stay
-// desktop-only here. The Volar CSS/HTML server is also Node-side only; its
-// web wiring is a possible follow-up.
+// typescriptServerPlugins cannot run in a browser extension host, so TS
+// features (hover, type errors, completions) come from the language worker
+// in src/language/ instead — the same DarTsx transform and post-processing
+// the desktop tsserver plugin applies, on @volar/monaco. The Volar CSS/HTML
+// server is also Node-side only; its web wiring is a possible follow-up.
 import '@codingame/monaco-editor-wrapper/features/extensionHostWorker';
 import '@codingame/monaco-vscode-api/vscode/vs/editor/contrib/codelens/browser/codelensController';
 import '@codingame/monaco-vscode-api/vscode/vs/editor/contrib/suggest/browser/suggestController';
@@ -64,6 +65,13 @@ function baseUserConfiguration(dark: boolean): string {
 
 export const registeredNames = new Set<string>();
 
+// Model references for EVERY workspace file, not just the opened tab. The
+// language worker syncs monaco models (see src/language/), so cross-file
+// type checking requires a model to exist per file — the vue repl does the
+// same with its getOrCreateModel loop. References are held forever: models
+// must survive tab switches.
+const fileModelReferences = new Map<string, { dispose(): void }>();
+
 export function registerWorkspaceFile(name: string, source: string): void {
 	if (registeredNames.has(name)) return;
 	registeredNames.add(name);
@@ -72,6 +80,17 @@ export function registerWorkspaceFile(name: string, source: string): void {
 
 export function unregisterWorkspaceFile(name: string): void {
 	registeredNames.delete(name);
+	disposeWorkspaceModel(name);
+}
+
+export async function ensureWorkspaceModel(name: string): Promise<void> {
+	if (fileModelReferences.has(name)) return;
+	fileModelReferences.set(name, await createModelReference(projectUri(name)));
+}
+
+export function disposeWorkspaceModel(name: string): void {
+	fileModelReferences.get(name)?.dispose();
+	fileModelReferences.delete(name);
 }
 
 export interface BootOptions {
@@ -103,7 +122,6 @@ async function doBoot(options: BootOptions): Promise<Workbench> {
 		registerWorkspaceFile(file.name, file.source);
 	}
 	updateUserConfiguration(baseUserConfiguration(options.dark));
-
 	// Theme classes + theme-scoped CSS are stamped on document.body (the
 	// engine's default container): it is an ancestor of EVERY editor — the
 	// compiled-output one lives outside the mount container — and React never
@@ -123,6 +141,10 @@ async function doBoot(options: BootOptions): Promise<Workbench> {
 	} catch (error) {
 		console.error('[dartsx-playground] extension activation failed', error);
 	}
+
+	// A model per workspace file so the language worker sees the whole
+	// project, not just the opened tab (cross-file type checking).
+	await Promise.all([...registeredNames].map(name => ensureWorkspaceModel(name)));
 
 	if (options.onDocumentChanged) {
 		vscode.workspace.onDidChangeTextDocument((event) => {
