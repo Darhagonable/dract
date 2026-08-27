@@ -35,10 +35,9 @@ export interface PlaygroundFile {
 
 /**
  * The workspace's tsconfig file (Vue-REPL style): a plain virtual file the
- * visitor can edit. Nothing consumes its options yet — the editor has no
- * language service and the compiler is a syntax transform — but the file is
- * the agreed surface for compiler options once a type-checking or emit layer
- * lands.
+ * visitor can edit. Its compilerOptions feed the language worker (see
+ * src/language/) — the compiler itself is still a syntax transform and does
+ * not read them.
  */
 export const TSCONFIG_FILE_NAME = 'tsconfig.json';
 

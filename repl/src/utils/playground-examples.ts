@@ -28,9 +28,9 @@ export const CUSTOM_EXAMPLE_ID = 'custom';
 
 /**
  * The tsconfig.json the playground injects into any workspace that lacks one
- * (Vue-REPL style: the config is an editable virtual file). Nothing consumes
- * these options yet — the editor has no language service and the compiler is
- * a syntax transform — so this is the agreed surface, not a live contract.
+ * (Vue-REPL style: the config is an editable virtual file). Its
+ * compilerOptions feed the language worker (see src/language/); the compiler
+ * itself is a syntax transform and ignores them.
  * `jsx: "preserve"` mirrors the compiler's hardcoded oxc transform mode.
  */
 export const DEFAULT_TSCONFIG_SOURCE = `{
