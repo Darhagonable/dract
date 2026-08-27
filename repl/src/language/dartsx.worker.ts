@@ -1,22 +1,21 @@
 // DarTsx language worker: TypeScript language features for the playground.
 //
-// Mirrors the vue-repl worker (src/monaco/vue.worker.ts) on the
-// @volar/monaco pair: createTypeScriptWorkerLanguageService here,
-// activateMarkers/registerProviders on the main thread. Two deviations from
-// vue-repl, both forced by the repl's stack:
-//   1. transport — the codingame monaco fork removed createWebWorker, so
-//      mirrored models arrive via the protocol's full-text sync messages
-//      instead of monaco's mirror-model machinery (see ./index.ts).
-//   2. the semantic plugin is wrapped with the DarTsx post-processing from
-//      @dartsx/language-service — the same diagnostic filter, unused-CSS
-//      warnings and hover keyword rewriting the desktop tsserver plugin
-//      applies.
-// TypeScript itself and the dartsx .d.ts files are bundled in via
-// ./virtual-fs.ts (fetched at boot), so type checking works offline.
+// The vue-repl worker shape on monaco-editor-core's native worker protocol:
+// the main thread (./index.ts) boots us via MonacoEnvironment.getWorker and
+// waits for the 'dartsx-ready' gate before handing the worker to monaco, so
+// monaco's $initialize handshake only flows once the d.ts payload (fetched at
+// boot, see ./virtual-fs.ts) is mounted.
+//
+// Inside: createTypeScriptWorkerLanguageService from @volar/monaco/worker +
+// the DarTsx post-processing from @dartsx/language-service — the same
+// diagnostic filter, unused-CSS warnings and hover keyword rewriting the
+// desktop tsserver plugin applies. TypeScript itself and the dartsx runtime
+// .d.ts files are bundled in, so type checking works offline.
 
+import * as monacoWorker from 'monaco-editor-core/esm/vs/editor/editor.worker';
 import * as ts from 'typescript';
 import { URI } from 'vscode-uri';
-import { createTypeScriptWorkerLanguageService, type WorkerLanguageService } from '@volar/monaco/worker';
+import { createTypeScriptWorkerLanguageService } from '@volar/monaco/worker';
 import type { Language } from '@volar/language-service';
 import { create as createSemanticPlugin } from 'volar-service-typescript/lib/plugins/semantic';
 import { create as createDirectiveCommentPlugin } from 'volar-service-typescript/lib/plugins/directiveComment';
@@ -28,80 +27,26 @@ import {
 	getUnusedCssDiagnostics,
 } from '@dartsx/language-service';
 import { virtualFs, loadVirtualFs } from './virtual-fs';
-import type { WorkerInbound, WorkerOutbound } from './protocol';
 
-// ── mirrored project files (stand-in for monaco's mirror models) ────
-
-interface Mirror {
+/** The slice of monaco's worker context the service uses. */
+interface MirrorModel {
 	uri: URI;
 	version: number;
-	text: string;
+	getValue(): string;
 }
 
-const mirrors = new Map<string, Mirror>();
-
-function readSourceFile(fileName: string): string | undefined {
-	const mirror = mirrors.get(URI.file(fileName).toString());
-	if (mirror) return mirror.text;
-	return virtualFs.readFile(fileName);
+interface WorkerContext {
+	getMirrorModels(): MirrorModel[];
 }
 
-// ── service construction ────────────────────────────────────────────
-
-let service: WorkerLanguageService | null = null;
-let compilerOptionsJson: Record<string, unknown> | null = null;
+let workerContext: WorkerContext | null = null;
 let languageRef: Language | undefined;
 
-function buildService(): void {
-	service?.dispose();
-	languageRef = undefined;
-
-	const converted = ts.convertCompilerOptionsFromJson(compilerOptionsJson ?? {}, '/tmp/project');
-	const compilerOptions: ts.CompilerOptions = {
-		...converted.options,
-		allowNonTsExtensions: true,
-	};
-	for (const diagnostic of converted.errors) {
-		console.warn('[dartsx-worker] tsconfig:', ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
-	}
-
-	service = createTypeScriptWorkerLanguageService({
-		typescript: ts,
-		compilerOptions,
-		env: {
-			workspaceFolders: [URI.file('/')],
-			locale: 'en',
-			fs: {
-				stat(uri: URI) {
-					return virtualFs.stat(uri.path);
-				},
-				readFile(uri: URI) {
-					return virtualFs.readFile(uri.path);
-				},
-				readDirectory(uri: URI) {
-					return virtualFs.readDirectory(uri.path);
-				},
-			},
-		},
-		uriConverter: {
-			asFileName: uri => uri.path,
-			asUri: fileName => URI.file(fileName),
-		},
-		workerContext: {
-			// The `host` channel (worker→main-thread callbacks like
-			// onFetchCdnFile in the vue worker) is unused here.
-			host: undefined,
-			getMirrorModels: () => [...mirrors.values()].map(mirror => ({
-				uri: mirror.uri,
-				version: mirror.version,
-				getValue: () => mirror.text,
-			})),
-		},
-		languagePlugins: [
-			getDarTsxLanguagePlugin(readSourceFile),
-		],
-		languageServicePlugins: makePlugins(),
-	});
+function readSourceFile(fileName: string): string | undefined {
+	const uri = URI.file(fileName).toString();
+	const model = workerContext?.getMirrorModels().find(mirror => mirror.uri.toString() === uri);
+	if (model) return model.getValue();
+	return virtualFs.readFile(fileName);
 }
 
 // ── DarTsx post-processing (same rules as the tsserver plugin) ──────
@@ -216,90 +161,67 @@ function patchLanguageService(ls: ts.LanguageService): void {
 	};
 }
 
-// ── message handling ────────────────────────────────────────────────
-
-// WorkerLanguageService's method surface (see @volar/monaco/worker.js) —
-// the dispatch whitelist.
-const METHODS = new Set([
-	'getSemanticTokenLegend', 'getCommands', 'getTriggerCharacters',
-	'getAutoFormatTriggerCharacters', 'getSignatureHelpTriggerCharacters', 'getSignatureHelpRetriggerCharacters',
-	'executeCommand', 'getDocumentFormattingEdits', 'getFoldingRanges', 'getSelectionRanges',
-	'getLinkedEditingRanges', 'getDocumentSymbols', 'getDocumentColors', 'getColorPresentations',
-	'getDiagnostics', 'getWorkspaceDiagnostics', 'getReferences', 'getFileReferences',
-	'getDefinition', 'getTypeDefinition', 'getImplementations', 'getRenameRange', 'getRenameEdits',
-	'getFileRenameEdits', 'getSemanticTokens', 'getHover', 'getCompletionItems', 'getCodeActions',
-	'getSignatureHelp', 'getCodeLenses', 'getDocumentHighlights', 'getDocumentLinks',
-	'getWorkspaceSymbols', 'getAutoInsertSnippet', 'getDocumentDropEdits', 'getInlayHints',
-	'resolveCodeAction', 'resolveCompletionItem', 'resolveCodeLens', 'resolveDocumentLink',
-	'resolveInlayHint', 'resolveWorkspaceSymbol', 'getCallHierarchyItems',
-	'getCallHierarchyIncomingCalls', 'getCallHierarchyOutgoingCalls',
-	'cancelRequest', 'dispose',
-]);
-
-async function handle(message: WorkerInbound): Promise<void> {
-	if (message.type === 'init') {
-		compilerOptionsJson = message.compilerOptions;
-		buildService();
-		post({ type: 'ready' });
-		return;
-	}
-
-	if (message.type === 'sync') {
-		mirrors.clear();
-		for (const model of message.models) {
-			mirrors.set(model.uri, { uri: URI.parse(model.uri), version: model.version, text: model.text });
-		}
-		post({ type: 'synced' });
-		return;
-	}
-
-	if (message.type === 'cancel') {
-		service?.cancelRequest(message.id);
-		return;
-	}
-
-	if (message.type === 'request') {
-		const { id, method, args } = message;
-		try {
-			if (!service) throw new Error('language service not initialized');
-			if (!METHODS.has(method)) throw new Error(`unknown method: ${method}`);
-			const fn = (service as unknown as Record<string, (...a: unknown[]) => unknown>)[method];
-			const result = await fn.call(service, ...args);
-			post({ type: 'response', id, result });
-		} catch (error) {
-			console.error('[dartsx-worker] request failed', method, error instanceof Error ? error.message : String(error));
-			post({ type: 'response', id, error: error instanceof Error ? error.message : String(error) });
-		}
-	}
-}
-
-// Boot: fetch the d.ts payload before anything can build the service.
-// Messages arriving mid-boot are queued (assigning onmessage synchronously
-// guarantees nothing is dropped) and replayed once ready.
-const inbox: WorkerInbound[] = [];
-let booted = false;
-
-self.onmessage = (event: MessageEvent<WorkerInbound>) => {
-	if (!booted) {
-		inbox.push(event.data);
-		return;
-	}
-	void handle(event.data);
-};
+// ── boot ────────────────────────────────────────────────────────────
 
 void (async () => {
 	try {
 		await loadVirtualFs();
 	} catch (error) {
 		console.error('[dartsx-worker] boot failed', error);
+		postMessage('dartsx-error');
 		return;
 	}
-	booted = true;
-	for (const message of inbox.splice(0)) {
-		void handle(message);
-	}
-})();
 
-function post(message: WorkerOutbound): void {
-	(self as unknown as Worker).postMessage(message);
-}
+	monacoWorker.initialize((context: WorkerContext, createData: { compilerOptions: Record<string, unknown> | null }) => {
+		workerContext = context;
+		const converted = ts.convertCompilerOptionsFromJson(createData.compilerOptions ?? {}, '/tmp/project');
+		const compilerOptions: ts.CompilerOptions = {
+			...converted.options,
+			allowNonTsExtensions: true,
+		};
+		for (const diagnostic of converted.errors) {
+			console.warn('[dartsx-worker] tsconfig:', ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+		}
+
+		// ts.sys is undefined in a browser worker. createSys keys off the mere
+		// PRESENCE of `sys` to route resolvePath through sys.resolvePath /
+		// sys.directoryExists, so the stub must provide both (real existence
+		// checks go through env.fs/virtualFs, not these).
+		const stubSys = {
+			useCaseSensitiveFileNames: true,
+			resolvePath: (fsPath: string) => (fsPath.startsWith('/') ? fsPath : `/${fsPath}`),
+			directoryExists: () => true,
+		} as unknown as typeof ts.sys;
+
+		return createTypeScriptWorkerLanguageService({
+			typescript: ts,
+			compilerOptions,
+			env: {
+				workspaceFolders: [URI.file('/')],
+				locale: 'en',
+				fs: {
+					stat(uri: URI) {
+						return virtualFs.stat(uri.path);
+					},
+					readFile(uri: URI) {
+						return virtualFs.readFile(uri.path);
+					},
+					readDirectory(uri: URI) {
+						return virtualFs.readDirectory(uri.path);
+					},
+				},
+			},
+			uriConverter: {
+				asFileName: uri => uri.path,
+				asUri: fileName => URI.file(fileName),
+			},
+			workerContext: context as never,
+			languagePlugins: [
+				getDarTsxLanguagePlugin(readSourceFile),
+			],
+			languageServicePlugins: makePlugins(),
+		});
+	});
+
+	postMessage('dartsx-ready');
+})();
