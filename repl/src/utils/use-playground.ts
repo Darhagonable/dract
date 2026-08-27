@@ -293,14 +293,23 @@ export function usePlayground(): PlaygroundEngine {
 
 		(async () => {
 			let wbMod: any, pg: any, pgModules: any, pgAst: any, pgMapping: any;
+			// All dynamic imports start in parallel; only the workbench module
+			// gates the editor — the compiler/wasm/output-pane chain finishes
+			// loading behind it (awaited below, right before first use).
+			const lateImports = Promise.all([
+				import('./playground.ts'),
+				import('./playground-modules.ts'),
+				import('./playground-ast.ts'),
+				import('./playground-mapping.ts'),
+			]).then(([pg_, pgModules_, pgAst_, pgMapping_]) => {
+				pg = pg_;
+				pgModules = pgModules_;
+				pgAst = pgAst_;
+				pgMapping = pgMapping_;
+			});
+			lateImports.catch(() => { }); // observed via `await lateImports` below
 			try {
-				[wbMod, pg, pgModules, pgAst, pgMapping] = await Promise.all([
-					import('./workbench.ts'),
-					import('./playground.ts'),
-					import('./playground-modules.ts'),
-					import('./playground-ast.ts'),
-					import('./playground-mapping.ts'),
-				]);
+				wbMod = await import('./workbench.ts');
 			} catch (bootError) {
 				// A load failure after unmount (e.g. a test env torn down mid-import)
 				// must not become an unhandled rejection; while mounted, surface it.
@@ -463,6 +472,14 @@ export function usePlayground(): PlaygroundEngine {
 			monacoApi = wbMod.monaco;
 			if (disposed) return;
 
+			// The editor mounts as soon as the workbench exists — "Loading
+			// editor…" ends HERE, not after the compiler/output-pane chain.
+			// Grammar colors arrive when the extension finishes activating in
+			// the background (workbench.ts).
+			await workbench.openFile(workspace.entry);
+			setActiveFile(workspace.entry);
+			setReady(true);
+
 			// TypeScript features run in the language worker, off the UI
 			// thread (see src/language/). Same DarTsx transform + filters as
 			// the desktop tsserver plugin; the tsconfig drives its options.
@@ -479,13 +496,25 @@ export function usePlayground(): PlaygroundEngine {
 					() => compilerOptions(),
 				) ?? null;
 			};
+			void (async () => {
+				try {
+					langMod = await import('../language/index.ts');
+					if (!disposed) createLanguageService();
+				} catch (langError) {
+					console.warn('[dartsx-playground] language service unavailable', langError);
+				}
+			})();
+
+			// Everything past this point needs the compiler/output chain.
 			try {
-				langMod = await import('../language/index.ts');
-				if (disposed) return;
-				createLanguageService();
-			} catch (langError) {
-				console.warn('[dartsx-playground] language service unavailable', langError);
+				await lateImports;
+			} catch (bootError) {
+				if (!disposed) {
+					setError(bootError instanceof Error ? bootError.message : String(bootError));
+				}
+				return;
 			}
+			if (disposed) return;
 
 			themeObserver = new MutationObserver(() => {
 				workbench.setTheme(currentThemeIsDark());
@@ -1111,13 +1140,7 @@ export function usePlayground(): PlaygroundEngine {
 				})();
 			};
 
-			const deleteProjectFile = async (name: string) => {
-				try {
-					const vscodeMod = await import('vscode');
-					await vscodeMod.workspace.fs.delete(projectUri(name), { useTrash: false });
-				} catch {
-					// Best effort — the model dispose below keeps the UI consistent.
-				}
+			const deleteProjectFile = (name: string) => {
 				const model = monaco.editor.getModel(projectUri(name));
 				model?.dispose();
 				wbMod.unregisterWorkspaceFile(name);
@@ -1299,13 +1322,13 @@ export function usePlayground(): PlaygroundEngine {
 			};
 			sourceHost.addEventListener('keydown', keyHandler, true);
 
-			// The core editor mounts lazily on first open — boot opens the
-			// entry so the editor exists before the UI reports ready.
+			// The editor itself already mounted and `ready` flipped early
+			// (right after bootWorkbench); this full open also wires the
+			// output-pane bookkeeping that didn't exist yet back then.
 			await openFile(currentFile);
 			publishWorkspaceState();
 			void compileAndRun();
 			if (initialDiagnostic) setError(initialDiagnostic);
-			setReady(true);
 		})();
 
 		return () => {
