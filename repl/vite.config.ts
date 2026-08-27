@@ -110,12 +110,11 @@ function playgroundRuntime(): Plugin {
 	};
 }
 
-// Dependencies the scanner cannot reach (the playground's dynamic imports and
-// the dartsx compiler's transitive deps — dartsx itself is excluded below)
-// are pre-declared so no optimize pass runs mid-session. The @volar packages
-// must be prebundled even though @volar/monaco is excluded: the raw
-// @volar/monaco/worker imports them, and raw CJS has no named ESM exports
-// ("does not provide an export named 'createLanguage'").
+// Dependencies the scanner cannot reach (the playground's dynamic imports
+// and the dartsx compiler's transitive deps) are pre-declared so no optimize
+// pass runs mid-session. The @volar packages must be prebundled explicitly:
+// they are CJS, and raw CJS has no named ESM exports ("does not provide an
+// export named 'createLanguage'").
 const PREBUNDLED = [
 	// CJS root of the language service: prebundled to ESM for dev (the raw
 	// file is CommonJS and cannot be served to the browser as-is). Safe to
@@ -218,16 +217,11 @@ export default defineConfig({
 	},
 
 	optimizeDeps: {
-		// The dartsx compiler resolves oxc-parser/oxc-transform through their
-		// browser fields to WASM bindings (fetched .wasm assets + a worker), so
-		// those packages — and the bindings themselves — must reach the browser
-		// raw instead of being esbuild-prebundled. dartsx is excluded with them
-		// so the whole compiler graph keeps its browser resolution.
+		// The oxc toolchain resolves through browser fields to WASM
+		// bindings (fetched .wasm assets + a nested worker) — esbuild
+		// prebundling breaks those worker URLs and asset refs, so this
+		// slice stays raw. Everything else is prebundled by default.
 		exclude: [
-			'dartsx',
-			// ESM-syntax .js in a CJS-typed package: serve raw like the
-			// monaco stack rather than letting esbuild mis-detect it.
-			'@volar/monaco',
 			'oxc-parser',
 			'oxc-transform',
 			'@oxc-parser/binding-wasm32-wasi',
