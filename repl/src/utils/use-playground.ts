@@ -688,18 +688,17 @@ export function usePlayground(): PlaygroundEngine {
 			const rangesFor = (model: any, ranges: { from: number; to: number }[]) => {
 				const limit = model.getValueLength();
 				const out: { range: any; offset: number }[] = [];
-				for (const range of ranges) {
-					const to = Math.min(range.to, limit);
-					if (range.from >= 0 && range.from < to) {
-						out.push({
-							range: new monaco.Range(
-								model.getPositionAt(range.from),
-								model.getPositionAt(to),
-							),
-							offset: range.from,
-						});
-					}
+			for (const range of ranges) {
+				const to = Math.min(range.to, limit);
+				if (range.from >= 0 && range.from < to) {
+					const start = model.getPositionAt(range.from);
+					const end = model.getPositionAt(to);
+					out.push({
+						range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+						offset: range.from,
+					});
 				}
+			}
 				return out;
 			};
 
