@@ -5,6 +5,3 @@ dist/
 coverage/
 _output/
 .vscode-test/
-# Copied from packages/vscode-extension by repl/scripts/prepare-vsix.mjs
-repl/dartsx.vsix
-packages/vscode-extension/*.vsix

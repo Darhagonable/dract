@@ -1,5 +1,4 @@
 import { defineConfig, type Plugin } from 'vite';
-import vsixPlugin from '@codingame/monaco-vscode-rollup-vsix-plugin';
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';
@@ -113,7 +112,10 @@ function playgroundRuntime(): Plugin {
 
 // Dependencies the scanner cannot reach (the playground's dynamic imports and
 // the dartsx compiler's transitive deps — dartsx itself is excluded below)
-// are pre-declared so no optimize pass runs mid-session.
+// are pre-declared so no optimize pass runs mid-session. The @volar packages
+// must be prebundled even though @volar/monaco is excluded: the raw
+// @volar/monaco/worker imports them, and raw CJS has no named ESM exports
+// ("does not provide an export named 'createLanguage'").
 const PREBUNDLED = [
 	// CJS root of the language service: prebundled to ESM for dev (the raw
 	// file is CommonJS and cannot be served to the browser as-is). Safe to
@@ -128,6 +130,8 @@ const PREBUNDLED = [
 	'prettier/standalone',
 	'prettier/plugins/typescript',
 	'prettier/plugins/estree',
+	'@volar/language-service',
+	'@volar/typescript',
 ];
 
 // Feeds the language worker's virtual FS (src/language/virtual-fs.ts): TS's
@@ -196,13 +200,21 @@ export default defineConfig({
 	plugins: [
 		playgroundRuntime(),
 		languageTypesFs(),
-		// Vite and the VSIX rollup plugin can resolve different Rollup type
-		// versions; runtime is compatible, only hook context types clash.
-		vsixPlugin() as unknown as Plugin,
 	],
 
 	worker: {
 		format: 'es',
+	},
+
+	server: {
+		warmup: {
+			clientFiles: [
+				'./src/main.ts',
+				'./src/utils/workbench.ts',
+				'./src/utils/playground-modules.ts',
+				'./src/utils/playground.ts',
+			],
+		},
 	},
 
 	optimizeDeps: {
@@ -210,9 +222,7 @@ export default defineConfig({
 		// browser fields to WASM bindings (fetched .wasm assets + a worker), so
 		// those packages — and the bindings themselves — must reach the browser
 		// raw instead of being esbuild-prebundled. dartsx is excluded with them
-		// so the whole compiler graph keeps its browser resolution. The
-		// monaco-vscode packages stay out entirely: their workers and service
-		// wiring break when esbuild prebundles them.
+		// so the whole compiler graph keeps its browser resolution.
 		exclude: [
 			'dartsx',
 			// ESM-syntax .js in a CJS-typed package: serve raw like the
@@ -223,17 +233,6 @@ export default defineConfig({
 			'@oxc-parser/binding-wasm32-wasi',
 			'@oxc-transform/binding-wasm32-wasi',
 			'@napi-rs/wasm-runtime',
-			'monaco-editor',
-			'vscode',
-			'@codingame/monaco-vscode-api',
-			'@codingame/monaco-editor-wrapper',
-			'@codingame/monaco-vscode-base-service-override',
-			'@codingame/monaco-vscode-files-service-override',
-			'@codingame/monaco-vscode-languages-service-override',
-			'@codingame/monaco-vscode-textmate-service-override',
-			'@codingame/monaco-vscode-theme-defaults-default-extension',
-			'@codingame/monaco-vscode-json-default-extension',
-			'@codingame/monaco-vscode-typescript-basics-default-extension',
 		],
 		include: PREBUNDLED,
 	},
