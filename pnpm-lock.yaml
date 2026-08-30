@@ -29,9 +29,9 @@ importers:
 
   packages/cli:
     dependencies:
-      '@dartsx/typescript-plugin':
+      '@dartsx/language':
         specifier: workspace:*
-        version: link:../typescript-plugin
+        version: link:../language
       '@volar/language-core':
         specifier: ~2.4.28
         version: 2.4.28
@@ -98,8 +98,30 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0))
 
+  packages/language:
+    dependencies:
+      '@volar/language-core':
+        specifier: ~2.4.28
+        version: 2.4.28
+      '@volar/typescript':
+        specifier: ~2.4.28
+        version: 2.4.28
+      dartsx:
+        specifier: workspace:*
+        version: link:../dartsx
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.3
+        version: 25.9.3
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/typescript-plugin:
     dependencies:
+      '@dartsx/language':
+        specifier: workspace:*
+        version: link:../language
       '@volar/language-core':
         specifier: ~2.4.28
         version: 2.4.28
@@ -135,6 +157,9 @@ importers:
 
   packages/vscode-extension:
     dependencies:
+      '@dartsx/language':
+        specifier: workspace:*
+        version: link:../language
       '@dartsx/typescript-plugin':
         specifier: workspace:*
         version: link:../typescript-plugin

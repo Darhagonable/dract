@@ -5,7 +5,7 @@ import { createGrammarSnapshot } from '@vscode-tmlanguage-snapshot/vscode';
 
 const fixtureDir = path.resolve(import.meta.dirname!, 'fixture');
 const snapshot = await createGrammarSnapshot(
-  path.resolve(import.meta.dirname!, '../package.json'),
+  path.resolve(import.meta.dirname!, '../dist/package.json'),
 );
 
 const fixtures = readdirSync(path.join(fixtureDir, 'src'));
@@ -13,7 +13,7 @@ const fixtures = readdirSync(path.join(fixtureDir, 'src'));
 describe('DarTsx grammar snapshot', () => {
   for (const file of fixtures) {
     it(`tokenizes ${file}`, async () => {
-      const result = await snapshot(`tests/fixture/src/${file}`);
+      const result = await snapshot(path.join(fixtureDir, 'src', file));
       expect(result).toMatchSnapshot();
     });
   }

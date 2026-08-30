@@ -29,7 +29,7 @@
 		"grammars": [
 			{
 				"scopeName": "source.dartsx.style.injection",
-				"path": "./syntaxes/dartsx.style.injection.tmLanguage.json",
+				"path": "@dartsx/language/syntaxes/dartsx.style.injection.tmLanguage.json",
 				"injectTo": [
 					"source.js",
 					"source.js.jsx",
@@ -43,7 +43,7 @@
 			},
 			{
 				"scopeName": "source.dartsx.css-expressions.injection",
-				"path": "./syntaxes/dartsx.css-expressions.injection.tmLanguage.json",
+				"path": "@dartsx/language/syntaxes/dartsx.css-expressions.injection.tmLanguage.json",
 				"injectTo": [
 					"source.js",
 					"source.js.jsx",
@@ -54,7 +54,7 @@
 			},
 			{
 				"scopeName": "source.dartsx.render.injection",
-				"path": "./syntaxes/dartsx.render.injection.tmLanguage.json",
+				"path": "@dartsx/language/syntaxes/dartsx.render.injection.tmLanguage.json",
 				"injectTo": [
 					"source.js",
 					"source.js.jsx",
@@ -66,12 +66,13 @@
 		]
 	},
 	"scripts": {
-		"build": "tsdown",
+		"build": "tsdown && node scripts/build-manifest.ts",
 		"check": "tsc --noEmit",
 		"test": "vitest run",
 		"package": "node scripts/package.ts"
 	},
 	"dependencies": {
+		"@dartsx/language": "workspace:*",
 		"@dartsx/typescript-plugin": "workspace:*",
 		"@volar/language-server": "~2.4.28",
 		"volar-service-css": "0.0.71",

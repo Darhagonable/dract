@@ -4,6 +4,7 @@ import { vsCodeWorker } from 'vitest-environment-vscode';
 export default defineProject({
 	test: {
 		include: ['tests/*.test.ts'],
+		globalSetup: ['./scripts/build-manifest.ts'],
 		pool: vsCodeWorker({
 			version: 'stable',
 			reuseWorker: true,

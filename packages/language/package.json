@@ -1,36 +1,24 @@
 {
-	"name": "@dartsx/cli",
+	"name": "@dartsx/language",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
-	"description": "DarTsx CLI - type-checking and packaging",
-	"bin": {
-		"dartsx": "./bin/dartsx.js"
-	},
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
-		}
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		},
+		"./syntaxes/*": "./syntaxes/*"
 	},
-	"files": [
-		"bin",
-		"dist"
-	],
 	"scripts": {
 		"build": "tsdown",
 		"check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@dartsx/language": "workspace:*",
 		"@volar/language-core": "~2.4.28",
 		"@volar/typescript": "~2.4.28",
-		"chokidar": "^5.0.0",
-		"dartsx": "workspace:*",
-		"kleur": "^4.1.5"
-	},
-	"peerDependencies": {
-		"typescript": ">=5.0.0"
+		"dartsx": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^25.9.3",

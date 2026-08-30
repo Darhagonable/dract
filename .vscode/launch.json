@@ -7,7 +7,7 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.@dartsx/vscode-extension",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/dist",
 				"${workspaceFolder}/playground"
 			],
 			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
@@ -20,7 +20,7 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.@dartsx/vscode-extension",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/dist",
 				"${workspaceFolder}/toolkit/router"
 			],
 			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
@@ -33,7 +33,7 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.@dartsx/vscode-extension",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/dist",
 				"${workspaceFolder}/toolkit/query"
 			],
 			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],
@@ -46,7 +46,7 @@
 			"request": "launch",
 			"args": [
 				"--disable-extension=dartsx.@dartsx/vscode-extension",
-				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/",
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension/dist",
 				"${workspaceFolder}/website"
 			],
 			"outFiles": ["${workspaceFolder}/packages/vscode-extension/dist/**/*.js"],

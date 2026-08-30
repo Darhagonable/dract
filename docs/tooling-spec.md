@@ -5,7 +5,8 @@
 DarTsx tooling currently ships as a VS Code-extension-first stack:
 
 - `packages/vscode-extension` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
-- `packages/typescript-plugin` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
+- `packages/language` (`@dartsx/language`) is the shared language core: the Volar language plugin (detection, virtual code, source mappings, embedded CSS/HTML), hover rewrites, diagnostic filtering, unused-CSS detection, and the canonical TextMate grammars (`syntaxes/`). Consumed by the tsserver plugin, the extension's language server, and the CLI.
+- `packages/typescript-plugin` is an internal implementation detail: a thin tsserver entry point that wires `@dartsx/language` into VS Code's built-in JavaScript/TypeScript language service. Its build output is a self-contained bundle so it can ship inside the extension VSIX.
 - `packages/vite-plugin` adapts the compiler's `Project` layer to dev/build flows.
 - `packages/dartsx` remains the source of truth for compiler and runtime behavior.
 
@@ -81,11 +82,18 @@ DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts
                             │
 ┌───────────────────────────▼────────────────────────┐
 │ VS Code JS/TS Language Service                     │
-│ (packages/typescript-plugin)                      │
+│ (packages/typescript-plugin)                       │
+│ - tsserver entry point around @dartsx/language    │
+└───────────────────────────┬────────────────────────┘
+                            │
+┌───────────────────────────▼────────────────────────┐
+│ Shared Language Core (@dartsx/language)            │
 │ - Detects DarTsx source by content                │
 │ - Builds Volar virtual code from DarTsx source    │
 │ - Rewrites hover labels to DarTsx-native terms    │
 │ - Filters false-positive diagnostics              │
+│ - Detects unused CSS selectors                    │
+│ - Owns the canonical TextMate grammars            │
 └───────────────────────────┬────────────────────────┘
                             │
                 ┌───────────▼───────────┐
@@ -177,6 +185,54 @@ It currently highlights:
 
 The grammar is intentionally lightweight. Semantic correctness still comes from tsserver and the compiler.
 
+### 5.6 Packaging Model
+
+The extension, the tsserver plugin, and the grammars ship together in one VSIX:
+
+```
+extension/
+├── dist/
+│   ├── main.cjs / server.cjs / browser.cjs   (bundled extension code)
+│   └── syntaxes/*.tmLanguage.json            (copied from @dartsx/language)
+└── node_modules/@dartsx/typescript-plugin/
+    ├── package.json                          (generated, no deps)
+    └── dist/index.js                         (self-contained bundle)
+```
+
+- VS Code resolves the `typescriptServerPlugins` contribution against the extension's own `node_modules`, so the plugin must physically ship inside the VSIX. This follows the same pattern used by Vue, Astro, and Lit.
+- The plugin's `dist/index.js` bundles `@dartsx/language`, the Volar runtime pieces, and the DarTsx preprocess lowering; only Node builtins and the host tsserver's `typescript` are required at runtime. This is asserted by `packages/typescript-plugin/tests/bundle.test.ts`.
+- The language core therefore exists twice in the VSIX (inlined in `server.cjs` and in the plugin bundle). This duplication is deliberate: every bundled-plugin ecosystem accepts it, and avoiding it would require shipping the real `@volar/*` dependency tree like Svelte does.
+
+### 5.7 Manifest and Grammar Assets
+
+The checked-in `packages/vscode-extension/package.json` is a source manifest, not a loadable extension: its grammar contribution paths are npm package specifiers (`@dartsx/language/syntaxes/...`), because VS Code itself only understands extension-root-relative file paths.
+
+`scripts/build-manifest.ts` turns the source manifest into `dist/package.json` — the real extension manifest:
+
+```
+@dartsx/language/syntaxes/foo.tmLanguage.json     (source, specifier)
+        ↓ build-manifest (resolve via exports map, copy)
+dist/syntaxes/foo.tmLanguage.json                 (asset)
+dist/package.json  →  contributes.grammars[].path: "./syntaxes/foo.tmLanguage.json"
+                      main: "./main.cjs", browser: "./browser.cjs"
+```
+
+`dist/` as a whole is the loadable extension artifact. What consumes what:
+
+- the VS Code test host and F5-on-package-dir launches load the SOURCE
+  manifest — its specifier grammar paths resolve because
+  `scripts/build-manifest.mjs` links `node_modules/@dartsx` to `@dartsx/` at
+  the extension root (gitignored, never staged into the VSIX); VS Code's
+  extension-root-relative resolution then finds the real files
+- F5 dev launches (`.vscode/launch.json`) point `--extensionDevelopmentPath`
+  at `dist/` directly
+- the VSIX (`scripts/package.ts` reads `dist/package.json`, reprefixes its
+  paths to the `extension/dist/**` layout, stages the self-contained tsserver
+  plugin under `node_modules/`, packs with vsce, and verifies the resulting
+  VSIX contains the plugin and the grammars before succeeding)
+
+Grammars are owned by `@dartsx/language/syntaxes` as the single source of truth and never exist as editable files in the extension; the grammar snapshot tests consume the dist manifest directly, and `package.ts` verifies the packaged VSIX contains the grammars before succeeding.
+
 ## 6. Build-Time Tooling Design
 
 ### 6.1 Vite Plugin Role
@@ -197,7 +253,7 @@ All cross-file state (reactive exports, reactive call propagation, invalidation 
 
 There are two related but distinct transforms in the repo:
 
-- the editor transform in `packages/typescript-plugin` exists to make VS Code's built-in JS/TS language service understand DarTsx source
+- the editor transform in `@dartsx/language` exists to make VS Code's built-in JS/TS language service understand DarTsx source; `packages/typescript-plugin` is only its tsserver entry point
 - the compiler in `packages/dartsx` exists to generate runtime code
 
 They intentionally solve different problems. The editor transform aims for type-service compatibility and source mapping. The compiler aims for correct emitted runtime behavior.

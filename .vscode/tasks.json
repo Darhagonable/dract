@@ -5,7 +5,7 @@
 			"label": "build-extension",
 			"type": "shell",
 			"command": "pnpm",
-			"args": ["-r", "--filter", "@dartsx/typescript-plugin", "--filter", "@dartsx/vscode-extension", "run", "build"],
+			"args": ["-r", "--filter", "@dartsx/language", "--filter", "@dartsx/typescript-plugin", "--filter", "@dartsx/vscode-extension", "run", "build"],
 			"group": "build",
 			"problemMatcher": ["$tsc"]
 		},
