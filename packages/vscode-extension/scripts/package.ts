@@ -55,7 +55,7 @@ function createVsixManifest(manifest: PackageManifest): Record<string, unknown> 
 	extensionManifest.files = ['dist/**', 'syntaxes/**', 'README.md'];
 	// workspace:* protocol deps are bundled at build time; drop them so the
 	// generated manifest stays valid on its own
-	delete extensionManifest.dependencies?.['@dartsx/typescript-plugin'];
+	delete extensionManifest.dependencies?.['@dartsx/language-service'];
 
 	return extensionManifest;
 }

@@ -22,7 +22,7 @@
 	"contributes": {
 		"typescriptServerPlugins": [
 			{
-				"name": "@dartsx/typescript-plugin",
+				"name": "@dartsx/language-service",
 				"enableForWorkspaceTypeScriptVersions": true
 			}
 		],
@@ -72,7 +72,7 @@
 		"package": "node scripts/package.ts"
 	},
 	"dependencies": {
-		"@dartsx/typescript-plugin": "workspace:*",
+		"@dartsx/language-service": "workspace:*",
 		"@volar/language-server": "~2.4.28",
 		"volar-service-css": "0.0.71",
 		"volar-service-html": "0.0.71",

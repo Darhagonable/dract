@@ -5,7 +5,7 @@
 DarTsx tooling currently ships as a VS Code-extension-first stack:
 
 - `packages/vscode-extension` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
-- `packages/typescript-plugin` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
+- `packages/language-service` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
 - `packages/vite-plugin` adapts the compiler's `Project` layer to dev/build flows.
 - `packages/dartsx` remains the source of truth for compiler and runtime behavior.
 
@@ -81,7 +81,7 @@ DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts
                             │
 ┌───────────────────────────▼────────────────────────┐
 │ VS Code JS/TS Language Service                     │
-│ (packages/typescript-plugin)                      │
+│ (packages/language-service)                      │
 │ - Detects DarTsx source by content                │
 │ - Builds Volar virtual code from DarTsx source    │
 │ - Rewrites hover labels to DarTsx-native terms    │
@@ -197,7 +197,7 @@ All cross-file state (reactive exports, reactive call propagation, invalidation 
 
 There are two related but distinct transforms in the repo:
 
-- the editor transform in `packages/typescript-plugin` exists to make VS Code's built-in JS/TS language service understand DarTsx source
+- the editor transform in `packages/language-service` exists to make VS Code's built-in JS/TS language service understand DarTsx source
 - the compiler in `packages/dartsx` exists to generate runtime code
 
 They intentionally solve different problems. The editor transform aims for type-service compatibility and source mapping. The compiler aims for correct emitted runtime behavior.

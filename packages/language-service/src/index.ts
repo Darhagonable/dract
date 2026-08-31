@@ -1,7 +1,9 @@
 /**
- * DarTsx TypeScript Language Service Plugin (Volar-based)
+ * DarTsx Language Service (Volar-based)
  *
- * Loaded by tsserver when configured in tsconfig.json.
+ * Loaded into VS Code's built-in tsserver by the DarTsx VS Code extension
+ * through its typescriptServerPlugins contribution — users never configure
+ * it in tsconfig.json.
  * Transforms DarTsx .tsx files into valid TypeScript via the Volar framework,
  * providing intellisense, diagnostics, hover, completions, and navigation.
  *
