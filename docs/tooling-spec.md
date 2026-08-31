@@ -5,7 +5,7 @@
 DarTsx tooling currently ships as a VS Code-extension-first stack:
 
 - `packages/vscode-extension` is the user-facing editor integration. Installing it enables DarTsx handling in JavaScript, TypeScript, JSX, and TSX editors.
-- `packages/language-service` is an internal implementation detail used by the VS Code extension through VS Code's built-in JavaScript/TypeScript language service.
+- `packages/language-service` is an internal implementation detail. The VS Code extension loads it into VS Code's built-in JavaScript/TypeScript language service through its `typescriptServerPlugins` manifest contribution — users never add it to a tsconfig. The same lowering and suppression rules are reused programmatically by `dartsx check`.
 - `packages/vite-plugin` adapts the compiler's `Project` layer to dev/build flows.
 - `packages/dartsx` remains the source of truth for compiler and runtime behavior.
 
@@ -75,7 +75,8 @@ DarTsx source can live in `.tsx` and `.jsx` files and, for non-JSX modules, `.ts
 │ VS Code Extension (packages/vscode-extension)     │
 │ - User-facing DarTsx support in JS/TS/JSX/TSX     │
 │ - Injects TextMate grammar into supported editors │
-│ - Hooks into VS Code's built-in JS/TS service     │
+│ - Loads language service into built-in tsserver   │
+│ - CSS/HTML features via embedded Volar server     │
 │ - Shows lightweight editor status UI              │
 └───────────────────────────┬────────────────────────┘
                             │
@@ -109,11 +110,14 @@ DarTsx uses JavaScript- and TypeScript-owned file extensions. That makes a Svelt
 
 The current design keeps a single VS Code language-service path in charge and layers DarTsx support into it:
 
+- The extension injects the language service into tsserver via `contributes.typescriptServerPlugins`, which also covers inferred projects — JS files with no jsconfig or tsconfig at all.
 - Volar virtual code handles source mapping and transformed service code.
 - The DarTsx integration only activates for files that actually contain DarTsx syntax.
 - Regular TypeScript files continue through the normal TS pipeline unchanged.
 - Regular JavaScript files continue through the normal JS pipeline unchanged.
 - The build stack stays separate and uses the real compiler instead of the editor-only lowering.
+
+The packaged VSIX is self-contained: the extension bundles its runtime dependencies into `dist/`, and the built language service is staged as `node_modules/@dartsx/language-service` inside the VSIX so tsserver resolves the plugin from the installed extension.
 
 ## 5. Editor Tooling Design
 
@@ -123,7 +127,21 @@ DarTsx detection is content-based. The editor plugin treats a file as DarTsx onl
 
 This selective activation matters because the extension injects into JavaScript, JSX, TypeScript, and TSX editors, but regular JS/TS files must not be reinterpreted as DarTsx.
 
-### 5.2 Virtual Code
+### 5.2 Language Service Package Layout
+
+`packages/language-service` is organized around its consumers:
+
+| Module | Role |
+|---|---|
+| `src/index.ts` | tsserver plugin glue — Volar quickstart factory plus a proxy that routes quick info and diagnostics through the modules below |
+| `src/language.ts` | Volar `LanguagePlugin` — lowering, virtual codes, source mappings; also embedded by the extension's CSS/HTML server |
+| `src/hover.ts` | Quick info rewriting to DarTsx-native vocabulary |
+| `src/diagnostics.ts` | Diagnostic suppression rules and unused-CSS warnings; exported as `@dartsx/language-service/diagnostics` and reused by `dartsx check` |
+| `src/unused-css.ts` | Standalone unused-CSS selector analyzer |
+
+`dartsx check` does not load a tsserver plugin; it wires `src/language.ts` into `@volar/typescript`'s `proxyCreateProgram` directly and imports the same suppression rules, so editor and CLI agree on which diagnostics are DarTsx artifacts.
+
+### 5.3 Virtual Code
 
 Internally, the VS Code integration uses a Volar `LanguagePlugin` to create a virtual JS, JSX, TS, or TSX view of DarTsx source.
 
@@ -141,7 +159,7 @@ Current lowering rules include:
 
 This lowering exists to make TypeScript services usable. It is not the runtime compiler output.
 
-### 5.3 Hover and Quick Info Rewriting
+### 5.4 Hover and Quick Info Rewriting
 
 Lowered TS syntax is useful for type-checking but not ideal for DarTsx users, so the plugin rewrites selected quick info results back into DarTsx-native terms.
 
@@ -152,7 +170,7 @@ Current rewrite behavior includes:
 - parameter labels rewritten to `prop` or `binded prop` for component parameters.
 - aliased imports resolved back to the definition site so imported `state` and `derived` symbols keep useful labels and type info.
 
-### 5.4 Diagnostic Filtering
+### 5.5 Diagnostic Filtering
 
 The plugin suppresses known false positives that are artifacts of DarTsx syntax or lowering strategy while leaving ordinary TypeScript errors visible.
 
@@ -163,7 +181,7 @@ Important examples:
 
 This is intentionally a filter layer, not a second semantic checker.
 
-### 5.5 Syntax Highlighting
+### 5.6 Syntax Highlighting
 
 The VS Code extension provides a TextMate injection grammar that targets JavaScript, JSX, TypeScript, and TSX scopes.
 
@@ -240,6 +258,8 @@ The current tooling architecture is expected to stay green under:
 - workspace build via `pnpm -r run build`
 - test suite via `pnpm test` or `npx vitest run`
 - playground production build through the workspace build
+- playground type-check via `pnpm --filter @dartsx/playground check`
+- extension packaging via `pnpm --filter @dartsx/vscode-extension run package`
 
 When the tooling architecture changes, these validation paths should be kept current before adding new editor-facing behavior.
 
