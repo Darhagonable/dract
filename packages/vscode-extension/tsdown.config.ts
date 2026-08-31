@@ -9,7 +9,11 @@ export default defineConfig([
 		format: 'cjs',
 		fixedExtension: true,
 		deps: {
+			// vscode is provided by the extension host; everything else bundles
+			// in because the VSIX ships no node_modules
 			neverBundle: ['vscode'],
+			alwaysBundle: [/./],
+			onlyBundle: false,
 		},
 	},
 	{
@@ -21,6 +25,8 @@ export default defineConfig([
 		fixedExtension: true,
 		deps: {
 			neverBundle: ['vscode'],
+			alwaysBundle: [/./],
+			onlyBundle: false,
 		},
 	},
 ]);

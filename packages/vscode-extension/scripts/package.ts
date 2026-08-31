@@ -14,11 +14,12 @@
  */
 
 import { createVSIX } from '@vscode/vsce';
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const languageServiceDir = resolve(packageDir, '../language-service');
 const stageDir = join(packageDir, 'out', 'vsix');
 // the .vsix is emitted next to the staging dir, NOT inside dist/ — dist is
 // symlinked into the stage, so writing there would make the vsix visible
@@ -52,12 +53,44 @@ function createVsixManifest(manifest: PackageManifest): Record<string, unknown> 
 	extensionManifest.name = VSCODE_EXTENSION_NAME;
 	// the staging directory only contains what we stage — declare it so vsce
 	// doesn't warn about a missing .vscodeignore
-	extensionManifest.files = ['dist/**', 'syntaxes/**', 'README.md'];
-	// workspace:* protocol deps are bundled at build time; drop them so the
-	// generated manifest stays valid on its own
-	delete extensionManifest.dependencies?.['@dartsx/language-service'];
+	extensionManifest.files = ['dist/**', 'syntaxes/**', 'README.md', 'node_modules/**'];
+	// runtime deps are bundled into dist at build time; only the language
+	// service stays a real dependency because tsserver resolves it from
+	// node_modules — with a concrete version so `npm list` in the staging
+	// dir can validate the tree
+	extensionManifest.dependencies = extensionManifest.dependencies?.['@dartsx/language-service']
+		? { '@dartsx/language-service': languageServiceVersion() }
+		: undefined;
 
 	return extensionManifest;
+}
+
+function languageServiceVersion(): string {
+	return JSON.parse(readFileSync(join(languageServiceDir, 'package.json'), 'utf8')).version;
+}
+
+/**
+ * Stage the built language service as a resolvable node module inside the
+ * VSIX. tsserver resolves `contributes.typescriptServerPlugins[].name`
+ * against the installed extension's path, so it must find
+ * `<extension>/node_modules/@dartsx/language-service` with a working `main`.
+ * The dist is self-contained (only `typescript` stays external, provided by
+ * tsserver itself), so the module dir needs nothing else.
+ */
+function stageLanguageService() {
+	const distDir = join(languageServiceDir, 'dist');
+	if (!statSync(distDir, { throwIfNoEntry: false })) {
+		throw new Error('Missing packages/language-service/dist. Run `pnpm build` first.');
+	}
+	const { name, version } = JSON.parse(readFileSync(join(languageServiceDir, 'package.json'), 'utf8'));
+	const moduleDir = join(stageDir, 'node_modules', ...name.split('/'));
+	mkdirSync(moduleDir, { recursive: true });
+	cpSync(distDir, join(moduleDir, 'dist'), { recursive: true });
+	writeFileSync(join(moduleDir, 'package.json'), JSON.stringify({
+		name,
+		version,
+		main: 'dist/index.js',
+	}, null, '\t'));
 }
 
 const STAGED_ENTRIES = [
@@ -84,6 +117,7 @@ async function main() {
 	const version = manifest.version;
 
 	stageArtifacts();
+	stageLanguageService();
 
 	const vsixManifest = createVsixManifest(manifest);
 	writeFileSync(join(stageDir, 'package.json'), JSON.stringify(vsixManifest, null, '\t'));
@@ -93,7 +127,7 @@ async function main() {
 	await createVSIX({
 		cwd: stageDir,
 		packagePath: join(outDir, `dartsx-${version}.vsix`),
-		dependencies: false,
+		useYarn: false,
 		updatePackageJson: false,
 		gitTagVersion: false,
 		followSymlinks: true,
