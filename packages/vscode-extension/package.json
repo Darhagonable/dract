@@ -22,7 +22,7 @@
 	"contributes": {
 		"typescriptServerPlugins": [
 			{
-				"name": "@dartsx/language-service",
+				"name": "@dartsx/language-service/dist/plugin",
 				"enableForWorkspaceTypeScriptVersions": true
 			}
 		],

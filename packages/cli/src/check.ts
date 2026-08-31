@@ -10,9 +10,7 @@ import * as ts from 'typescript';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { proxyCreateProgram } from '@volar/typescript/lib/node/proxyCreateProgram.js';
-import { getDarTsxLanguagePlugin } from '@dartsx/language-service/language';
-import { analyzeUnusedCss } from '@dartsx/language-service/unused-css';
-import { shouldSuppressDiagnostic } from '@dartsx/language-service/diagnostics';
+import { getDarTsxLanguagePlugin, analyzeUnusedCss, shouldSuppressDiagnostic } from '@dartsx/language-service';
 import { isDarTsxFile, findSuppressZones, type SuppressZone } from 'dartsx/compiler/preprocess';
 
 export interface CheckOptions {

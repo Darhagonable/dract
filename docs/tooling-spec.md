@@ -117,7 +117,7 @@ The current design keeps a single VS Code language-service path in charge and la
 - Regular JavaScript files continue through the normal JS pipeline unchanged.
 - The build stack stays separate and uses the real compiler instead of the editor-only lowering.
 
-The packaged VSIX is self-contained: the extension bundles its runtime dependencies into `dist/`, and the built language service is staged as `node_modules/@dartsx/language-service` inside the VSIX so tsserver resolves the plugin from the installed extension.
+The packaged VSIX is self-contained: the extension bundles its runtime dependencies into `dist/`, and the built language service is staged as `node_modules/@dartsx/language-service` (dist + conventional `main`/`exports`) inside the VSIX so tsserver resolves the plugin from the installed extension.
 
 ## 5. Editor Tooling Design
 
@@ -133,11 +133,14 @@ This selective activation matters because the extension injects into JavaScript,
 
 | Module | Role |
 |---|---|
-| `src/index.ts` | tsserver plugin glue — Volar quickstart factory plus a proxy that routes quick info and diagnostics through the modules below |
+| `src/index.ts` | package root — re-exports the language core consumed by the extension's CSS/HTML server and `dartsx check` |
+| `src/plugin.ts` | tsserver plugin entry (`@dartsx/language-service/plugin`) — Volar quickstart factory plus a proxy that routes quick info and diagnostics through the modules below |
 | `src/language.ts` | Volar `LanguagePlugin` — lowering, virtual codes, source mappings; also embedded by the extension's CSS/HTML server |
 | `src/hover.ts` | Quick info rewriting to DarTsx-native vocabulary |
-| `src/diagnostics.ts` | Diagnostic suppression rules and unused-CSS warnings; exported as `@dartsx/language-service/diagnostics` and reused by `dartsx check` |
+| `src/diagnostics.ts` | Diagnostic suppression rules and unused-CSS warnings; consumed from the package root and reused by `dartsx check` |
 | `src/unused-css.ts` | Standalone unused-CSS selector analyzer |
+
+The tsserver entry is reached by name: the extension's `typescriptServerPlugins` contribution names `@dartsx/language-service/dist/plugin`, which tsserver resolves node10-style (ignoring the `exports` map) directly onto the built plugin factory. `main` and `exports` both serve the language-core barrel for every other consumer, so the package layout stays fully conventional.
 
 `dartsx check` does not load a tsserver plugin; it wires `src/language.ts` into `@volar/typescript`'s `proxyCreateProgram` directly and imports the same suppression rules, so editor and CLI agree on which diagnostics are DarTsx artifacts.
 

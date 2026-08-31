@@ -9,17 +9,9 @@
 			"types": "./dist/index.d.ts",
 			"default": "./dist/index.js"
 		},
-		"./language": {
-			"types": "./dist/language.d.ts",
-			"default": "./dist/language.js"
-		},
-		"./diagnostics": {
-			"types": "./dist/diagnostics.d.ts",
-			"default": "./dist/diagnostics.js"
-		},
-		"./unused-css": {
-			"types": "./dist/unused-css.d.ts",
-			"default": "./dist/unused-css.js"
+		"./plugin": {
+			"types": "./dist/plugin.d.ts",
+			"default": "./dist/plugin.js"
 		}
 	},
 	"scripts": {

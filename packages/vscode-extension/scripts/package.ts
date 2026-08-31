@@ -72,10 +72,11 @@ function languageServiceVersion(): string {
 /**
  * Stage the built language service as a resolvable node module inside the
  * VSIX. tsserver resolves `contributes.typescriptServerPlugins[].name`
- * against the installed extension's path, so it must find
- * `<extension>/node_modules/@dartsx/language-service` with a working `main`.
- * The dist is self-contained (only `typescript` stays external, provided by
- * tsserver itself), so the module dir needs nothing else.
+ * ("@dartsx/language-service/dist/plugin") against the installed
+ * extension's path — node10-style, ignoring the exports map — landing
+ * directly on the staged factory file. The dist is self-contained (only
+ * `typescript` stays external, provided by tsserver itself), so the module
+ * dir needs nothing else.
  */
 function stageLanguageService() {
 	const distDir = join(languageServiceDir, 'dist');
@@ -90,6 +91,9 @@ function stageLanguageService() {
 		name,
 		version,
 		main: 'dist/index.js',
+		exports: {
+			'.': './dist/index.js',
+		},
 	}, null, '\t'));
 }
 
