@@ -5,6 +5,7 @@ export default defineConfig({
 		index: 'src/index.ts',
 		language: 'src/language.ts',
 		'unused-css': 'src/unused-css.ts',
+		diagnostics: 'src/diagnostics.ts',
 	},
 	format: 'cjs',
 	fixedExtension: false,

@@ -12,15 +12,8 @@ import * as fs from 'node:fs';
 import { proxyCreateProgram } from '@volar/typescript/lib/node/proxyCreateProgram.js';
 import { getDarTsxLanguagePlugin } from '@dartsx/language-service/language';
 import { analyzeUnusedCss } from '@dartsx/language-service/unused-css';
-import { findSuppressZones, isDarTsxFile } from 'dartsx/compiler/preprocess';
-
-// Errors always suppressed in DarTsx files — false positives from custom syntax transforms
-// (mirrors ALWAYS_SUPPRESS in the TypeScript plugin)
-const ALWAYS_SUPPRESS = new Set([
-	1003, 1005, 1109, 1128, 1136, 1381, 1434,
-	2304, 2362, 2552, 2632, 2657, 2693, 2695, 2724, 2809,
-	6385, 7026,
-]);
+import { shouldSuppressDiagnostic } from '@dartsx/language-service/diagnostics';
+import { isDarTsxFile, findSuppressZones, type SuppressZone } from 'dartsx/compiler/preprocess';
 
 export interface CheckOptions {
 	cwd?: string;
@@ -80,14 +73,18 @@ export function check(options: CheckOptions = {}): CheckResult {
 	];
 
 	// Filter out suppressed diagnostics (control flow zones, bind attributes)
+	// using the same suppression rules as the editor language service
+	const zonesCache = new Map<string, SuppressZone[]>();
 	const filteredDiagnostics = allDiagnostics.filter(d => {
 		if (!d.file || d.start === undefined) return true;
-		const source = d.file.text;
-		if (!isDarTsxFile(source)) return true;
-		// Always suppress known false positives from DarTsx syntax transforms
-		if (ALWAYS_SUPPRESS.has(d.code)) return false;
-		const zones = findSuppressZones(source);
-		return !zones.some((z: { start: number; end: number }) => d.start! >= z.start && d.start! < z.end);
+		const content = d.file.text;
+		if (!isDarTsxFile(content)) return true;
+		let zones = zonesCache.get(d.file.fileName);
+		if (!zones) {
+			zones = findSuppressZones(content);
+			zonesCache.set(d.file.fileName, zones);
+		}
+		return !shouldSuppressDiagnostic(d, zones);
 	});
 
 	// Report TS errors
