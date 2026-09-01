@@ -644,6 +644,113 @@ exports[`DarTsx grammar snapshot > tokenizes JsxBlockExpressions.tsx 1`] = `
 >"
 `;
 
+exports[`DarTsx grammar snapshot > tokenizes JsxHighlight.jsx 1`] = `
+">component HighlightDemo(label, count = 0) {
+#^^^^^^^^^ source.js.jsx storage.type.component.dartsx
+#         ^ source.js.jsx
+#          ^^^^^^^^^^^^^ source.js.jsx entity.name.function.component.dartsx
+#                       ^ source.js.jsx punctuation.definition.parameters.begin.tsx
+#                        ^^^^^ source.js.jsx meta.parameters.tsx variable.parameter.tsx
+#                             ^ source.js.jsx meta.parameters.tsx punctuation.separator.parameter.tsx
+#                              ^ source.js.jsx meta.parameters.tsx
+#                               ^^^^^ source.js.jsx meta.parameters.tsx variable.parameter.tsx
+#                                    ^ source.js.jsx meta.parameters.tsx
+#                                     ^ source.js.jsx meta.parameters.tsx keyword.operator.assignment.tsx
+#                                      ^ source.js.jsx meta.parameters.tsx
+#                                       ^ source.js.jsx meta.parameters.tsx constant.numeric.decimal.tsx
+#                                        ^ source.js.jsx punctuation.definition.parameters.end.tsx
+#                                         ^ source.js.jsx
+#                                          ^ source.js.jsx meta.block.js.jsx punctuation.definition.block.js.jsx
+>	state active = true
+#^ source.js.jsx meta.block.js.jsx
+# ^^^^^ source.js.jsx meta.block.js.jsx storage.type.state.dartsx
+#      ^ source.js.jsx meta.block.js.jsx
+#       ^^^^^^ source.js.jsx meta.block.js.jsx variable.other.readwrite.tsx
+#             ^ source.js.jsx meta.block.js.jsx
+#              ^ source.js.jsx meta.block.js.jsx keyword.operator.assignment.tsx
+#               ^ source.js.jsx meta.block.js.jsx
+#                ^^^^ source.js.jsx meta.block.js.jsx constant.language.boolean.true.tsx
+>	derived status = active ? "on" : "off"
+#^ source.js.jsx meta.block.js.jsx
+# ^^^^^^^ source.js.jsx meta.block.js.jsx storage.type.derived.dartsx
+#        ^ source.js.jsx meta.block.js.jsx
+#         ^^^^^^ source.js.jsx meta.block.js.jsx variable.other.constant.tsx
+#               ^ source.js.jsx meta.block.js.jsx
+#                ^ source.js.jsx meta.block.js.jsx keyword.operator.assignment.tsx
+#                 ^ source.js.jsx meta.block.js.jsx
+#                  ^^^^^^ source.js.jsx meta.block.js.jsx variable.other.readwrite.tsx
+#                        ^ source.js.jsx meta.block.js.jsx
+#                         ^ source.js.jsx meta.block.js.jsx keyword.operator.ternary.tsx
+#                          ^ source.js.jsx meta.block.js.jsx
+#                           ^ source.js.jsx meta.block.js.jsx string.quoted.double.tsx punctuation.definition.string.begin.tsx
+#                            ^^ source.js.jsx meta.block.js.jsx string.quoted.double.tsx
+#                              ^ source.js.jsx meta.block.js.jsx string.quoted.double.tsx punctuation.definition.string.end.tsx
+#                               ^ source.js.jsx meta.block.js.jsx
+#                                ^ source.js.jsx meta.block.js.jsx keyword.operator.ternary.tsx
+#                                 ^ source.js.jsx meta.block.js.jsx
+#                                  ^ source.js.jsx meta.block.js.jsx string.quoted.double.tsx punctuation.definition.string.begin.tsx
+#                                   ^^^ source.js.jsx meta.block.js.jsx string.quoted.double.tsx
+#                                      ^ source.js.jsx meta.block.js.jsx string.quoted.double.tsx punctuation.definition.string.end.tsx
+>	render (
+#^ source.js.jsx meta.block.js.jsx
+# ^^^^^^ source.js.jsx meta.block.js.jsx keyword.control.render.dartsx
+#       ^ source.js.jsx meta.block.js.jsx
+#        ^ source.js.jsx meta.block.js.jsx meta.brace.round.tsx
+>		<section>
+#^^ source.js.jsx meta.block.js.jsx
+#  ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#   ^^^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#          ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>			<h1>{label}</h1>
+#^^^ source.js.jsx meta.block.js.jsx
+#   ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#    ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#      ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+#       ^ source.js.jsx meta.block.js.jsx punctuation.section.embedded.begin.js.jsx
+#        ^^^^^ source.js.jsx meta.block.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#             ^ source.js.jsx meta.block.js.jsx punctuation.section.embedded.end.js.jsx
+#              ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#                ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#                  ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>			<input bind:value={count} />
+#^^^ source.js.jsx meta.block.js.jsx
+#   ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#    ^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#         ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx
+#          ^^^^^^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                    ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                     ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                      ^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                           ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                            ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx
+#                             ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>			<Badge 'data-id' as dataId={status} />
+#^^^ source.js.jsx meta.block.js.jsx
+#   ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#    ^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx support.class.component.js.jsx
+#         ^^^^^^^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx
+#                    ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                      ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx
+#                       ^^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.other.attribute-name.js.jsx
+#                             ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx keyword.operator.assignment.js.jsx
+#                              ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.section.embedded.begin.js.jsx
+#                               ^^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx meta.embedded.expression.js.jsx variable.other.readwrite.tsx
+#                                     ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.section.embedded.end.js.jsx
+#                                      ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx
+#                                       ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>		</section>
+#^^ source.js.jsx meta.block.js.jsx
+#  ^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.begin.js.jsx
+#    ^^^^^^^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx entity.name.tag.js.jsx
+#           ^ source.js.jsx meta.block.js.jsx meta.tag.js.jsx punctuation.definition.tag.end.js.jsx
+>	)
+#^ source.js.jsx meta.block.js.jsx
+# ^ source.js.jsx meta.block.js.jsx meta.brace.round.tsx
+>}
+#^ source.js.jsx meta.block.js.jsx punctuation.definition.block.js.jsx
+>"
+`;
+
 exports[`DarTsx grammar snapshot > tokenizes PropsInferenceDemo.tsx 1`] = `
 ">component Badge(title: string, count: number, active: boolean = false) {
 #^^^^^^^^^ source.tsx storage.type.component.dartsx
