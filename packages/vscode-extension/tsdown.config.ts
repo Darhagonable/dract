@@ -15,6 +15,14 @@ export default defineConfig([
 			alwaysBundle: [/./],
 			onlyBundle: false,
 		},
+		alias: {
+			// these packages resolve `main` to a UMD build whose AMD-factory
+			// require array rolldown cannot statically rewrite — the surviving
+			// runtime requires crashed the bundled server at boot. Their
+			// `module` (ESM) builds bundle cleanly.
+			'vscode-css-languageservice': 'vscode-css-languageservice/lib/esm/cssLanguageService.js',
+			'vscode-html-languageservice': 'vscode-html-languageservice/lib/esm/htmlLanguageService.js',
+		},
 	},
 	{
 		entry: {
