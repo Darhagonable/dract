@@ -12,7 +12,8 @@
 		"./plugin": {
 			"types": "./dist/plugin.d.ts",
 			"default": "./dist/plugin.js"
-		}
+		},
+		"./syntaxes/*": "./syntaxes/*"
 	},
 	"scripts": {
 		"build": "tsdown",

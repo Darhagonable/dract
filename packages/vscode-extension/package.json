@@ -29,7 +29,7 @@
 		"grammars": [
 			{
 				"scopeName": "source.dartsx.style.injection",
-				"path": "./syntaxes/dartsx.style.injection.tmLanguage.json",
+				"path": "./node_modules/@dartsx/language-service/syntaxes/dartsx.style.injection.tmLanguage.json",
 				"injectTo": [
 					"source.js",
 					"source.js.jsx",
@@ -43,7 +43,7 @@
 			},
 			{
 				"scopeName": "source.dartsx.css-expressions.injection",
-				"path": "./syntaxes/dartsx.css-expressions.injection.tmLanguage.json",
+				"path": "./node_modules/@dartsx/language-service/syntaxes/dartsx.css-expressions.injection.tmLanguage.json",
 				"injectTo": [
 					"source.js",
 					"source.js.jsx",
@@ -54,7 +54,7 @@
 			},
 			{
 				"scopeName": "source.dartsx.render.injection",
-				"path": "./syntaxes/dartsx.render.injection.tmLanguage.json",
+				"path": "./node_modules/@dartsx/language-service/syntaxes/dartsx.render.injection.tmLanguage.json",
 				"injectTo": [
 					"source.js",
 					"source.js.jsx",

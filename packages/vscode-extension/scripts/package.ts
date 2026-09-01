@@ -7,7 +7,8 @@
  *   1. Read the real package.json in memory
  *   2. Rewrite the identity for the VSIX (name: "vscode-extension" -> dartsx.vscode-extension)
  *      and strip npm-only fields vsce rejects or doesn't need
- *   3. Stage artifacts into out/vsix/ (symlinks to dist/, syntaxes/, README.md)
+ *   3. Stage artifacts into out/vsix/ (symlinks to dist/, README.md; the
+ *      language service module is staged as node_modules/ — see below)
  *   4. Write the generated manifest as out/vsix/package.json — the only file written
  *   5. Run @vscode/vsce's createVSIX against the staging directory
  *   6. Remove the staging directory — only the .vsix remains in out/
@@ -53,7 +54,7 @@ function createVsixManifest(manifest: PackageManifest): Record<string, unknown> 
 	extensionManifest.name = VSCODE_EXTENSION_NAME;
 	// the staging directory only contains what we stage — declare it so vsce
 	// doesn't warn about a missing .vscodeignore
-	extensionManifest.files = ['dist/**', 'syntaxes/**', 'README.md', 'node_modules/**'];
+	extensionManifest.files = ['dist/**', 'README.md', 'node_modules/**'];
 	// runtime deps are bundled into dist at build time; only the language
 	// service stays a real dependency because tsserver resolves it from
 	// node_modules — with a concrete version so `npm list` in the staging
@@ -76,17 +77,24 @@ function languageServiceVersion(): string {
  * extension's path — node10-style, ignoring the exports map — landing
  * directly on the staged factory file. The dist is self-contained (only
  * `typescript` stays external, provided by tsserver itself), so the module
- * dir needs nothing else.
+ * dir needs nothing else. The TextMate grammars ship from here too:
+ * `contributes.grammars[].path` points at node_modules/.../syntaxes/.
  */
 function stageLanguageService() {
 	const distDir = join(languageServiceDir, 'dist');
 	if (!statSync(distDir, { throwIfNoEntry: false })) {
 		throw new Error('Missing packages/language-service/dist. Run `pnpm build` first.');
 	}
+	const syntaxesDir = join(languageServiceDir, 'syntaxes');
+	if (!statSync(syntaxesDir, { throwIfNoEntry: false })) {
+		throw new Error('Missing packages/language-service/syntaxes.');
+	}
 	const { name, version } = JSON.parse(readFileSync(join(languageServiceDir, 'package.json'), 'utf8'));
 	const moduleDir = join(stageDir, 'node_modules', ...name.split('/'));
 	mkdirSync(moduleDir, { recursive: true });
 	cpSync(distDir, join(moduleDir, 'dist'), { recursive: true });
+	// grammars are plain data — staged as-is, no build step involved
+	cpSync(syntaxesDir, join(moduleDir, 'syntaxes'), { recursive: true });
 	writeFileSync(join(moduleDir, 'package.json'), JSON.stringify({
 		name,
 		version,
@@ -99,7 +107,6 @@ function stageLanguageService() {
 
 const STAGED_ENTRIES = [
 	'dist',
-	'syntaxes',
 	'README.md',
 ];
 

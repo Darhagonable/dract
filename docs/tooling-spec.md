@@ -139,6 +139,7 @@ This selective activation matters because the extension injects into JavaScript,
 | `src/hover.ts` | Quick info rewriting to DarTsx-native vocabulary |
 | `src/diagnostics.ts` | Diagnostic suppression rules and unused-CSS warnings; consumed from the package root and reused by `dartsx check` |
 | `src/unused-css.ts` | Standalone unused-CSS selector analyzer |
+| `syntaxes/` | TextMate injection grammars (plain JSON, no build step) — the extension's `contributes.grammars` paths point at them through `node_modules/@dartsx/language-service/syntaxes/`, and they are exposed as the `./syntaxes/*` package export for other tooling |
 
 The tsserver entry is reached by name: the extension's `typescriptServerPlugins` contribution names `@dartsx/language-service/dist/plugin`, which tsserver resolves node10-style (ignoring the `exports` map) directly onto the built plugin factory. `main` and `exports` both serve the language-core barrel for every other consumer, so the package layout stays fully conventional.
 
@@ -186,7 +187,7 @@ This is intentionally a filter layer, not a second semantic checker.
 
 ### 5.6 Syntax Highlighting
 
-The VS Code extension provides a TextMate injection grammar that targets JavaScript, JSX, TypeScript, and TSX scopes.
+The grammar JSON files live in `packages/language-service/syntaxes/` — language-defining data, alongside the rest of the language core. The VS Code extension contributes them as injection grammars targeting JavaScript, JSX, TypeScript, and TSX scopes, with manifest paths pointing into `node_modules/@dartsx/language-service/syntaxes/` (resolved through the workspace symlink in dev, staged into the VSIX alongside the plugin).
 
 It currently highlights:
 
