@@ -138,7 +138,6 @@ async function main() {
 	await createVSIX({
 		cwd: stageDir,
 		packagePath: join(outDir, `dartsx-${version}.vsix`),
-		useYarn: false,
 		updatePackageJson: false,
 		gitTagVersion: false,
 		followSymlinks: true,

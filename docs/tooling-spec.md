@@ -117,7 +117,7 @@ The current design keeps a single VS Code language-service path in charge and la
 - Regular JavaScript files continue through the normal JS pipeline unchanged.
 - The build stack stays separate and uses the real compiler instead of the editor-only lowering.
 
-The packaged VSIX is self-contained: the extension bundles its runtime dependencies into `dist/`, and the built language service is staged as `node_modules/@dartsx/language-service` (dist + conventional `main`/`exports`) inside the VSIX so tsserver resolves the plugin from the installed extension.
+The packaged VSIX is self-contained: the extension bundles its runtime dependencies into `dist/` — except the language service, which stays external and is staged once as `node_modules/@dartsx/language-service`, so the extension's language server (`dist/server.cjs` requires it at runtime) and tsserver (via the plugin contribution) resolve the same physical package.
 
 ## 5. Editor Tooling Design
 
