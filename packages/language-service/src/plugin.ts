@@ -17,12 +17,22 @@
  */
 
 import { createLanguageServicePlugin } from '@volar/typescript/lib/quickstart/createLanguageServicePlugin';
+import * as fs from 'fs';
 import { getDarTsxLanguagePlugin } from './language';
 import { getQuickInfoWithDarTsxKeywords } from './hover';
 import { filterDarTsxDiagnostics, getUnusedCssDiagnostics } from './diagnostics';
 
+// the core is Node-free — tsserver hosts it with a disk-backed reader
+function readFile(fileName: string): string | undefined {
+	try {
+		return fs.readFileSync(fileName, 'utf-8');
+	} catch {
+		return undefined;
+	}
+}
+
 const baseInit = createLanguageServicePlugin(() => ({
-	languagePlugins: [getDarTsxLanguagePlugin()],
+	languagePlugins: [getDarTsxLanguagePlugin(readFile)],
 }));
 
 const init: typeof baseInit = (modules) => {
@@ -38,16 +48,16 @@ const init: typeof baseInit = (modules) => {
 				get(target, prop, receiver) {
 					if (prop === 'getQuickInfoAtPosition') {
 						return (fileName: string, position: number) => {
-							return getQuickInfoWithDarTsxKeywords(target, fileName, position);
+							return getQuickInfoWithDarTsxKeywords(target, fileName, position, readFile);
 						};
 					}
 					if (prop === 'getSyntacticDiagnostics' || prop === 'getSemanticDiagnostics' || prop === 'getSuggestionDiagnostics') {
 						const original = target[prop];
 						return (fileName: string) => {
 							let diags = original.call(target, fileName);
-							diags = filterDarTsxDiagnostics(diags, fileName);
+							diags = filterDarTsxDiagnostics(diags, fileName, readFile);
 							if (prop === 'getSemanticDiagnostics') {
-								diags = [...diags, ...getUnusedCssDiagnostics(fileName, ts)];
+								diags = [...diags, ...getUnusedCssDiagnostics(fileName, ts, readFile)];
 							}
 							return diags;
 						};

@@ -141,6 +141,8 @@ This selective activation matters because the extension injects into JavaScript,
 | `src/unused-css.ts` | Standalone unused-CSS selector analyzer |
 | `syntaxes/` | TextMate injection grammars (plain JSON, no build step) — the extension's `contributes.grammars` paths point at them through `node_modules/@dartsx/language-service/syntaxes/`, and they are exposed as the `./syntaxes/*` package export for other tooling |
 
+The core is Node-free: every fs-touching function takes a required `readFile` (`fileName → content`, `undefined` = skip the feature), and hover/diagnostic filtering accept an optional `toSource` mapping generated (virtual-code) offsets back to source positions for worker hosts. Each host wires its own reader — `src/plugin.ts` passes an fs-backed one internally, the extension server and `dartsx check` construct their own, and browser workers (monaco) pass one backed by editor models or a virtual fs. `DarTsxVirtualCode` is exported for workers that walk the mappings. The root entry (`dist/index.js`) therefore contains no Node builtins and bundles cleanly for browsers.
+
 The tsserver entry is reached by name: the extension's `typescriptServerPlugins` contribution names `@dartsx/language-service/dist/plugin`, which tsserver resolves node10-style (ignoring the `exports` map) directly onto the built plugin factory. `main` and `exports` both serve the language-core barrel for every other consumer, so the package layout stays fully conventional.
 
 `dartsx check` does not load a tsserver plugin; it wires `src/language.ts` into `@volar/typescript`'s `proxyCreateProgram` directly and imports the same suppression rules, so editor and CLI agree on which diagnostics are DarTsx artifacts.

@@ -10,7 +10,6 @@
  */
 
 import { isDarTsxFile, findSuppressZones, type SuppressZone } from 'dartsx/compiler/preprocess';
-import * as fs from 'fs';
 import { analyzeUnusedCss, DARTSX_UNUSED_CSS_CODE } from './unused-css';
 
 // Errors always suppressed in DarTsx files (syntax errors from custom keywords,
@@ -49,24 +48,26 @@ export function shouldSuppressDiagnostic(
 }
 
 /**
- * Filter diagnostics for one file (tsserver plugin path):
- * reads the file from disk and suppresses DarTsx false positives.
+ * Filter diagnostics for one file: reads content through the given reader
+ * and suppresses DarTsx false positives. Workers pass a `toSource` that
+ * maps generated offsets back to source; tsserver positions are already
+ * source-mapped and omit it.
  */
 export function filterDarTsxDiagnostics(
 	diags: import('typescript').Diagnostic[],
 	fileName: string,
+	readFile: (fileName: string) => string | undefined,
+	toSource?: (fileName: string, offset: number) => number,
 ): import('typescript').Diagnostic[] {
 	if (!diags.length) return diags;
-	let content: string;
-	try {
-		content = fs.readFileSync(fileName, 'utf-8');
-	} catch {
-		return diags;
-	}
-	if (!isDarTsxFile(content)) return diags;
+	const content = readFile(fileName);
+	if (content === undefined || !isDarTsxFile(content)) return diags;
 
 	const zones = findSuppressZones(content);
-	return diags.filter(d => !shouldSuppressDiagnostic(d, zones));
+	return diags.filter(d => !shouldSuppressDiagnostic(
+		d.start === undefined ? d : { ...d, start: toSource ? toSource(fileName, d.start) : d.start },
+		zones,
+	));
 }
 
 /**
@@ -76,14 +77,10 @@ export function filterDarTsxDiagnostics(
 export function getUnusedCssDiagnostics(
 	fileName: string,
 	ts: typeof import('typescript'),
+	readFile: (fileName: string) => string | undefined,
 ): import('typescript').Diagnostic[] {
-	let content: string;
-	try {
-		content = fs.readFileSync(fileName, 'utf-8');
-	} catch {
-		return [];
-	}
-	if (!isDarTsxFile(content)) return [];
+	const content = readFile(fileName);
+	if (content === undefined || !isDarTsxFile(content)) return [];
 
 	const warnings = analyzeUnusedCss(content);
 	if (warnings.length === 0) return [];

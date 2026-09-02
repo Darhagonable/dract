@@ -18,13 +18,12 @@ import type { } from '@volar/typescript';
 import { forEachEmbeddedCode } from '@volar/language-core';
 import { preprocess, isDarTsxFile } from 'dartsx/compiler/preprocess';
 import { skipBracedExpression } from './unused-css';
-import * as fs from 'fs';
 
 type IScriptSnapshot = import('@volar/language-core').IScriptSnapshot;
 
 // ── Virtual Code ───────────────────────────────────────────────────
 
-class DarTsxVirtualCode implements VirtualCode {
+export class DarTsxVirtualCode implements VirtualCode {
 	id = 'root';
 	languageId = 'dartsx';
 	embeddedCodes: VirtualCode[] = [];
@@ -487,7 +486,7 @@ function skipString(source: string, start: number): number {
 
 // ── Language Plugin ────────────────────────────────────────────────
 
-export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirtualCode> {
+export function getDarTsxLanguagePlugin<T = any>(readFile: (fileName: string) => string | undefined): LanguagePlugin<T, DarTsxVirtualCode> {
 	return {
 		getLanguageId(scriptId: T) {
 			const fileName = typeof scriptId === 'string'
@@ -503,17 +502,13 @@ export function getDarTsxLanguagePlugin<T = any>(): LanguagePlugin<T, DarTsxVirt
 			// Read file content to determine if it's DarTsx.
 			// Only claim files that actually contain DarTsx syntax.
 			// Non-DarTsx .tsx files must be left to native TS handling.
-			try {
-				// Strip file:// URI scheme if present
-				const filePath = fileName.startsWith('file://')
-					? decodeURIComponent(fileName.slice(7))
-					: fileName;
-				const content = fs.readFileSync(filePath, 'utf-8');
-				if (isDarTsxFile(content)) {
-					return 'dartsx';
-				}
-			} catch {
-				// File might not exist on disk (e.g., untitled buffers)
+			// Strip file:// URI scheme if present
+			const filePath = fileName.startsWith('file://')
+				? decodeURIComponent(fileName.slice(7))
+				: fileName;
+			const content = readFile(filePath);
+			if (content !== undefined && isDarTsxFile(content)) {
+				return 'dartsx';
 			}
 
 			return undefined;

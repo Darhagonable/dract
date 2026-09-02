@@ -8,23 +8,23 @@
  */
 
 import { isDarTsxFile } from 'dartsx/compiler/preprocess';
-import * as fs from 'fs';
+
+type ReadFile = (fileName: string) => string | undefined;
+type ToSource = (fileName: string, offset: number) => number;
 
 export function getQuickInfoWithDarTsxKeywords(
 	service: import('typescript').LanguageService,
 	fileName: string,
 	position: number,
+	readFile: ReadFile,
+	toSource?: ToSource,
 ): import('typescript').QuickInfo | undefined {
+	const map: ToSource = toSource ?? ((_f, offset) => offset);
 	const result = service.getQuickInfoAtPosition(fileName, position);
 	if (!result?.displayParts?.length) return result;
 
-	let content: string;
-	try {
-		content = fs.readFileSync(fileName, 'utf-8');
-	} catch {
-		return result;
-	}
-	if (!isDarTsxFile(content)) return result;
+	const content = readFile(fileName);
+	if (content === undefined || !isDarTsxFile(content)) return result;
 	rewriteComponentPropsOverload(result);
 
 	const first = result.displayParts[0];
@@ -34,19 +34,19 @@ export function getQuickInfoWithDarTsxKeywords(
 		const label = result.displayParts[1];
 		const close = result.displayParts[2];
 		if (label.kind === 'text' && (label.text === 'parameter' || label.text === 'property') && close.kind === 'punctuation' && close.text === ')') {
-			rewriteParameterLabel(service, result, fileName, position, content);
+			rewriteParameterLabel(service, result, fileName, position, content, readFile, map);
 		}
 	}
 
 	// Rewrite keywords: function → component, let/var → state, const/var → derived
 	if (first.kind === 'keyword') {
 		if (first.text === 'function' || first.text === 'let' || first.text === 'const' || first.text === 'var') {
-			if (tryRewriteKeyword(first, content, result.textSpan.start)) {
+			if (tryRewriteKeyword(first, content, map(fileName, result.textSpan.start))) {
 				return result;
 			}
-			const defSite = getDefinitionSite(service, fileName, position, content);
+			const defSite = getDefinitionSite(service, fileName, position, content, readFile);
 			if (defSite) {
-				tryRewriteKeyword(first, defSite.content, defSite.textSpan.start);
+				tryRewriteKeyword(first, defSite.content, map(defSite.fileName, defSite.textSpan.start));
 			}
 		}
 	}
@@ -59,9 +59,9 @@ export function getQuickInfoWithDarTsxKeywords(
 			const kwPart = result.displayParts.find(p => p.kind === 'keyword' &&
 				(p.text === 'let' || p.text === 'const' || p.text === 'var' || p.text === 'function'));
 			if (kwPart) {
-				const defSite = getDefinitionSite(service, fileName, position, content);
+				const defSite = getDefinitionSite(service, fileName, position, content, readFile);
 				if (defSite && isDarTsxFile(defSite.content)) {
-					tryRewriteKeyword(kwPart, defSite.content, defSite.textSpan.start);
+					tryRewriteKeyword(kwPart, defSite.content, map(defSite.fileName, defSite.textSpan.start));
 					fixAliasAnyType(service, result, defSite.fileName, defSite.textSpan.start);
 				}
 			}
@@ -140,6 +140,8 @@ function rewriteParameterLabel(
 	fileName: string,
 	position: number,
 	content: string,
+	readFile: ReadFile,
+	map: ToSource,
 ): void {
 	if (!result.displayParts || result.displayParts.length < 3) return;
 
@@ -153,21 +155,24 @@ function rewriteParameterLabel(
 	const paramName = getParamName(result.displayParts);
 	if (!paramName) return;
 
-	if (isInsideComponent(content, result.textSpan.start)) {
-		label.text = isBoundParam(content, result.textSpan.start)
+	const spanStart = map(fileName, result.textSpan.start);
+
+	if (isInsideComponent(content, spanStart)) {
+		label.text = isBoundParam(content, spanStart)
 			? 'binded prop'
 			: 'prop';
-		rewriteRenamedPropName(result, content, result.textSpan.start);
+		rewriteRenamedPropName(result, content, spanStart);
 		return;
 	}
 
-	const defSite = getDefinitionSite(service, fileName, position, content);
+	const defSite = getDefinitionSite(service, fileName, position, content, readFile);
 	if (!defSite || !isDarTsxFile(defSite.content)) return;
-	if (!isInsideComponent(defSite.content, defSite.textSpan.start)) return;
+	const defStart = map(defSite.fileName, defSite.textSpan.start);
+	if (!isInsideComponent(defSite.content, defStart)) return;
 
 	// Volar may map the definition to the start of the param list (coarse mapping).
 	// Resolve the actual parameter position by name within the component's param list.
-	const paramPos = findParamInComponent(defSite.content, defSite.textSpan.start, paramName);
+	const paramPos = findParamInComponent(defSite.content, defStart, paramName);
 
 	label.text = isBoundParam(defSite.content, paramPos)
 		? 'binded prop'
@@ -218,15 +223,18 @@ function getDefinitionSite(
 	fileName: string,
 	position: number,
 	content: string,
+	readFile: ReadFile,
 ): { fileName: string; content: string; textSpan: import('typescript').TextSpan } | undefined {
 	try {
 		const defs = service.getDefinitionAtPosition(fileName, position);
 		if (!defs?.length) return undefined;
 
 		const def = defs[0];
+		const defContent = def.fileName === fileName ? content : readFile(def.fileName);
+		if (defContent === undefined) return undefined;
 		return {
 			fileName: def.fileName,
-			content: def.fileName === fileName ? content : fs.readFileSync(def.fileName, 'utf-8'),
+			content: defContent,
 			textSpan: def.textSpan,
 		};
 	} catch {

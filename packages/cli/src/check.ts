@@ -51,7 +51,7 @@ export function check(options: CheckOptions = {}): CheckResult {
 	const proxied = proxyCreateProgram(
 		ts,
 		ts.createProgram,
-		() => [getDarTsxLanguagePlugin()],
+		() => [getDarTsxLanguagePlugin(f => { try { return fs.readFileSync(f, 'utf-8'); } catch { return undefined; } })],
 	);
 
 	const host = ts.createCompilerHost(parsed.options);

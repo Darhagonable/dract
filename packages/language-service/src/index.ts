@@ -6,9 +6,15 @@
  * rewriting, diagnostic filtering, unused-CSS detection. Consumed by the
  * VS Code extension's language server and `dartsx check` from this root;
  * the tsserver plugin factory lives at ./plugin.
+ *
+ * The core is Node-free: every fs-touching function takes a required
+ * readFile (fileName → content, undefined = degrade). Hosts wire it —
+ * Node callers pass an fs-backed reader, browser workers pass one backed
+ * by editor models or a virtual fs, plus an optional toSource for
+ * generated→source offset mapping.
  */
 
-export { getDarTsxLanguagePlugin } from './language';
+export { getDarTsxLanguagePlugin, DarTsxVirtualCode } from './language';
 export { getQuickInfoWithDarTsxKeywords } from './hover';
 export {
 	filterDarTsxDiagnostics,
