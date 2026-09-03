@@ -3,7 +3,7 @@
  *
  * Transforms DarTsx custom syntax into valid TypeScript/TSX. Used by both:
  * - The compiler pipeline (OXC parsing → analyze → transform → codegen)
- * - The TypeScript plugin (language service type-checking & intellisense)
+ * - The language service (editor type-checking & intellisense)
  *
  * A `mode` option controls the few output differences:
  * - `compiler`: replaces styles with `<$$styleN />` markers

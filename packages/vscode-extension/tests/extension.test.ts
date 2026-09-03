@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as vscode from 'vscode';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 async function openFixture(file: string) {
 	const uri = vscode.Uri.file(import.meta.dirname! + '/fixture/' + file);
@@ -29,6 +31,20 @@ describe('VSCode Extension', () => {
 		await ext!.activate();
 		expect(ext!.isActive).toBe(true);
 	});
+
+	// Activation alone cannot catch a broken language server: client.start()
+	// resolves once the spawn is initiated and a crash only shows up as async
+	// log noise. Spawn the bundle the way vscode-languageclient does and
+	// require it to stay alive.
+	it('language server bundle boots', async () => {
+		const server = path.resolve(import.meta.dirname!, '../dist/server.cjs');
+		const child = spawn('node', [server, '--stdio']);
+		let stderr = '';
+		child.stderr.on('data', d => { stderr += d; });
+		await new Promise(r => setTimeout(r, 3000));
+		expect(child.exitCode, `server crashed:\n${stderr}`).toBeNull();
+		child.kill();
+	}, 10_000);
 });
 
 describe('Hover keyword overrides', async () => {

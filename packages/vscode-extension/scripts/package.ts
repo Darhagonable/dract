@@ -1,99 +1,68 @@
 #!/usr/bin/env node
 /**
  * Packages the DarTsx VS Code extension into a .vsix without ever mutating
- * the real package.json.
- *
- * Flow:
- *   1. Read the real package.json in memory
- *   2. Rewrite the identity for the VSIX (name: "vscode-extension" -> dartsx.vscode-extension)
- *      and strip npm-only fields vsce rejects or doesn't need
- *   3. Stage artifacts into out/vsix/ (symlinks to dist/, syntaxes/, README.md)
- *   4. Write the generated manifest as out/vsix/package.json — the only file written
- *   5. Run @vscode/vsce's createVSIX against the staging directory
- *   6. Remove the staging directory — only the .vsix remains in out/
+ * the real package.json: stage dist/, README.md and the built language
+ * service (as node_modules, shared with tsserver) into out/vsix/, generate
+ * the VSIX manifest there, run vsce, remove the staging dir.
  */
 
 import { createVSIX } from '@vscode/vsce';
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const languageServiceDir = resolve(packageDir, '../language-service');
 const stageDir = join(packageDir, 'out', 'vsix');
-// the .vsix is emitted next to the staging dir, NOT inside dist/ — dist is
-// symlinked into the stage, so writing there would make the vsix visible
-// inside out/vsix/ too
 const outDir = join(packageDir, 'out');
 
 const VSCODE_EXTENSION_NAME = 'vscode-extension';
 
-interface PackageManifest {
-	name: string;
-	publisher: string;
-	version: string;
-	dependencies?: Record<string, string>;
-	[key: string]: unknown;
-}
-
-function readManifest(): PackageManifest {
-	return JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
-}
-
-function createVsixManifest(manifest: PackageManifest): Record<string, unknown> {
+function createVsixManifest(manifest: { name: string; dependencies?: Record<string, string>; [key: string]: unknown }): Record<string, unknown> {
 	const {
-		// npm-only fields that must not leak into the VSIX manifest
 		name: _npmName,
 		private: _private,
 		scripts: _scripts,
 		devDependencies: _devDependencies,
+		dependencies: _dependencies,
 		...extensionManifest
 	} = manifest;
 
-	extensionManifest.name = VSCODE_EXTENSION_NAME;
-	// the staging directory only contains what we stage — declare it so vsce
-	// doesn't warn about a missing .vscodeignore
-	extensionManifest.files = ['dist/**', 'syntaxes/**', 'README.md'];
-	// workspace:* protocol deps are bundled at build time; drop them so the
-	// generated manifest stays valid on its own
-	delete extensionManifest.dependencies?.['@dartsx/typescript-plugin'];
-
+	extensionManifest.name = VSCODE_EXTENSION_NAME; // vsce rejects scoped names
+	extensionManifest.files = ['dist/**', 'README.md', 'node_modules/**'];
 	return extensionManifest;
 }
 
-const STAGED_ENTRIES = [
-	'dist',
-	'syntaxes',
-	'README.md',
-];
-
-function stageArtifacts() {
-	rmSync(stageDir, { recursive: true, force: true });
-	mkdirSync(stageDir, { recursive: true });
-
-	for (const entry of STAGED_ENTRIES) {
-		const source = join(packageDir, entry);
-		if (!statSync(source, { throwIfNoEntry: false })) {
-			throw new Error(`Missing artifact required for packaging: ${entry}. Run \`pnpm build\` first.`);
-		}
-		symlinkSync(relative(stageDir, source), join(stageDir, entry), 'dir');
-	}
+/** Stage the built language service as a node module — tsserver resolves its plugin entry (dist/plugin) and the grammars (syntaxes/) from here. */
+function stageLanguageService() {
+	const { name } = JSON.parse(readFileSync(join(languageServiceDir, 'package.json'), 'utf8'));
+	const moduleDir = join(stageDir, 'node_modules', ...name.split('/'));
+	mkdirSync(join(moduleDir, 'dist'), { recursive: true });
+	cpSync(join(languageServiceDir, 'dist'), join(moduleDir, 'dist'), { recursive: true });
+	cpSync(join(languageServiceDir, 'syntaxes'), join(moduleDir, 'syntaxes'), { recursive: true });
+	writeFileSync(join(moduleDir, 'package.json'), JSON.stringify({ name, main: 'dist/index.js' }, null, '\t'));
 }
 
 async function main() {
-	const manifest = readManifest();
+	const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
 	const version = manifest.version;
 
-	stageArtifacts();
+	rmSync(stageDir, { recursive: true, force: true });
+	mkdirSync(join(stageDir, 'node_modules'), { recursive: true });
+	for (const entry of ['dist', 'README.md']) {
+		if (!statSync(join(packageDir, entry), { throwIfNoEntry: false })) {
+			throw new Error(`Missing ${entry}. Run \`pnpm build\` first.`);
+		}
+		symlinkSync(relative(stageDir, join(packageDir, entry)), join(stageDir, entry), entry === 'dist' ? 'dir' : 'file');
+	}
+	stageLanguageService();
 
-	const vsixManifest = createVsixManifest(manifest);
-	writeFileSync(join(stageDir, 'package.json'), JSON.stringify(vsixManifest, null, '\t'));
-
+	writeFileSync(join(stageDir, 'package.json'), JSON.stringify(createVsixManifest(manifest), null, '\t'));
 	readdirSync(outDir).filter(f => f.endsWith('.vsix')).forEach(f => rmSync(join(outDir, f)));
 
 	await createVSIX({
 		cwd: stageDir,
 		packagePath: join(outDir, `dartsx-${version}.vsix`),
-		dependencies: false,
 		updatePackageJson: false,
 		gitTagVersion: false,
 		followSymlinks: true,
@@ -101,7 +70,6 @@ async function main() {
 	});
 
 	rmSync(stageDir, { recursive: true, force: true });
-
 	console.log(`Packaged ${manifest.publisher}.${VSCODE_EXTENSION_NAME} v${version} -> out/dartsx-${version}.vsix`);
 }
 

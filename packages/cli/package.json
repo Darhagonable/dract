@@ -26,7 +26,7 @@
 		"@volar/typescript": "~2.4.28",
 		"chokidar": "^5.0.0",
 		"dartsx": "workspace:*",
-		"@dartsx/typescript-plugin": "workspace:*",
+		"@dartsx/language-service": "workspace:*",
 		"kleur": "^4.1.5"
 	},
 	"peerDependencies": {

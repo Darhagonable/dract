@@ -4,6 +4,7 @@ import { vsCodeWorker } from 'vitest-environment-vscode';
 export default defineProject({
 	test: {
 		include: ['tests/*.test.ts'],
+		fileParallelism: false,
 		pool: vsCodeWorker({
 			version: 'stable',
 			reuseWorker: true,

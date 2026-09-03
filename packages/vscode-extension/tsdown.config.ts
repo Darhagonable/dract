@@ -7,9 +7,17 @@ export default defineConfig([
 			server: 'src/server.ts',
 		},
 		format: 'cjs',
-		fixedExtension: true,
 		deps: {
-			neverBundle: ['vscode'],
+			// the language service is staged as node_modules/@dartsx/language-service
+			// in the VSIX and shared with tsserver — require it at runtime, don't bundle
+			neverBundle: ['vscode', '@dartsx/language-service'],
+			alwaysBundle: [/./],
+			onlyBundle: false,
+		},
+		alias: {
+			// UMD `main` builds leave runtime `require` calls after bundling — alias to the ESM builds
+			'vscode-css-languageservice': 'vscode-css-languageservice/lib/esm/cssLanguageService.js',
+			'vscode-html-languageservice': 'vscode-html-languageservice/lib/esm/htmlLanguageService.js',
 		},
 	},
 	{
@@ -18,9 +26,10 @@ export default defineConfig([
 		},
 		format: 'cjs',
 		platform: 'browser',
-		fixedExtension: true,
 		deps: {
 			neverBundle: ['vscode'],
+			alwaysBundle: [/./],
+			onlyBundle: false,
 		},
 	},
 ]);

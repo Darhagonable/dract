@@ -1,74 +1,30 @@
 /**
- * DarTsx TypeScript Language Service Plugin (Volar-based)
+ * Quick info (hover) rewriting — presents DarTsx-native vocabulary
+ * (component, state, derived, prop, binded prop) instead of the lowered
+ * TypeScript equivalents produced by the service view.
  *
- * Loaded by tsserver when configured in tsconfig.json.
- * Transforms DarTsx .tsx files into valid TypeScript via the Volar framework,
- * providing intellisense, diagnostics, hover, completions, and navigation.
- *
- * Wraps Volar's Proxy-based service with an outer Proxy that intercepts
- * getQuickInfoAtPosition to display DarTsx keywords (component, state,
- * derived) instead of their TypeScript equivalents (function, let, const).
+ * All functions are pure with respect to the language service:
+ * they take a `ts.LanguageService` and source content, never tsserver state.
  */
 
-import { createLanguageServicePlugin } from '@volar/typescript/lib/quickstart/createLanguageServicePlugin';
-import { getDarTsxLanguagePlugin } from './language';
-import { isDarTsxFile, findSuppressZones, type SuppressZone } from 'dartsx/compiler/preprocess';
-import * as fs from 'fs';
-import { analyzeUnusedCss, DARTSX_UNUSED_CSS_CODE } from './unused-css';
+import { isDarTsxFile } from 'dartsx/compiler/preprocess';
 
-const baseInit = createLanguageServicePlugin(() => ({
-	languagePlugins: [getDarTsxLanguagePlugin()],
-}));
+type ReadFile = (fileName: string) => string | undefined;
+type ToSource = (fileName: string, offset: number) => number;
 
-const init: typeof baseInit = (modules) => {
-	const ts = modules.typescript;
-	const base = baseInit(modules);
-	return {
-		...base,
-		create(info) {
-			const service = base.create(info);
-			// Volar returns a Proxy whose get trap caches methods,
-			// so property assignment doesn't stick. Wrap with our own Proxy.
-			return new Proxy(service, {
-				get(target, prop, receiver) {
-					if (prop === 'getQuickInfoAtPosition') {
-						return (fileName: string, position: number) => {
-							return getQuickInfoWithDarTsxKeywords(target, fileName, position);
-						};
-					}
-					if (prop === 'getSyntacticDiagnostics' || prop === 'getSemanticDiagnostics' || prop === 'getSuggestionDiagnostics') {
-						const original = target[prop];
-						return (fileName: string) => {
-							let diags = original.call(target, fileName);
-							diags = filterDarTsxDiagnostics(diags, fileName);
-							if (prop === 'getSemanticDiagnostics') {
-								diags = [...diags, ...getUnusedCssDiagnostics(fileName, ts)];
-							}
-							return diags;
-						};
-					}
-					return Reflect.get(target, prop, receiver);
-				},
-			});
-		},
-	};
-};
-
-function getQuickInfoWithDarTsxKeywords(
+export function getQuickInfoWithDarTsxKeywords(
 	service: import('typescript').LanguageService,
 	fileName: string,
 	position: number,
+	readFile: ReadFile,
+	toSource?: ToSource,
 ): import('typescript').QuickInfo | undefined {
+	const map: ToSource = toSource ?? ((_f, offset) => offset);
 	const result = service.getQuickInfoAtPosition(fileName, position);
 	if (!result?.displayParts?.length) return result;
 
-	let content: string;
-	try {
-		content = fs.readFileSync(fileName, 'utf-8');
-	} catch {
-		return result;
-	}
-	if (!isDarTsxFile(content)) return result;
+	const content = readFile(fileName);
+	if (content === undefined || !isDarTsxFile(content)) return result;
 	rewriteComponentPropsOverload(result);
 
 	const first = result.displayParts[0];
@@ -78,19 +34,19 @@ function getQuickInfoWithDarTsxKeywords(
 		const label = result.displayParts[1];
 		const close = result.displayParts[2];
 		if (label.kind === 'text' && (label.text === 'parameter' || label.text === 'property') && close.kind === 'punctuation' && close.text === ')') {
-			rewriteParameterLabel(service, result, fileName, position, content);
+			rewriteParameterLabel(service, result, fileName, position, content, readFile, map);
 		}
 	}
 
 	// Rewrite keywords: function → component, let/var → state, const/var → derived
 	if (first.kind === 'keyword') {
 		if (first.text === 'function' || first.text === 'let' || first.text === 'const' || first.text === 'var') {
-			if (tryRewriteKeyword(first, content, result.textSpan.start)) {
+			if (tryRewriteKeyword(first, content, map(fileName, result.textSpan.start))) {
 				return result;
 			}
-			const defSite = getDefinitionSite(service, fileName, position, content);
+			const defSite = getDefinitionSite(service, fileName, position, content, readFile);
 			if (defSite) {
-				tryRewriteKeyword(first, defSite.content, defSite.textSpan.start);
+				tryRewriteKeyword(first, defSite.content, map(defSite.fileName, defSite.textSpan.start));
 			}
 		}
 	}
@@ -103,9 +59,9 @@ function getQuickInfoWithDarTsxKeywords(
 			const kwPart = result.displayParts.find(p => p.kind === 'keyword' &&
 				(p.text === 'let' || p.text === 'const' || p.text === 'var' || p.text === 'function'));
 			if (kwPart) {
-				const defSite = getDefinitionSite(service, fileName, position, content);
+				const defSite = getDefinitionSite(service, fileName, position, content, readFile);
 				if (defSite && isDarTsxFile(defSite.content)) {
-					tryRewriteKeyword(kwPart, defSite.content, defSite.textSpan.start);
+					tryRewriteKeyword(kwPart, defSite.content, map(defSite.fileName, defSite.textSpan.start));
 					fixAliasAnyType(service, result, defSite.fileName, defSite.textSpan.start);
 				}
 			}
@@ -184,6 +140,8 @@ function rewriteParameterLabel(
 	fileName: string,
 	position: number,
 	content: string,
+	readFile: ReadFile,
+	map: ToSource,
 ): void {
 	if (!result.displayParts || result.displayParts.length < 3) return;
 
@@ -197,21 +155,24 @@ function rewriteParameterLabel(
 	const paramName = getParamName(result.displayParts);
 	if (!paramName) return;
 
-	if (isInsideComponent(content, result.textSpan.start)) {
-		label.text = isBoundParam(content, result.textSpan.start)
+	const spanStart = map(fileName, result.textSpan.start);
+
+	if (isInsideComponent(content, spanStart)) {
+		label.text = isBoundParam(content, spanStart)
 			? 'binded prop'
 			: 'prop';
-		rewriteRenamedPropName(result, content, result.textSpan.start);
+		rewriteRenamedPropName(result, content, spanStart);
 		return;
 	}
 
-	const defSite = getDefinitionSite(service, fileName, position, content);
+	const defSite = getDefinitionSite(service, fileName, position, content, readFile);
 	if (!defSite || !isDarTsxFile(defSite.content)) return;
-	if (!isInsideComponent(defSite.content, defSite.textSpan.start)) return;
+	const defStart = map(defSite.fileName, defSite.textSpan.start);
+	if (!isInsideComponent(defSite.content, defStart)) return;
 
 	// Volar may map the definition to the start of the param list (coarse mapping).
 	// Resolve the actual parameter position by name within the component's param list.
-	const paramPos = findParamInComponent(defSite.content, defSite.textSpan.start, paramName);
+	const paramPos = findParamInComponent(defSite.content, defStart, paramName);
 
 	label.text = isBoundParam(defSite.content, paramPos)
 		? 'binded prop'
@@ -262,15 +223,18 @@ function getDefinitionSite(
 	fileName: string,
 	position: number,
 	content: string,
+	readFile: ReadFile,
 ): { fileName: string; content: string; textSpan: import('typescript').TextSpan } | undefined {
 	try {
 		const defs = service.getDefinitionAtPosition(fileName, position);
 		if (!defs?.length) return undefined;
 
 		const def = defs[0];
+		const defContent = def.fileName === fileName ? content : readFile(def.fileName);
+		if (defContent === undefined) return undefined;
 		return {
 			fileName: def.fileName,
-			content: def.fileName === fileName ? content : fs.readFileSync(def.fileName, 'utf-8'),
+			content: defContent,
 			textSpan: def.textSpan,
 		};
 	} catch {
@@ -434,75 +398,3 @@ function tryRewriteKeyword(
 	}
 	return false;
 }
-
-// Errors always suppressed in DarTsx files (syntax errors from custom keywords,
-// and semantic errors that are always false positives from the transform)
-const ALWAYS_SUPPRESS = new Set([
-	1003, 1005, 1109, 1128, 1136, 1381, 1434,
-	2304, 2362, 2552, 2632, 2657, 2693, 2695, 2724, 2809,
-	6385, 7026,
-]);
-
-// Errors suppressed only when they occur inside DarTsx-specific zones
-// (control flow in JSX, bind: attributes) — legitimate type errors
-// outside these zones are preserved (e.g. className vs class, fillOpacity vs fill-opacity)
-const ZONE_SUPPRESS = new Set([
-	2322, // Type 'X' is not assignable to type 'Y'
-	2339, // Property 'X' does not exist on type 'Y'
-	2747, // 'X' is not a valid JSX element
-]);
-
-function filterDarTsxDiagnostics(
-	diags: import('typescript').Diagnostic[],
-	fileName: string,
-): import('typescript').Diagnostic[] {
-	if (!diags.length) return diags;
-	let content: string;
-	try {
-		content = fs.readFileSync(fileName, 'utf-8');
-	} catch {
-		return diags;
-	}
-	if (!isDarTsxFile(content)) return diags;
-
-	let zones: SuppressZone[] | undefined;
-
-	return diags.filter(d => {
-		if (!d.code) return true;
-		if (ALWAYS_SUPPRESS.has(d.code)) return false;
-		if (ZONE_SUPPRESS.has(d.code)) {
-			if (!zones) zones = findSuppressZones(content);
-			const start = d.start ?? 0;
-			return !zones.some(z => start >= z.start && start < z.end);
-		}
-		return true;
-	});
-}
-
-// ── Unused CSS selector detection ──────────────────────────────────
-
-function getUnusedCssDiagnostics(fileName: string, ts: typeof import('typescript')): import('typescript').Diagnostic[] {
-	let content: string;
-	try {
-		content = fs.readFileSync(fileName, 'utf-8');
-	} catch {
-		return [];
-	}
-	if (!isDarTsxFile(content)) return [];
-
-	const warnings = analyzeUnusedCss(content);
-	if (warnings.length === 0) return [];
-
-	const sourceFile = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-	return warnings.map(w => ({
-		file: sourceFile,
-		start: w.start,
-		length: w.length,
-		messageText: w.message,
-		category: 0 as import('typescript').DiagnosticCategory,
-		code: DARTSX_UNUSED_CSS_CODE,
-		source: 'dartsx',
-	}));
-}
-
-export = init;
