@@ -60,7 +60,10 @@ export class DarTsxVirtualCode implements VirtualCode {
 		let code: string;
 		let mapMappings: string;
 		try {
-			const result = preprocess(source, { mode: 'typecheck' });
+			// filename drives the lowering's output language: .jsx/.js files get
+			// JavaScript virtual code matching their scriptKind below — annotated
+			// TS output would be a syntax error in tsserver's JS parse mode
+			const result = preprocess(source, { mode: 'typecheck', filename: fileName });
 			code = result.code;
 			mapMappings = result.map.mappings;
 		} catch {

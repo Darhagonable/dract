@@ -6,8 +6,7 @@ DarTsx is a fresh frontend framework using JSX-like syntax with Flow-style compo
 
 ## Features
 
-- **Syntax highlighting** for DarTsx syntax in `.js`, `.jsx`, `.ts`, and `.tsx` files, injected into VS Code's built-in JS/TS grammars
-- **Semantic tokens** for `component`, `state`, `derived`, `render`, `bind`, and `as` expressions
+- **Syntax highlighting** for DarTsx syntax in `.js`, `.jsx`, `.ts`, and `.tsx` files, injected into VS Code's built-in JS/TS grammars — `state` and `derived` color like `let`/`const`, `component` like a declaration, consistently across all four languages
 - **CSS language features** inside `<style>` blocks (diagnostics, completions, hover) powered by the Volar language server
 - **TypeScript integration** — the extension ships an embedded DarTsx language service that loads into VS Code's built-in TS server: diagnostics, completions, hover, and go-to-definition work out of the box, without requiring you to be inside a TypeScript project
 
@@ -15,7 +14,7 @@ Works with VS Code's built-in JavaScript/TypeScript language service, so nothing
 
 ## Desktop & Web
 
-The extension runs both on desktop VS Code and in web contexts (vscode.dev / github.dev). On the web it provides syntax highlighting and semantic tokens; CSS language features are desktop-only.
+The extension runs both on desktop VS Code and in web contexts (vscode.dev / github.dev). On the web it provides syntax highlighting; CSS language features are desktop-only.
 
 ## Getting Started
 
