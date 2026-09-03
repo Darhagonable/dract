@@ -83,7 +83,7 @@
 		"@vscode-tmlanguage-snapshot/vscode": "^2.0.0",
 		"@vscode/vsce": "^3.9.2",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.9",
+		"vitest": "5.0.0",
 		"vitest-environment-vscode": "^0.1.3"
 	}
 }
