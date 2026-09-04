@@ -1,0 +1,45 @@
+{
+	"name": "octane-playground",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@codemirror/autocomplete": "^6.18.6",
+		"@codemirror/commands": "^6.10.4",
+		"@codemirror/lang-javascript": "^6.2.5",
+		"@codemirror/language": "^6.11.0",
+		"@codemirror/lint": "^6.9.7",
+		"@codemirror/lsp-client": "^6.2.5",
+		"@codemirror/state": "^6.7.1",
+		"@codemirror/view": "^6.43.6",
+		"@dartsx/language-service": "workspace:*",
+		"@jridgewell/sourcemap-codec": "^1.5.0",
+		"@lezer/highlight": "^1.2.3",
+		"@oxc-parser/binding-wasm32-wasi": "^0.136.0",
+		"@oxc-transform/binding-wasm32-wasi": "^0.136.0",
+		"@typescript/vfs": "^1.6.4",
+		"dartsx": "workspace:*",
+		"es-module-lexer": "^1.7.0",
+		"esrap": "^2.3.0",
+		"oxc-parser": "^0.136.0",
+		"prettier": "^3.9.6",
+		"react": "^19.2.7",
+		"react-dom": "^19.2.7",
+		"shiki": "^3.23.0",
+		"typescript": "^6.0.3"
+	},
+	"devDependencies": {
+		"@types/node": "^25.0.0",
+		"@types/react": "^19.2.18",
+		"@types/react-dom": "^19.2.4",
+		"@vitejs/plugin-react": "^6.1.0",
+		"esbuild": "^0.28.2",
+		"vite": "^8.2.0"
+	}
+}

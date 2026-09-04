@@ -1,0 +1,13 @@
+{
+	"groups": [
+		{
+			"label": "DarTsx",
+			"examples": [
+				{ "path": "/counter", "label": "Counter" },
+				{ "path": "/effect", "label": "Effect" },
+				{ "path": "/context", "label": "Context" },
+				{ "path": "/store", "label": "Store" }
+			]
+		}
+	]
+}
