@@ -390,6 +390,13 @@ export function sandboxSrcdoc(theme: 'dark' | 'light' = 'dark'): string {
 		background: #ffffff;
 		color: #1c2027;
 	}
+	/* chobitsu's viewport-size-on-resize badge (top-right, 1s after a resize):
+	   inline white background, no inline color — its text falls back to the
+	   initial CanvasText, which color-scheme: dark renders near-white. Pin a
+	   dark color so it stays readable in both themes. (The only other
+	   __chobitsu-hide__ node, the highlighter host, is all:initial + shadow
+	   DOM, so this rule can't touch element highlighting.) */
+	.__chobitsu-hide__ { color: #1c2027; }
 </style>
 <script>${SANDBOX_SHIM}</script>
 <script src="${CHOBITSU_URL}"></script>
