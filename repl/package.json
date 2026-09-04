@@ -1,0 +1,43 @@
+{
+	"name": "octane-playground",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@jridgewell/sourcemap-codec": "^1.5.0",
+		"@oxc-parser/binding-wasm32-wasi": "^0.136.0",
+		"@oxc-transform/binding-wasm32-wasi": "^0.136.0",
+		"@shikijs/monaco": "^4.0.2",
+		"dartsx": "workspace:*",
+		"es-module-lexer": "^1.7.0",
+		"esrap": "^2.3.0",
+		"monaco-editor-core": "^0.52.2",
+		"oxc-parser": "^0.136.0",
+		"prettier": "^3.9.6",
+		"react": "^19.2.7",
+		"react-dom": "^19.2.7",
+		"shiki": "^4.0.2",
+		"sucrase": "^3.35.1"
+	},
+	"devDependencies": {
+		"@dartsx/language-service": "workspace:*",
+		"@types/node": "^25.0.0",
+		"@types/react": "^19.2.18",
+		"@types/react-dom": "^19.2.4",
+		"@volar/language-service": "~2.4.28",
+		"@volar/monaco": "~2.4.28",
+		"@volar/typescript": "~2.4.28",
+		"esbuild": "^0.28.1",
+		"monaco-languageserver-types": "^0.4.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.2.0",
+		"volar-service-typescript": "0.0.71",
+		"vscode-uri": "^3.1.0"
+	}
+}
