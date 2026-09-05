@@ -1,49 +1,117 @@
-import examples from '../examples/meta.json';
-
-const sources = import.meta.glob('../examples/**/App.tsx', {
-	query: '?raw',
-	import: 'default',
-	eager: true,
-}) as Record<string, string>;
-
-function sourceFor(path: string): string {
-	return sources[`../examples${path}/App.tsx`] ?? `// missing example: ${path}`;
-}
+import { onMount } from 'dartsx';
+import { mountEditors, openFile, setOutput } from './editor/editors';
+import { setEditorTheme } from './editor/highlight';
+import { languageUris, syncFiles, TSCONFIG_FILE } from './editor/models';
+import { mountLanguage, reloadLanguage } from './language/index';
+import { DEFAULT_EXAMPLE_PATH, EXAMPLES, loadExample } from './state/examples';
 
 export default component App() {
 	state activeTab = 'preview'
+	state examplePath = DEFAULT_EXAMPLE_PATH
+	state files = loadExample(DEFAULT_EXAMPLE_PATH)
+	state activeFile = files[0].name
+	state dark = true
+
+	let tsconfigTimer: ReturnType<typeof setTimeout> | undefined
+
+	function showOutput() {
+		setOutput(`// compiled output for ${activeFile} — compiler lands in the next step`)
+	}
+
+	function selectExample(path: string) {
+		examplePath = path
+		files = loadExample(path)
+		activeFile = files[0].name
+		syncFiles(files)
+		openFile(activeFile)
+		showOutput()
+	}
+
+	function selectFile(name: string) {
+		activeFile = name
+		openFile(name)
+		showOutput()
+	}
+
+	function toggleTheme() {
+		dark = !dark
+		setEditorTheme(dark)
+	}
+
+	function onSourceChange(name: string, source: string) {
+		const file = files.find((candidate) => candidate.name === name)
+		if (file && file.source !== source) file.source = source
+		if (name === TSCONFIG_FILE) {
+			clearTimeout(tsconfigTimer)
+			tsconfigTimer = setTimeout(() => reloadLanguage(), 500)
+		}
+	}
+
+	function getCompilerOptions(): Record<string, unknown> | null {
+		try {
+			const parsed = JSON.parse(files.find((file) => file.name === TSCONFIG_FILE)?.source ?? '')
+			return (parsed?.compilerOptions as Record<string, unknown>) ?? null
+		} catch {
+			return null
+		}
+	}
+
+	onMount(() => {
+		mountEditors(
+			document.getElementById('editor-mount')!,
+			document.getElementById('output-mount')!,
+			{ onSourceChange, onOpenFile: selectFile },
+		)
+		syncFiles(files)
+		openFile(activeFile)
+		showOutput()
+		mountLanguage({ getSyncUris: () => languageUris(), getCompilerOptions })
+	})
 
 	render (
 		<div class="layout">
-			<div class="editor" id="editor-mount">
-				{for (const group of examples.groups) (
-					<section>
-						<h2>{group.label}</h2>
-						{for (const example of group.examples) (
-							<article>
-								<h3>{example.label}</h3>
-								<pre><code>{sourceFor(example.path)}</code></pre>
-							</article>
-						)}
-					</section>
-				)}
-			</div>
-			<div class="result">
-				<div class="result-tabs">
-					<button onclick={() => activeTab = 'preview'}>Preview</button>
-					<button onclick={() => activeTab = 'output'}>Output</button>
+			<div class="side">
+				<div class="bar">
+					{for (const example of EXAMPLES) (
+						<button
+							class={example.path === examplePath ? 'active' : ''}
+							onclick={() => selectExample(example.path)}
+						>
+							{example.label}
+						</button>
+					)}
+					<span class="gap" />
+					{for (const file of files) (
+						<button
+							class={file.name === activeFile ? 'active' : ''}
+							onclick={() => selectFile(file.name)}
+						>
+							{file.name}
+						</button>
+					)}
+					<span class="gap" />
+					<button onclick={() => toggleTheme()}>Theme</button>
 				</div>
-				{if (activeTab === 'preview') (
-					<div id="preview-mount">preview</div>
-				)}
-				{if (activeTab === 'output') (
-					<div id="output-mount">output</div>
-				)}
+				<div id="editor-mount" class="editor" />
+			</div>
+			<div class="side">
+				<div class="bar">
+					<button class={activeTab === 'preview' ? 'active' : ''} onclick={() => (activeTab = 'preview')}>Preview</button>
+					<button class={activeTab === 'output' ? 'active' : ''} onclick={() => (activeTab = 'output')}>Output</button>
+				</div>
+				<div id="preview-mount" class={activeTab === 'preview' ? 'fill' : 'fill hidden'}>preview</div>
+				<div id="output-mount" class={activeTab === 'output' ? 'fill' : 'fill hidden'} />
 			</div>
 		</div>
 		<style>
-			.layout { display: flex; }
-			.editor, .result { flex: 1; min-width: 0; }
+			.layout { display: flex; height: 100vh; }
+			.side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+			.bar { display: flex; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid #ccc; }
+			.gap { flex: 1; }
+			.editor { flex: 1; min-height: 0; }
+			.fill { flex: 1; min-height: 0; }
+			.hidden { display: none; }
+			.active { font-weight: bold; }
 		</style>
 	)
 }
