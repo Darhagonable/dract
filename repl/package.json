@@ -9,11 +9,23 @@
 		"check": "dartsx check"
 	},
 	"dependencies": {
-		"dartsx": "workspace:*"
+		"@dartsx/language-service": "workspace:*",
+		"@shikijs/monaco": "^4.0.2",
+		"dartsx": "workspace:*",
+		"monaco-editor-core": "^0.52.2",
+		"shiki": "^4.0.2"
 	},
 	"devDependencies": {
 		"@dartsx/cli": "workspace:*",
 		"@dartsx/vite-plugin": "workspace:*",
-		"vite": "^8.0.16"
+		"@types/node": "^25.9.3",
+		"@volar/language-service": "~2.4.28",
+		"@volar/monaco": "~2.4.28",
+		"@volar/typescript": "~2.4.28",
+		"monaco-languageserver-types": "^0.4.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16",
+		"volar-service-typescript": "0.0.71",
+		"vscode-uri": "^3.1.0"
 	}
 }
