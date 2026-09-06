@@ -15,6 +15,7 @@ import { createHighlighterCoreSync } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine-javascript.mjs';
 import { shikiToMonaco } from '@shikijs/monaco';
 import langCss from 'shiki/langs/css.mjs';
+import langJavascript from 'shiki/langs/javascript.mjs';
 import langJson from 'shiki/langs/json.mjs';
 import langTs from 'shiki/langs/typescript.mjs';
 import langTsx from 'shiki/langs/tsx.mjs';
@@ -72,6 +73,7 @@ const grammars = [
 	...langTs.map((entry) =>
 		entry.scopeName === 'source.ts' ? mergeInjections(entry, 'ts-') : entry,
 	),
+	...langJavascript,
 	...langJson,
 	...langCss,
 ];

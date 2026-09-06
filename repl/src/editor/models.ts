@@ -40,6 +40,11 @@ type SourceListener = (name: string, source: string) => void;
 
 let sourceListener: SourceListener | null = null;
 
+/** Set the singleton sink for project-model content changes. */
+export function setSourceListener(listener: SourceListener): void {
+	sourceListener = listener;
+}
+
 function bindListener(model: monaco.editor.ITextModel): void {
 	model.onDidChangeContent(() => {
 		const name = projectName(model.uri);

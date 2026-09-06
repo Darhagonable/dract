@@ -10,10 +10,16 @@
 	},
 	"dependencies": {
 		"@dartsx/language-service": "workspace:*",
+		"@jridgewell/remapping": "^2.3.5",
+		"@oxc-parser/binding-wasm32-wasi": "^0.149.0",
+		"@oxc-transform/binding-wasm32-wasi": "^0.149.0",
 		"@shikijs/monaco": "^4.0.2",
 		"dartsx": "workspace:*",
 		"monaco-editor-core": "^0.52.2",
-		"shiki": "^4.0.2"
+		"postcss": "^8.5.15",
+		"postcss-selector-parser": "^7.1.4",
+		"shiki": "^4.0.2",
+		"source-map-js": "^1.2.1"
 	},
 	"devDependencies": {
 		"@dartsx/cli": "workspace:*",
