@@ -71,12 +71,27 @@ export default defineConfig({
 	worker: {
 		format: 'es',
 	},
+	server: {
+		// The oxc wasm bindings are wasip1-threads builds: posting the shared
+		// wasm memory to their worker pool requires cross-origin isolation.
+		// credentialless keeps cross-origin CDN modules loadable later.
+		headers: {
+			'Cross-Origin-Opener-Policy': 'same-origin',
+			'Cross-Origin-Embedder-Policy': 'credentialless',
+		},
+	},
+	preview: {
+		headers: {
+			'Cross-Origin-Opener-Policy': 'same-origin',
+			'Cross-Origin-Embedder-Policy': 'credentialless',
+		},
+	},
 	build: {
 		target: 'esnext',
 	},
 	optimizeDeps: {
 		// These ship CommonJS; raw CJS has no named ESM exports, so they are
-		// prebundled to ESM — for both the main thread and the worker sub-build.
+		// prebundled to ESM — for both the main thread and worker sub-builds.
 		include: [
 			'typescript',
 			'@dartsx/language-service',
@@ -85,6 +100,21 @@ export default defineConfig({
 			'@volar/monaco',
 			'volar-service-typescript/lib/plugins/semantic',
 			'volar-service-typescript/lib/plugins/directiveComment',
+			'esrap',
+			'esrap/languages/tsx',
+			'@jridgewell/remapping',
+			'postcss',
+			'postcss-selector-parser',
+		],
+		// The oxc toolchain resolves through browser fields to WASM bindings
+		// (fetched .wasm assets + a nested worker) — prebundling breaks those
+		// asset URLs, so this slice stays raw for the compiler worker.
+		exclude: [
+			'oxc-parser',
+			'oxc-transform',
+			'@oxc-parser/binding-wasm32-wasi',
+			'@oxc-transform/binding-wasm32-wasi',
+			'@napi-rs/wasm-runtime',
 		],
 	},
 });

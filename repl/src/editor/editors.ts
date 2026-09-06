@@ -8,7 +8,7 @@
 import * as monaco from 'monaco-editor-core';
 import './monaco-env';
 import './highlight';
-import { getOutputModel, projectName, projectUri } from './models';
+import { getOutputModel, projectName, projectUri, setSourceListener } from './models';
 
 export interface EditorHost {
 	/** A project model's content changed. */
@@ -37,6 +37,7 @@ const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 export function mountEditors(inputContainer: HTMLElement, outputContainer: HTMLElement, editorHost: EditorHost): void {
 	if (input) return;
 	host = editorHost;
+	setSourceListener(editorHost.onSourceChange);
 
 	input = monaco.editor.create(inputContainer, {
 		...EDITOR_OPTIONS,

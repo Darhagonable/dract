@@ -1,9 +1,12 @@
 import { onMount } from 'dartsx';
+import { compile, type FileOutput } from './compiler/client';
 import { mountEditors, openFile, setOutput } from './editor/editors';
 import { setEditorTheme } from './editor/highlight';
 import { languageUris, syncFiles, TSCONFIG_FILE } from './editor/models';
 import { mountLanguage, reloadLanguage } from './language/index';
 import { DEFAULT_EXAMPLE_PATH, EXAMPLES, loadExample } from './state/examples';
+
+const COMPILE_DEBOUNCE_MS = 250;
 
 export default component App() {
 	state activeTab = 'preview'
@@ -13,9 +16,33 @@ export default component App() {
 	state dark = true
 
 	let tsconfigTimer: ReturnType<typeof setTimeout> | undefined
+	let compileTimer: ReturnType<typeof setTimeout> | undefined
+	let compileResult: Record<string, FileOutput> | null = null
 
 	function showOutput() {
-		setOutput(`// compiled output for ${activeFile} — compiler lands in the next step`)
+		const result = compileResult?.[activeFile]
+		if (!result) {
+			setOutput(`// compiling ${activeFile}…`)
+		} else if (result.error) {
+			setOutput(`// compile error in ${activeFile}\n\n${result.error}`)
+		} else if (result.code !== null) {
+			setOutput(result.code)
+		} else {
+			setOutput(`// ${activeFile} produces no compiled output`)
+		}
+	}
+
+	function runCompile() {
+		void compile(files).then((outputs) => {
+			if (!outputs) return
+			compileResult = outputs
+			showOutput()
+		})
+	}
+
+	function scheduleCompile() {
+		clearTimeout(compileTimer)
+		compileTimer = setTimeout(runCompile, COMPILE_DEBOUNCE_MS)
 	}
 
 	function selectExample(path: string) {
@@ -24,7 +51,8 @@ export default component App() {
 		activeFile = files[0].name
 		syncFiles(files)
 		openFile(activeFile)
-		showOutput()
+		compileResult = null
+		runCompile()
 	}
 
 	function selectFile(name: string) {
@@ -44,6 +72,8 @@ export default component App() {
 		if (name === TSCONFIG_FILE) {
 			clearTimeout(tsconfigTimer)
 			tsconfigTimer = setTimeout(() => reloadLanguage(), 500)
+		} else {
+			scheduleCompile()
 		}
 	}
 
@@ -66,6 +96,7 @@ export default component App() {
 		openFile(activeFile)
 		showOutput()
 		mountLanguage({ getSyncUris: () => languageUris(), getCompilerOptions })
+		runCompile()
 	})
 
 	render (
