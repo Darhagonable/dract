@@ -4,6 +4,7 @@ import { mountEditors, openFile, setOutput } from './editor/editors';
 import { setEditorTheme } from './editor/highlight';
 import { languageUris, syncFiles, TSCONFIG_FILE } from './editor/models';
 import { mountLanguage, reloadLanguage } from './language/index';
+import { mountPreview, type Preview } from './preview/sandbox';
 import { DEFAULT_EXAMPLE_PATH, EXAMPLES, loadExample } from './state/examples';
 
 const COMPILE_DEBOUNCE_MS = 250;
@@ -18,6 +19,7 @@ export default component App() {
 	let tsconfigTimer: ReturnType<typeof setTimeout> | undefined
 	let compileTimer: ReturnType<typeof setTimeout> | undefined
 	let compileResult: Record<string, FileOutput> | null = null
+	let preview: Preview | null = null
 
 	function showOutput() {
 		const result = compileResult?.[activeFile]
@@ -33,11 +35,27 @@ export default component App() {
 	}
 
 	function runCompile() {
-		void compile(files).then((outputs) => {
-			if (!outputs) return
-			compileResult = outputs
-			showOutput()
-		})
+		compile(files).then(
+			(result) => {
+				if (!result) return
+				compileResult = result.outputs
+				showOutput()
+				if (result.graphError) {
+					preview?.reportError(`Graph error\n\n${result.graphError}`)
+					return
+				}
+				if (result.graph) {
+					void preview?.run(result.graph).then((run) => {
+						if (run?.error) console.error('[preview]', run.error)
+					})
+				}
+			},
+			(error) => {
+				// A failed worker boot must be visible, not a silent hang.
+				const message = error instanceof Error ? error.message : String(error)
+				setOutput(`// compiler unavailable\n\n${message}`)
+			},
+		)
 	}
 
 	function scheduleCompile() {
@@ -96,6 +114,9 @@ export default component App() {
 		openFile(activeFile)
 		showOutput()
 		mountLanguage({ getSyncUris: () => languageUris(), getCompilerOptions })
+		preview = mountPreview(document.getElementById('preview-mount')!, {
+			onRuntimeError: (message) => console.error('[preview:runtime]', message),
+		})
 		runCompile()
 	})
 
@@ -130,19 +151,19 @@ export default component App() {
 					<button class={activeTab === 'preview' ? 'active' : ''} onclick={() => (activeTab = 'preview')}>Preview</button>
 					<button class={activeTab === 'output' ? 'active' : ''} onclick={() => (activeTab = 'output')}>Output</button>
 				</div>
-				<div id="preview-mount" class={activeTab === 'preview' ? 'fill' : 'fill hidden'}>preview</div>
-				<div id="output-mount" class={activeTab === 'output' ? 'fill' : 'fill hidden'} />
-			</div>
+			<div id="preview-mount" class={activeTab === 'preview' ? 'fill' : 'fill hidden'} />
+			<div id="output-mount" class={activeTab === 'output' ? 'fill' : 'fill hidden'} />
 		</div>
-		<style>
-			.layout { display: flex; height: 100vh; }
-			.side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-			.bar { display: flex; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid #ccc; }
-			.gap { flex: 1; }
-			.editor { flex: 1; min-height: 0; }
-			.fill { flex: 1; min-height: 0; }
-			.hidden { display: none; }
-			.active { font-weight: bold; }
-		</style>
+	</div>
+	<style>
+		.layout { display: flex; height: 100vh; }
+		.side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+		.bar { display: flex; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid #ccc; }
+		.gap { flex: 1; }
+		.editor { flex: 1; min-height: 0; }
+		.fill { flex: 1; min-height: 0; position: relative; }
+		.hidden { display: none; }
+		.active { font-weight: bold; }
+	</style>
 	)
 }
