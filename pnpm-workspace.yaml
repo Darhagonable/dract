@@ -2,6 +2,7 @@ packages:
   - packages/*
   - toolkit/*
   - playground
+  - repl
   - website
 
 allowBuilds:
