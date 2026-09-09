@@ -39,7 +39,7 @@ export async function emit_dts(
 		if (file.isDartsx) {
 			// Transform DarTsx → valid TSX for tsc
 			const source = fs.readFileSync(srcPath, 'utf-8');
-			const { code } = preprocess(source, { mode: 'typecheck' });
+			const { code } = preprocess(source, { mode: 'typecheck', filename: file.name });
 			fs.writeFileSync(tmpPath, code);
 		} else {
 			fs.copyFileSync(srcPath, tmpPath);

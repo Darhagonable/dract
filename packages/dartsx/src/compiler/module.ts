@@ -81,6 +81,10 @@ export function compileModule(source: string, options: CompileModuleOptions = {}
 	// so the analyzer and transform don't need to handle TS-specific AST nodes.
 	// JSX is preserved; the $$s/$$d/$$style markers survive as identifiers/elements.
 	const stripped = oxcTransformSync(filename, preprocessed.code, { sourcemap: true, jsx: 'preserve' });
+	if (stripped.errors.length > 0) {
+		const errorMessages = stripped.errors.map((e) => e.message).join('\n');
+		throw new Error(`Type-stripping failed for ${filename}:\n${errorMessages}`);
+	}
 
 	// Phase 2: Parse with OXC
 	const parseResult = parse(filename, stripped.code, 'jsx');

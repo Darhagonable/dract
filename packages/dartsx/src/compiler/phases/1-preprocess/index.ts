@@ -1,7 +1,8 @@
 /**
  * Unified DarTsx Preprocessor
  *
- * Transforms DarTsx custom syntax into valid TypeScript/TSX. Used by both:
+ * Transforms DarTsx custom syntax into valid TypeScript/TSX or JavaScript/JSX
+ * (type-preserving: the output language follows the input file). Used by both:
  * - The compiler pipeline (OXC parsing → analyze → transform → codegen)
  * - The language service (editor type-checking & intellisense)
  *
@@ -9,13 +10,19 @@
  * - `compiler`: replaces styles with `<$$styleN />` markers
  * - `typecheck`: blanks CSS preserving interpolations, wraps assignment attrs in arrows
  *
- * Both modes produce IIFEs for control flow, full destructured params,
- * $$s/$$d markers, and `satisfies T as T` for typed state.
+ * A `lang` option (defaulting to the `filename` extension) controls the output
+ * language: TS output carries the invented param/type annotations and
+ * `satisfies T as T` casts that tsserver consumers read; JS output omits them.
+ * User-written TypeScript passes through in both — in JS it is invalid by
+ * design and errors downstream, exactly like regular JavaScript.
+ *
+ * Both modes produce IIFEs for control flow, full destructured params, and
+ * $$s/$$d markers.
  * All transforms use MagicString for source-map-safe manipulation.
  *
  * Transforms:
- *   - `component Name(params)` → `function Name({params}: {types})`
- *   - `state x: T =` → `let $$sN = 0, x = init satisfies T as T`
+ *   - `component Name(params)` → `function Name({params}: {types})` (TS) / `function Name({params})` (JS)
+ *   - `state x: T =` → `let $$sN = 0, x = init satisfies T as T` (TS) / `let $$sN = 0, x = init` (JS)
  *   - `derived x =` → `const $$dN = 0, x =`
  *   - `render (...)` → `return (<>...</>)` with IIFE-wrapped control flow
  *   - `{if/for/switch/try}` in JSX → IIFE wrappers `{(() => { ... })()}`
@@ -43,6 +50,17 @@ export interface PreprocessOptions {
 	 * - `typecheck`: uses `satisfies T as T`, blanks styles preserving interpolations
 	 */
 	mode?: 'compiler' | 'typecheck';
+	/**
+	 * Target language of the lowered output — type-preserving:
+	 * - `ts`: emits the invented param/type annotations and `satisfies T as T`
+	 *   casts that tsserver consumers read
+	 * - `js`: omits invented annotations. User-written TypeScript passes
+	 *   through untouched — it is invalid JavaScript by design and errors
+	 *   downstream, the same way regular JavaScript rejects it
+	 * Defaults to inferring from `filename`'s extension (`.js`/`.jsx`/`.mjs`/
+	 * `.cjs` → `js`), else `ts`.
+	 */
+	lang?: 'ts' | 'js';
 	/** Filename recorded in the generated source map (for remapping chains). */
 	filename?: string;
 }
@@ -64,7 +82,7 @@ export interface ExtractedStyleBlock {
 }
 
 export interface PreprocessResult {
-	/** The transformed valid TSX code */
+	/** The transformed valid TSX/JSX code */
 	code: string;
 	/** Source map from output → original */
 	map: SourceMap;
@@ -112,6 +130,7 @@ export function isDarTsxFile(content: string): boolean {
  */
 export function preprocess(source: string, options: PreprocessOptions = {}): PreprocessResult {
 	const mode = options.mode ?? 'compiler';
+	const lang = options.lang ?? (/\.[cm]?jsx?$/.test(options.filename ?? '') ? 'js' : 'ts');
 	const ms = new MagicString(source);
 	const commentRanges = buildCommentRanges(source);
 
@@ -124,9 +143,9 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	const styleBlocks: ExtractedStyleBlock[] = [];
 
 	// Transform passes (order matters)
-	transformComponentDeclarations(ms, source, commentRanges, components, renamedParams, bindParams, mode);
-	transformStateDeclarations(ms, source, commentRanges, stateVars);
-	transformDerivedDeclarations(ms, source, commentRanges, derivedVars);
+	transformComponentDeclarations(ms, source, commentRanges, components, renamedParams, bindParams, lang);
+	transformStateDeclarations(ms, source, commentRanges, stateVars, lang);
+	transformDerivedDeclarations(ms, source, commentRanges, derivedVars, lang);
 	transformRenderBlocks(ms, source);
 	transformStyleBlocks(ms, source, commentRanges, styleBlocks, mode);
 	transformJsxAttributes(ms, source);
@@ -214,7 +233,7 @@ function transformComponentDeclarations(
 	components: ComponentMeta[],
 	renamedParams: Record<string, Record<string, string>>,
 	bindParams: Record<string, string[]>,
-	mode: 'compiler' | 'typecheck',
+	lang: 'ts' | 'js',
 ): void {
 	const re = /\b((?:export\s+)?(?:default\s+)?(?:async\s+)?)component(\s+(\w+))/g;
 	let match;
@@ -235,7 +254,8 @@ function transformComponentDeclarations(
 		ms.overwrite(prefixEnd, prefixEnd + 'component'.length, 'function');
 
 		// Find the param list
-		const openParen = source.indexOf('(', match.index + match[0].length);
+		const nameEnd = match.index + match[0].length;
+		const openParen = source.indexOf('(', nameEnd);
 		if (openParen === -1) continue;
 		const closeParen = findMatchingParen(source, openParen);
 		if (closeParen === -1) continue;
@@ -261,27 +281,30 @@ function transformComponentDeclarations(
 			}
 		}
 
-		// Build the type annotation
-		const typeParts: string[] = [];
-		for (const p of parsed) {
-			if (p.isRest) {
-				typeParts.push('[key: string]: any');
-			} else {
-				const key = p.externalName !== null ? `'${p.externalName}'` : p.localName;
-				const optional = (p.isOptional || p.defaultValue !== null) ? '?' : '';
-				const type = p.type ?? 'any';
-				typeParts.push(`${key}${optional}: ${type}`);
-			}
-		}
-
 		// Replace ( with ({ — original param positions become destructuring bindings
 		ms.overwrite(openParen, openParen + 1, '({');
-		// Replace ) with }: {type annotation})
-		ms.overwrite(closeParen, closeParen + 1, `}: {${typeParts.join(', ')}})`);
+		// Replace ) with }: {type annotation}) — TS output carries the invented
+		// type literal for tsserver consumers; JS output has no annotation
+		if (lang === 'js') {
+			ms.overwrite(closeParen, closeParen + 1, '})');
+		} else {
+			const typeParts: string[] = [];
+			for (const p of parsed) {
+				if (p.isRest) {
+					typeParts.push('[key: string]: any');
+				} else {
+					const key = p.externalName !== null ? `'${p.externalName}'` : p.localName;
+					const optional = (p.isOptional || p.defaultValue !== null) ? '?' : '';
+					const type = p.type ?? 'any';
+					typeParts.push(`${key}${optional}: ${type}`);
+				}
+			}
+			ms.overwrite(closeParen, closeParen + 1, `}: {${typeParts.join(', ')}})`);
+		}
 
 		// Edit each param in place to become a destructuring binding
 		for (let i = 0; i < paramRanges.length; i++) {
-			editParamForDestructuring(ms, source, paramRanges[i], parsed[i]);
+			editParamForDestructuring(ms, source, paramRanges[i], parsed[i], lang);
 		}
 	}
 }
@@ -392,19 +415,25 @@ function parseOneParam(raw: string): ParsedParam {
 /**
  * Edit a param range in place so the original tokens become a destructuring binding.
  * Uses MagicString remove/overwrite to keep source positions intact.
+ * The DarTsx syntax (`bind `, `'ext' as local`) lowers for both languages;
+ * TypeScript-only syntax (annotations, `?`) is only removed for TS output —
+ * in JS it passes through untouched, exactly like regular JavaScript.
  */
 function editParamForDestructuring(
 	ms: MagicString, source: string, range: ParamRange, param: ParsedParam,
+	lang: 'ts' | 'js',
 ): void {
 	const raw = range.text;
 	const leadingWs = raw.match(/^\s*/)![0].length;
 	const contentStart = range.start + leadingWs;
 
-	// Rest params: keep `...name` at original position, remove type
+	// Rest params: keep `...name` at original position, remove type (TS only)
 	if (param.isRest) {
-		const nameEnd = contentStart + 3 + param.localName.length;
-		if (nameEnd < range.end) {
-			ms.remove(nameEnd, range.end);
+		if (lang === 'ts') {
+			const nameEnd = contentStart + 3 + param.localName.length;
+			if (nameEnd < range.end) {
+				ms.remove(nameEnd, range.end);
+			}
 		}
 		return;
 	}
@@ -434,6 +463,7 @@ function editParamForDestructuring(
 			// Find the localName end
 			const localStart = afterQuote + (asMatch ? asMatch[0].length : 0);
 			const localEnd = localStart + param.localName.length;
+			if (lang === 'js') return;
 			// Remove optional `?` after name
 			let afterName = localEnd;
 			if (source[afterName] === '?') {
@@ -458,6 +488,8 @@ function editParamForDestructuring(
 		}
 	} else {
 		// Simple param: `name: Type = default` → `name = default` or just `name`
+		// (TS only — JS passes annotations and `?` through)
+		if (lang === 'js') return;
 		const nameEnd = cursor + param.localName.length;
 		let afterName = nameEnd;
 		if (source[afterName] === '?') {
@@ -502,6 +534,7 @@ function findDefaultEquals(source: string, start = 0, end = source.length): numb
 function transformStateDeclarations(
 	ms: MagicString, source: string, commentRanges: SkipRange[],
 	stateVars: string[],
+	lang: 'ts' | 'js',
 ): void {
 	let stateCounter = 0;
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+(\w+))/g;
@@ -526,12 +559,13 @@ function transformStateDeclarations(
 		ms.overwrite(stateStart, stateEnd, 'let');
 		ms.appendLeft(stateEnd, ` ${STATE_MARKER}${stateCounter++} = 0,`);
 
-		// Move type annotation to `satisfies T as T` (only when there's an initializer)
+		// Move type annotation to `satisfies T as T` (TS only, when there's an
+		// initializer) — JS output passes user-written annotations through
 		if (source[peek] === '=') {
 			const colonIdx = source.indexOf(':', afterVar);
-			if (colonIdx !== -1 && colonIdx < peek) {
-				const typeText = source.slice(colonIdx + 1, peek).trim();
+			if (colonIdx !== -1 && colonIdx < peek && lang === 'ts') {
 				ms.overwrite(colonIdx, peek, ' ');
+				const typeText = source.slice(colonIdx + 1, peek).trim();
 				// Find end of value expression (`;` or `\n` at bracket depth 0)
 				let ins = peek + 1, depth = 0;
 				while (ins < source.length) {
@@ -544,9 +578,10 @@ function transformStateDeclarations(
 				}
 				ms.appendLeft(ins, ` satisfies ${typeText} as ${typeText}`);
 			}
-		} else if (afterType > afterVar) {
-			// No initializer but has a type annotation — widen to include undefined
-			// since the variable is uninitialized until runtime (e.g. bind:this)
+		} else if (afterType > afterVar && lang === 'ts') {
+			// No initializer but has a type annotation — widen to include
+			// undefined since the variable is uninitialized until runtime
+			// (e.g. bind:this). JS passes the annotation through.
 			ms.appendLeft(afterType, ' | undefined');
 		}
 	}
@@ -557,6 +592,7 @@ function transformStateDeclarations(
 function transformDerivedDeclarations(
 	ms: MagicString, source: string, commentRanges: SkipRange[],
 	derivedVars: string[],
+	lang: 'ts' | 'js',
 ): void {
 	let derivedCounter = 0;
 	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[\w{[])/g;

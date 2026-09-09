@@ -60,7 +60,7 @@ export class DarTsxVirtualCode implements VirtualCode {
 		let code: string;
 		let mapMappings: string;
 		try {
-			const result = preprocess(source, { mode: 'typecheck' });
+			const result = preprocess(source, { mode: 'typecheck', filename: fileName });
 			code = result.code;
 			mapMappings = result.map.mappings;
 		} catch {
