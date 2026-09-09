@@ -1,6 +1,6 @@
-component UserCard(bind name, age, active = true) {
-	derived status = active ? "Active" : "Inactive"
-	render (
+function UserCard({name, age, active = true}) {
+	const $$d0 = 0, status = active ? "Active" : "Inactive"
+	return (
 		<div>
 			<h2>{name}</h2>
 			<input bind:value={name} />
@@ -8,29 +8,29 @@ component UserCard(bind name, age, active = true) {
 	)
 }
 
-component Badge(label, count = 0) {
-	state total = count
-	render <span>{label}: {total}</span>
+function Badge({label, count = 0}) {
+	let $$s0 = 0, total = count
+	return <span>{label}: {total}</span>
 }
 
-component List(items, ...rest) {
-	state heading = "items"
-	render (
+function List({items, ...rest}) {
+	let $$s1 = 0, heading = "items"
+	return (
 		<ul>
-			{for (const item of items) (
+			{(() => { for (const item of items) { return (
 				<li key={item}>{heading}</li>
-			)}
+			)}})()}
 		</ul>
 	)
 }
 
-component Anchor('data-id' as dataId, bind 'aria-label' as ariaLabel) {
-	state focused = false
-	render <a data-id={dataId} aria-label={ariaLabel}>{focused}</a>
+function Anchor({'data-id': dataId, 'aria-label': ariaLabel}) {
+	let $$s2 = 0, focused = false
+	return <a data-id={dataId} aria-label={ariaLabel}>{focused}</a>
 }
 
-state selected = null
-state container;
+let $$s3 = 0, selected = null
+let $$s4 = 0, container;
 
 export function helper(value) {
 	return value ?? null
@@ -93,6 +93,6 @@ const table = <DataTable row={(r) => <tr>{r}</tr>} />
 // unbalanced-delimiter rows go last: their stale stack entries persist
 // to EOF, so no row may follow them.
 const textPunct = <p>a ) b ( c</p>
-const holeStmt = <p>{a; render(x)}</p>
+const holeStmt = <p>{a; return (x)}</p>
 const staleOpen = foo((
 const staleClose = bar]

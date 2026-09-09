@@ -163,6 +163,20 @@ component GenericComponent<T extends Record<string, unknown>>(data: T, label: st
   )
 }
 
+component ThemedButton(color: string) {
+  state size = 16
+
+  render (
+    <button>Click</button>
+    <style>
+      button {
+        color: {color};
+        font-size: {size}px;
+      }
+    </style>
+  )
+}
+
 // Non-DarTsx code should pass through unchanged
 function RegularComponent() { return <div>hello</div> }
 

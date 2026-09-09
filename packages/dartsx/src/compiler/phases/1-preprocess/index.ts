@@ -6,6 +6,15 @@
  * - The compiler pipeline (OXC parsing → analyze → transform → codegen)
  * - The language service (editor type-checking & intellisense)
  *
+ * The source is lexed once (see ./lexer.ts); every transform consumes that
+ * token stream — keyword detection classifies statement position from
+ * tokens, never from raw characters, so strings, comments, templates,
+ * regexes and JSX can never produce false positives. DarTsx keywords
+ * (`component`, `state`, `derived`, `render`) are contextual: they rewrite
+ * only in statement position, and ordinary JavaScript passes through
+ * untouched. Remaining regexes only ever run inside lexer-confirmed
+ * regions (JSX tag ranges, style blocks).
+ *
  * A `mode` option controls the few output differences:
  * - `compiler`: replaces styles with `<$$styleN />` markers
  * - `typecheck`: blanks CSS preserving interpolations, wraps assignment attrs in arrows
@@ -32,6 +41,13 @@
  */
 
 import MagicString, { type SourceMap } from 'magic-string';
+import {
+	lex,
+	skipString,
+	findJSXEnd,
+	type LexResult,
+	type Token,
+} from './lexer.js';
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -105,21 +121,41 @@ export interface PreprocessResult {
 /**
  * Detect whether a source file contains DarTsx syntax.
  *
- * Comments and string literals are stripped first so JSDoc, prose strings,
- * and template literals mentioning `state`/`derived` don't cause false
- * positives.
+ * Runs on the lexer's token stream, so strings, comments, templates and
+ * regexes mentioning `state`/`derived`/`render` never cause false
+ * positives. Detection is deliberately lenient (no statement-position
+ * filter): a false positive just passes through preprocessing unchanged.
  */
 export function isDarTsxFile(content: string): boolean {
-	const sample = content.replace(
-		/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*)/g,
-		() => '',
-	);
-	return /\bcomponent\s+\w+\s*\(/.test(sample)
-		|| /\bstate\s+\w+/.test(sample)
-		|| /\bderived\s+\w+/.test(sample)
-		|| /\bderived\s+[{[]/.test(sample)
-		|| /\brender\s*[(<]/.test(sample)
-		|| /<[^>]*\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/.test(sample);
+	const { tokens, keywords } = lex(content);
+
+	for (let i = 0; i < keywords.length; i++) {
+		const { index, token } = keywords[i];
+		const next = tokens[index + 1];
+		if (!next) continue;
+		switch (token.text) {
+			case 'component': {
+				const paren = tokens[index + 2];
+				if (next.kind === 'word' && paren?.kind === 'punct' && paren.text === '(') return true;
+				break;
+			}
+			case 'state':
+				if (next.kind === 'word') return true;
+				break;
+			case 'derived':
+				if (next.kind === 'word' || (next.kind === 'punct' && (next.text === '{' || next.text === '['))) return true;
+				break;
+			case 'render':
+				if ((next.kind === 'punct' && next.text === '(')
+					|| (next.kind === 'operator' && next.text === '<')
+					|| next.kind === 'jsx') return true;
+				break;
+		}
+	}
+
+	// bind:{x} / bind:name={…} attributes only appear inside JSX tags
+	const bindRe = /\bbind:(?:\{[a-zA-Z_]\w*\}|[a-zA-Z][\w-]*)\b/;
+	return tokens.some((t) => t.kind === 'jsx' && bindRe.test(t.text));
 }
 
 // ── Main entry point ───────────────────────────────────────────────
@@ -132,7 +168,7 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	const mode = options.mode ?? 'compiler';
 	const lang = options.lang ?? (/\.[cm]?jsx?$/.test(options.filename ?? '') ? 'js' : 'ts');
 	const ms = new MagicString(source);
-	const commentRanges = buildCommentRanges(source);
+	const lexed = lex(source);
 
 	// Metadata collectors
 	const components: ComponentMeta[] = [];
@@ -143,13 +179,13 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	const styleBlocks: ExtractedStyleBlock[] = [];
 
 	// Transform passes (order matters)
-	transformComponentDeclarations(ms, source, commentRanges, components, renamedParams, bindParams, lang);
-	transformStateDeclarations(ms, source, commentRanges, stateVars, lang);
-	transformDerivedDeclarations(ms, source, commentRanges, derivedVars, lang);
-	transformRenderBlocks(ms, source);
-	transformStyleBlocks(ms, source, commentRanges, styleBlocks, mode);
-	transformJsxAttributes(ms, source);
-	transformHtmlDirective(ms, source);
+	transformComponentDeclarations(ms, source, lexed, components, renamedParams, bindParams, lang);
+	transformStateDeclarations(ms, source, lexed, stateVars, lang);
+	transformDerivedDeclarations(ms, source, lexed, derivedVars);
+	transformRenderBlocks(ms, source, lexed);
+	transformStyleBlocks(ms, source, lexed, styleBlocks, mode);
+	transformJsxAttributes(ms, source, lexed);
+	transformHtmlDirective(ms, source, lexed);
 
 	const code = ms.toString();
 	// The map must name its source (and include it) or a remapping chain that
@@ -164,103 +200,67 @@ export function preprocess(source: string, options: PreprocessOptions = {}): Pre
 	return { code, map, components, stateVars, derivedVars, renamedParams, bindParams, styleBlocks };
 }
 
-// ── Comment & string literal detection ─────────────────────────────
-
-type SkipRange = { start: number; end: number };
-
-function buildCommentRanges(source: string): SkipRange[] {
-	const ranges: SkipRange[] = [];
-	let i = 0;
-	while (i < source.length) {
-		const ch = source[i];
-		if (ch === '/' && source[i + 1] === '/') {
-			const start = i;
-			i = source.indexOf('\n', i);
-			if (i === -1) i = source.length;
-			ranges.push({ start, end: i });
-		} else if (ch === '/' && source[i + 1] === '*') {
-			const start = i;
-			i = source.indexOf('*/', i + 2);
-			i = i === -1 ? source.length : i + 2;
-			ranges.push({ start, end: i });
-		} else if (ch === '\'' || ch === '"' || ch === '`') {
-			const start = i;
-			i = skipString(source, i);
-			ranges.push({ start, end: i });
-		} else {
-			i++;
-		}
-	}
-	return ranges;
-}
-
-function isInComment(ranges: SkipRange[], pos: number): boolean {
-	for (const r of ranges) {
-		if (pos >= r.start && pos < r.end) return true;
-		if (r.start > pos) break;
-	}
-	return false;
-}
-
-function skipString(source: string, start: number): number {
-	const quote = source[start];
-	let i = start + 1;
-	while (i < source.length) {
-		if (source[i] === '\\') { i += 2; continue; }
-		if (source[i] === quote) return i + 1;
-		if (quote === '`' && source[i] === '$' && source[i + 1] === '{') {
-			let depth = 1;
-			i += 2;
-			while (i < source.length && depth > 0) {
-				if (source[i] === '{') depth++;
-				else if (source[i] === '}') depth--;
-				else if (source[i] === '`') { i = skipString(source, i); continue; }
-				i++;
-			}
-			continue;
-		}
-		i++;
-	}
-	return i;
-}
-
 // ── Component declarations ─────────────────────────────────────────
 
 function transformComponentDeclarations(
 	ms: MagicString,
 	source: string,
-	commentRanges: SkipRange[],
+	lexed: LexResult,
 	components: ComponentMeta[],
 	renamedParams: Record<string, Record<string, string>>,
 	bindParams: Record<string, string[]>,
 	lang: 'ts' | 'js',
 ): void {
-	const re = /\b((?:export\s+)?(?:default\s+)?(?:async\s+)?)component(\s+(\w+))/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		if (isInComment(commentRanges, match.index)) continue;
+	const { tokens, matchIndex, keywords } = lexed;
 
-		const name = match[3];
-		const prefix = match[1];
+	for (const { index, token, enclosed, jsxHoleStart } of keywords) {
+		if (token.text !== 'component') continue;
+		const nameTok = tokens[index + 1];
+		if (!nameTok || nameTok.kind !== 'word') continue;
+		const name = nameTok.text;
+
+		// `export default async component …` — the declaration chain
+		const chain = declarationChainStart(tokens, index);
+		const prev = chain > 0 ? tokens[chain - 1] : undefined;
+		if (!isStatementPosition(prev, enclosed, tokens[chain].newlineBefore, jsxHoleStart)) continue;
+		const prefixWords = new Set(
+			tokens.slice(chain, index).filter((t) => t.kind === 'word').map((t) => t.text),
+		);
+
 		components.push({
 			name,
-			isExport: /\bexport\b/.test(prefix),
-			isDefault: /\bdefault\b/.test(prefix),
-			isAsync: /\basync\b/.test(prefix),
+			isExport: prefixWords.has('export'),
+			isDefault: prefixWords.has('default'),
+			isAsync: prefixWords.has('async'),
 		});
 
 		// Replace `component` → `function`
-		const prefixEnd = match.index + prefix.length;
-		ms.overwrite(prefixEnd, prefixEnd + 'component'.length, 'function');
+		ms.overwrite(token.start, token.end, 'function');
 
-		// Find the param list
-		const nameEnd = match.index + match[0].length;
-		const openParen = source.indexOf('(', nameEnd);
-		if (openParen === -1) continue;
-		const closeParen = findMatchingParen(source, openParen);
-		if (closeParen === -1) continue;
+		// Find the param list, skipping optional type parameters `<T extends …>`
+		let openIdx = index + 2;
+		if (tokens[openIdx]?.kind === 'operator' && tokens[openIdx].text === '<') {
+			let depth = 0;
+			while (openIdx < tokens.length) {
+				const t = tokens[openIdx];
+				if (t.kind === 'operator') {
+					if (t.text === '<' || t.text === '<<') depth += t.text.length;
+					else if (t.text === '>' || t.text === '>>' || t.text === '>>>') {
+						depth -= t.text.length;
+						if (depth <= 0) break;
+					}
+				}
+				openIdx++;
+			}
+			openIdx++; // first token after the closing `>`
+		}
+		const openTok = tokens[openIdx];
+		if (!openTok || openTok.kind !== 'punct' || openTok.text !== '(') continue;
+		const closeIdx = matchIndex.get(openIdx);
+		if (closeIdx === undefined) continue;
+		const closeTok = tokens[closeIdx];
 
-		const paramRanges = splitParamRanges(source, openParen + 1, closeParen);
+		const paramRanges = splitParamRanges(source, tokens, openIdx, closeIdx);
 		if (paramRanges.length === 0) continue;
 		const parsed = paramRanges.map(r => parseOneParam(r.text));
 
@@ -282,11 +282,11 @@ function transformComponentDeclarations(
 		}
 
 		// Replace ( with ({ — original param positions become destructuring bindings
-		ms.overwrite(openParen, openParen + 1, '({');
+		ms.overwrite(openTok.start, openTok.start + 1, '({');
 		// Replace ) with }: {type annotation}) — TS output carries the invented
 		// type literal for tsserver consumers; JS output has no annotation
 		if (lang === 'js') {
-			ms.overwrite(closeParen, closeParen + 1, '})');
+			ms.overwrite(closeTok.start, closeTok.start + 1, '})');
 		} else {
 			const typeParts: string[] = [];
 			for (const p of parsed) {
@@ -299,7 +299,7 @@ function transformComponentDeclarations(
 					typeParts.push(`${key}${optional}: ${type}`);
 				}
 			}
-			ms.overwrite(closeParen, closeParen + 1, `}: {${typeParts.join(', ')}})`);
+			ms.overwrite(closeTok.start, closeTok.start + 1, `}: {${typeParts.join(', ')}})`);
 		}
 
 		// Edit each param in place to become a destructuring binding
@@ -327,25 +327,23 @@ interface ParsedParam {
 	defaultValue: string | null;
 }
 
-function splitParamRanges(source: string, start: number, end: number): ParamRange[] {
+/** Split a param list into per-param ranges at depth-0 comma tokens. */
+function splitParamRanges(source: string, tokens: readonly Token[], openIdx: number, closeIdx: number): ParamRange[] {
 	const ranges: ParamRange[] = [];
 	let depth = 0;
-	let current = start;
-	for (let i = start; i < end; i++) {
-		const ch = source[i];
-		if (ch === "'" || ch === '"' || ch === '`') {
-			i = skipString(source, i) - 1;
-			continue;
-		}
-		if (ch === '(' || ch === '[' || ch === '{') depth++;
-		else if (ch === ')' || ch === ']' || ch === '}') depth--;
-		else if (ch === ',' && depth === 0) {
-			ranges.push({ text: source.slice(current, i), start: current, end: i });
-			current = i + 1;
+	let current: Token | undefined = tokens[openIdx + 1];
+	for (let k = openIdx + 1; k < closeIdx; k++) {
+		const t = tokens[k];
+		if (t.kind === 'punct' && '([{'.includes(t.text)) depth++;
+		else if (t.kind === 'punct' && ')]}'.includes(t.text)) depth--;
+		else if (t.kind === 'punct' && t.text === ',' && depth === 0) {
+			if (current) ranges.push({ text: source.slice(current.start, t.start), start: current.start, end: t.start });
+			current = tokens[k + 1];
 		}
 	}
-	const lastText = source.slice(current, end);
-	if (lastText.trim()) ranges.push({ text: lastText, start: current, end });
+	if (current && current.start < tokens[closeIdx].start) {
+		ranges.push({ text: source.slice(current.start, tokens[closeIdx].start), start: current.start, end: tokens[closeIdx].start });
+	}
 	return ranges;
 }
 
@@ -532,133 +530,216 @@ function findDefaultEquals(source: string, start = 0, end = source.length): numb
 // ── State declarations ─────────────────────────────────────────────
 
 function transformStateDeclarations(
-	ms: MagicString, source: string, commentRanges: SkipRange[],
+	ms: MagicString, source: string, lexed: LexResult,
 	stateVars: string[],
 	lang: 'ts' | 'js',
 ): void {
 	let stateCounter = 0;
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bstate(\s+(\w+))/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		if (isInComment(commentRanges, match.index)) continue;
-		const exportKw = match[1] || '';
-		const name = match[3];
-		const stateStart = match.index + exportKw.length;
-		const stateEnd = stateStart + 'state'.length;
-		const afterVar = stateEnd + match[2].length;
+	const { tokens, keywords } = lexed;
 
-		// Validate: next non-ws char after name+type should be =, ;, ), \n or similar
-		const afterType = skipTypeAnnotation(source, afterVar);
-		let peek = afterType;
-		while (peek < source.length && (source[peek] === ' ' || source[peek] === '\t')) peek++;
-		if (peek < source.length && !/[=;,)\n]/.test(source[peek])) continue;
+	for (const { index, token, enclosed, jsxHoleStart } of keywords) {
+		if (token.text !== 'state') continue;
+		const nameTok = tokens[index + 1];
+		if (!nameTok || nameTok.kind !== 'word') continue;
 
-		stateVars.push(name);
+		// `export state …` — the declaration starts at `export`
+		const chain = declarationChainStart(tokens, index);
+		const prev = chain > 0 ? tokens[chain - 1] : undefined;
+		if (!isStatementPosition(prev, enclosed, tokens[chain].newlineBefore, jsxHoleStart)) continue;
+
+		// Optional `: Type` annotation, then the statement terminator
+		const decl = declarationTerminator(tokens, index + 1);
+		if (!decl) continue;
+		const { colonTok, terminator } = decl;
+
+		stateVars.push(nameTok.text);
 
 		// Replace `state` → `let` and insert marker (preserves identifier source positions)
-		ms.overwrite(stateStart, stateEnd, 'let');
-		ms.appendLeft(stateEnd, ` ${STATE_MARKER}${stateCounter++} = 0,`);
+		ms.overwrite(token.start, token.end, 'let');
+		ms.appendLeft(token.end, ` ${STATE_MARKER}${stateCounter++} = 0,`);
 
 		// Move type annotation to `satisfies T as T` (TS only, when there's an
 		// initializer) — JS output passes user-written annotations through
-		if (source[peek] === '=') {
-			const colonIdx = source.indexOf(':', afterVar);
-			if (colonIdx !== -1 && colonIdx < peek && lang === 'ts') {
-				ms.overwrite(colonIdx, peek, ' ');
-				const typeText = source.slice(colonIdx + 1, peek).trim();
-				// Find end of value expression (`;` or `\n` at bracket depth 0)
-				let ins = peek + 1, depth = 0;
-				while (ins < source.length) {
-					const ch = source[ins];
-					if (ch === "'" || ch === '"' || ch === '`') { ins = skipString(source, ins); continue; }
-					if (ch === '(' || ch === '{' || ch === '[') depth++;
-					else if (ch === ')' || ch === '}' || ch === ']') depth--;
-					else if (depth === 0 && (ch === ';' || ch === '\n')) break;
-					ins++;
-				}
-				ms.appendLeft(ins, ` satisfies ${typeText} as ${typeText}`);
+		if (terminator.kind === 'operator' && terminator.text === '=') {
+			if (colonTok !== undefined && lang === 'ts') {
+				ms.overwrite(colonTok.start, terminator.start, ' ');
+				const typeText = source.slice(colonTok.end, terminator.start).trim();
+				ms.appendLeft(valueEndOffset(source, tokens, decl.terminatorIdx), ` satisfies ${typeText} as ${typeText}`);
 			}
-		} else if (afterType > afterVar && lang === 'ts') {
+		} else if (colonTok !== undefined && lang === 'ts') {
 			// No initializer but has a type annotation — widen to include
 			// undefined since the variable is uninitialized until runtime
 			// (e.g. bind:this). JS passes the annotation through.
-			ms.appendLeft(afterType, ' | undefined');
+			ms.appendLeft(statementBreakOffset(source, tokens, decl.terminatorIdx), ' | undefined');
 		}
 	}
+}
+
+/**
+ * Locate the terminator of a `name [: Type]` declaration and validate it:
+ * after the optional annotation the declaration must end at `=`, `;`, `,`,
+ * `)` or a line break. Returns null when the shape doesn't match.
+ */
+function declarationTerminator(
+	tokens: readonly Token[], nameIdx: number,
+): { colonTok: Token | undefined; terminator: Token; terminatorIdx: number } | null {
+	let cursor = nameIdx + 1;
+	let colonTok: Token | undefined;
+	if (tokens[cursor]?.kind === 'punct' && tokens[cursor].text === ':') {
+		colonTok = tokens[cursor];
+		cursor = typeEndTokenIndex(tokens, cursor + 1);
+	}
+	const terminator = tokens[cursor];
+	if (!terminator) return null;
+	const ends = terminator.newlineBefore
+		|| (terminator.kind === 'operator' && terminator.text === '=')
+		|| (terminator.kind === 'punct' && (terminator.text === ';' || terminator.text === ',' || terminator.text === ')'));
+	return ends ? { colonTok, terminator, terminatorIdx: cursor } : null;
+}
+
+/** Token index of the first token of a declaration's `export`/`default`/`async` prefix chain. */
+function declarationChainStart(tokens: readonly Token[], index: number): number {
+	let chain = index;
+	while (chain > 0 && tokens[chain - 1].kind === 'word'
+		&& (tokens[chain - 1].text === 'export' || tokens[chain - 1].text === 'default' || tokens[chain - 1].text === 'async')) {
+		chain--;
+	}
+	return chain;
+}
+
+/**
+ * Token index of the terminator ending a type annotation that starts at
+ * `start`: the first depth-0 `=`, `;`, closer, or token on a new line —
+ * mirroring how the grammar ends a type in a declaration.
+ */
+function typeEndTokenIndex(tokens: readonly Token[], start: number): number {
+	let depth = 0;
+	for (let k = start; k < tokens.length; k++) {
+		const t = tokens[k];
+		if (t.kind === 'punct') {
+			if (t.text === '(' || t.text === '[' || t.text === '{') depth++;
+			else if (t.text === ')' || t.text === ']' || t.text === '}') {
+				if (depth === 0) return k;
+				depth--;
+			} else if (depth === 0 && t.text === ';') return k;
+		} else if (t.kind === 'operator') {
+			if (depth === 0 && t.text === '=') return k;
+			if (t.text === '<') depth++;
+			else if (t.text === '>') { if (depth === 0) return k; depth--; }
+		}
+		if (depth === 0 && t.newlineBefore) return k;
+	}
+	return tokens.length;
+}
+
+/**
+ * Offset where the statement containing `tokens[index]` breaks: the token's
+ * start, or the line break immediately before it (insertion stays on the
+ * statement's own line).
+ */
+function statementBreakOffset(source: string, tokens: readonly Token[], index: number): number {
+	const t = tokens[index];
+	if (!t) return source.length;
+	if (!t.newlineBefore) return t.start;
+	const nl = source.indexOf('\n', tokens[index - 1].end);
+	return nl !== -1 && nl < t.start ? nl : t.start;
+}
+
+/**
+ * Offset just past a `= initializer` value expression: the `;` or line
+ * break at bracket depth 0 that ends the statement.
+ */
+function valueEndOffset(source: string, tokens: readonly Token[], equalsIndex: number): number {
+	let depth = 0;
+	for (let k = equalsIndex + 1; k < tokens.length; k++) {
+		const t = tokens[k];
+		if (depth === 0 && t.kind === 'punct' && t.text === ';') return t.start;
+		if (depth === 0 && t.newlineBefore) return statementBreakOffset(source, tokens, k);
+		if (t.kind === 'punct' && '([{'.includes(t.text)) depth++;
+		else if (t.kind === 'punct' && ')]}'.includes(t.text)) depth--;
+	}
+	return source.length;
 }
 
 // ── Derived declarations ───────────────────────────────────────────
 
 function transformDerivedDeclarations(
-	ms: MagicString, source: string, commentRanges: SkipRange[],
+	ms: MagicString, source: string, lexed: LexResult,
 	derivedVars: string[],
-	lang: 'ts' | 'js',
 ): void {
 	let derivedCounter = 0;
-	const re = /(\bexport\s+)?(?<!\.)(?<!\w)\bderived(?=\s+[\w{[])/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		if (isInComment(commentRanges, match.index)) continue;
-		const start = match.index;
-		const exportKw = match[1] || '';
-		const derivedStart = start + exportKw.length;
-		const afterKeyword = start + match[0].length;
-		let cursor = afterKeyword;
-		while (cursor < source.length && /\s/.test(source[cursor])) cursor++;
+	const { tokens, matchIndex, keywords } = lexed;
 
-		const nextChar = source[cursor];
+	for (const { index, token, enclosed, jsxHoleStart } of keywords) {
+		if (token.text !== 'derived') continue;
+		const next = tokens[index + 1];
+		if (!next) continue;
+		// the grammar requires whitespace between `derived` and its binding
+		if (!/\s/.test(source[token.end] ?? '')) continue;
 
-		if (nextChar === '{' || nextChar === '[') {
+		// `export derived …` — the declaration starts at `export`
+		const chain = declarationChainStart(tokens, index);
+		const prev = chain > 0 ? tokens[chain - 1] : undefined;
+		if (!isStatementPosition(prev, enclosed, tokens[chain].newlineBefore, jsxHoleStart)) continue;
+
+		if ((next.kind === 'punct' && (next.text === '{' || next.text === '['))) {
 			// Destructuring: derived { a, b } = expr
-			const patternEnd = nextChar === '{'
-				? findMatchingBrace(source, cursor)
-				: findMatchingBracket(source, cursor);
-			if (patternEnd === -1) continue;
+			const closeIdx = matchIndex.get(index + 1);
+			if (closeIdx === undefined) continue;
+			const afterPattern = tokens[closeIdx + 1];
+			if (!afterPattern || afterPattern.kind !== 'operator' || afterPattern.text !== '=') continue;
 
-			let eqCursor = patternEnd + 1;
-			while (eqCursor < source.length && /\s/.test(source[eqCursor])) eqCursor++;
-			if (source[eqCursor] !== '=') continue;
+			collectPatternIdentifiers(source.slice(next.start, tokens[closeIdx].end), derivedVars);
+			ms.overwrite(token.start, token.end, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
+		} else if (next.kind === 'word') {
+			// Simple: derived name = expr — optional `: Type`, then terminator
+			if (!declarationTerminator(tokens, index + 1)) continue;
 
-			const pattern = source.slice(cursor, patternEnd + 1);
-			collectPatternIdentifiers(pattern, derivedVars);
-
-			const keywordEnd = derivedStart + 'derived'.length;
-			ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
-		} else {
-			// Simple: derived name = expr
-			const nameMatch = source.slice(cursor).match(/^(\w+)/);
-			if (!nameMatch) continue;
-			const name = nameMatch[1];
-			const matchEnd = cursor + name.length;
-
-			const afterType = skipTypeAnnotation(source, matchEnd);
-			let peek = afterType;
-			while (peek < source.length && (source[peek] === ' ' || source[peek] === '\t')) peek++;
-			if (peek < source.length && !/[=;,)\n]/.test(source[peek])) continue;
-
-			derivedVars.push(name);
-
-			const keywordEnd = derivedStart + 'derived'.length;
-			ms.overwrite(derivedStart, keywordEnd, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
+			derivedVars.push(next.text);
+			ms.overwrite(token.start, token.end, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
 		}
 	}
 }
 
 // ── Render blocks ──────────────────────────────────────────────────
 
-function transformRenderBlocks(ms: MagicString, source: string): void {
-	const re = /\brender\s*\(/g;
-	const processed: { start: number; end: number }[] = [];
+/**
+ * `render` is a contextual keyword: it initiates a render block only in
+ * statement position — exactly where a `return` statement would be legal.
+ * Everywhere else (expression slots, method calls, method definitions,
+ * property names) it is an ordinary identifier and must pass through
+ * untouched, the same way regular JavaScript keeps `{ return: 5 }` intact.
+ *
+ * Classification runs on the lexer's token stream — previous significant
+ * token, delimiter nesting, and ASI newline flags — never on raw
+ * characters, so strings, comments, templates, regexes and JSX can never
+ * produce false positives.
+ */
+function transformRenderBlocks(ms: MagicString, source: string, lexed: LexResult): void {
+	const { tokens, matchIndex, keywords } = lexed;
 	// Track ranges overwritten by rewriteTryToCall (no further edits allowed inside)
 	const overwrittenRanges: { start: number; end: number }[] = [];
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		const renderStart = match.index;
-		// Skip method calls like `data.render()`
-		if (renderStart > 0 && source[renderStart - 1] === '.') continue;
-		const openParen = renderStart + match[0].length - 1;
-		const closeParen = findMatchingParen(source, openParen);
-		if (closeParen === -1) continue;
+	// Track render-block paren ranges already wrapped in control-flow IIFEs
+	const processed: { start: number; end: number }[] = [];
+
+	// `render (…)` → `return (…)`
+	for (const { index, token, prev, enclosed, jsxHoleStart } of keywords) {
+		if (token.text !== 'render') continue;
+		const next = tokens[index + 1];
+		if (!next || next.kind !== 'punct' || next.text !== '(') continue;
+		// A comment between `render` and `(` is not the call form (the paren
+		// may belong to the comment's follow-up expression — see pass 2)
+		if (!gapIsWhitespace(source, token.end, next.start)) continue;
+		const closeIdx = matchIndex.get(index + 1);
+		if (closeIdx === undefined) continue;
+		if (!isStatementPosition(prev, enclosed, token.newlineBefore, jsxHoleStart)) continue;
+		// `render(args) { … }` is a method/class definition, never a render block
+		const afterClose = tokens[closeIdx + 1];
+		if (afterClose?.kind === 'punct' && afterClose.text === '{') continue;
+
+		const renderStart = token.start;
+		const openParen = next.start;
+		const closeParen = tokens[closeIdx].start;
 
 		ms.overwrite(renderStart, openParen, 'return ');
 
@@ -685,25 +766,97 @@ function transformRenderBlocks(ms: MagicString, source: string): void {
 		}
 
 		// Wrap control flow blocks in IIFEs (skip nested render blocks)
-		if (!processed.some(r => match!.index > r.start && match!.index < r.end)) {
+		if (!processed.some(r => renderStart > r.start && renderStart < r.end)) {
 			processed.push({ start: openParen, end: closeParen });
 			wrapControlFlowBlocks(ms, source, openParen + 1, closeParen, overwrittenRanges);
 		}
 	}
 
 	// render <expr> or render <JSX> → return ...
-	// Skip positions that fall inside overwritten try block ranges
-	const reOther = /\brender(\s+)(?!\()/g;
-	while ((match = reOther.exec(source)) !== null) {
-		const pos = match.index;
-		// Skip method calls like `obj.render`
-		if (pos > 0 && source[pos - 1] === '.') continue;
-		if (overwrittenRanges.some(r => pos >= r.start && pos < r.end)) continue;
-		ms.overwrite(pos, pos + 'render'.length, 'return');
+	// Skips positions that fall inside overwritten try block ranges
+	for (const { index, token, prev, enclosed, jsxHoleStart } of keywords) {
+		if (token.text !== 'render') continue;
+		const next = tokens[index + 1];
+		// Trailing `render\n` at end of file still matches (the expression
+		// simply isn't there yet); a following `(` was pass 1's job
+		const gapStart = token.end;
+		const gapEnd = next?.start ?? source.length;
+		if (source[gapStart] === undefined || !/\s/.test(source[gapStart])) continue;
+		if (next?.kind === 'punct' && next.text === '(' && gapIsWhitespace(source, gapStart, gapEnd)) continue;
+		if (overwrittenRanges.some(r => token.start >= r.start && token.start < r.end)) continue;
+		if (!isStatementPosition(prev, enclosed, token.newlineBefore, jsxHoleStart)) continue;
+		ms.overwrite(token.start, token.end, 'return');
 	}
 }
 
+// ── Contextual keyword analysis ────────────────────────────────────
+
+/** Words after which an expression (not a statement) begins. */
+const OPERAND_KEYWORDS = new Set([
+	'return', 'throw', 'await', 'typeof', 'new', 'case', 'void', 'yield', 'delete', 'instanceof', 'in', 'of',
+]);
+
+/** Words after which a statement may begin (like `else return`). */
+const STATEMENT_KEYWORDS = new Set(['else', 'do']);
+
+/**
+ * Decide whether a keyword token sits in statement position — exactly
+ * where a statement would be legal — from the previous significant token,
+ * the delimiter nesting, and whether a line break (ASI) separates them.
+ *
+ * When classification isn't confident, returns false: a missed keyword
+ * fails loudly downstream, while a false positive silently corrupts
+ * ordinary JavaScript.
+ */
+function isStatementPosition(
+	prev: Token | undefined,
+	enclosed: boolean,
+	newlineBefore: boolean,
+	jsxHoleStart = false,
+): boolean {
+	if (enclosed || jsxHoleStart) return false; // inside ( or [ — an expression slot; a JSX hole's leading expression likewise
+	if (!prev) return true; // start of file
+
+	if (prev.kind === 'punct') {
+		switch (prev.text) {
+			case ';': case '{': case '}': case ')':
+				return true; // statement boundary / brace-less control body
+			case ']':
+				return newlineBefore; // index end: statement only via ASI
+			default:
+				return false; // ( [ , : . ? — operand slots
+		}
+	}
+	if (prev.kind === 'word') {
+		if (STATEMENT_KEYWORDS.has(prev.text)) return true;
+		if (OPERAND_KEYWORDS.has(prev.text)) return false;
+		return newlineBefore; // a value token: statement only via ASI
+	}
+	if (prev.kind === 'jsx') return newlineBefore; // closed element: statement only via ASI
+	if (prev.kind === 'operator') {
+		// Postfix ++/-- completes a statement; binary operators leave the
+		// keyword in expression position
+		return prev.text === '++' || prev.text === '--' ? newlineBefore : false;
+	}
+	// number, string, template, regex — value tokens
+	return newlineBefore;
+}
+
+/** Whether every character between two offsets is whitespace. */
+function gapIsWhitespace(source: string, start: number, end: number): boolean {
+	for (let i = start; i < end; i++) {
+		if (!/\s/.test(source[i])) return false;
+	}
+	return true;
+}
+
 // ── Control flow IIFE wrapping ─────────────────────────────────────
+
+/** Skip whitespace up to `end`, returning the new position. */
+function skipWs(source: string, pos: number, end: number): number {
+	while (pos < end && /\s/.test(source[pos])) pos++;
+	return pos;
+}
 
 function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, end: number, overwrittenRanges?: { start: number; end: number }[], topLevel = true): void {
 	let i = start;
@@ -719,7 +872,7 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 
 			// Check if this brace contains a control flow keyword
 			let j = i + 1;
-			while (j < closeBrace && /\s/.test(source[j])) j++;
+			j = skipWs(source, j, closeBrace);
 			const inner = source.slice(j, j + 10);
 
 			if (/^if\s*\(/.test(inner) || /^for\s*[\s(]/.test(inner) || /^switch\s*\(/.test(inner)) {
@@ -814,7 +967,7 @@ interface TryBlocks {
 
 function parseTryBlocks(source: string, tryStart: number, end: number): TryBlocks | null {
 	let pos = tryStart + 3; // skip 'try'
-	while (pos < end && /\s/.test(source[pos])) pos++;
+	pos = skipWs(source, pos, end);
 
 	// Try body: either { ... } or ( ... )
 	let tryBodyStart: number, tryBodyEnd: number;
@@ -845,13 +998,13 @@ function parseTryBlocks(source: string, tryStart: number, end: number): TryBlock
 
 	// Parse catch and pending in any order
 	while (pos < end) {
-		while (pos < end && /\s/.test(source[pos])) pos++;
+		pos = skipWs(source, pos, end);
 		if (pos >= end) break;
 
 		const slice = source.slice(pos, pos + 10);
 		if (/^catch/.test(slice)) {
 			pos += 5;
-			while (pos < end && /\s/.test(source[pos])) pos++;
+			pos = skipWs(source, pos, end);
 			let param = '';
 			if (source[pos] === '(') {
 				const closeParen = findMatchingParen(source, pos);
@@ -860,14 +1013,14 @@ function parseTryBlocks(source: string, tryStart: number, end: number): TryBlock
 					pos = closeParen + 1;
 				}
 			}
-			while (pos < end && /\s/.test(source[pos])) pos++;
+			pos = skipWs(source, pos, end);
 			const bodyRange = readBlockOrParenRange(source, pos, end);
 			if (!bodyRange) break;
 			result.catchBlock = { param, bodyStart: bodyRange.start, bodyEnd: bodyRange.end };
 			pos = bodyRange.end;
 		} else if (/^pending/.test(slice)) {
 			pos += 7;
-			while (pos < end && /\s/.test(source[pos])) pos++;
+			pos = skipWs(source, pos, end);
 			const bodyRange = readBlockOrParenRange(source, pos, end);
 			if (!bodyRange) break;
 			result.pendingBlock = { bodyStart: bodyRange.start, bodyEnd: bodyRange.end };
@@ -900,38 +1053,6 @@ function readBlockOrParenRange(source: string, pos: number, end: number): { star
 	return null;
 }
 
-/** Find the end of a JSX element starting at `<`. Returns position after element, or -1. */
-function findJSXEnd(source: string, start: number, end = source.length): number {
-	if (source[start] !== '<') return -1;
-	let pos = start + 1;
-	while (pos < end && /[a-zA-Z0-9._$]/.test(source[pos])) pos++;
-	let depth = 1;
-	while (pos < end && depth > 0) {
-		if (source[pos] === '/' && source[pos + 1] === '>') {
-			depth--;
-			pos += 2;
-		} else if (source[pos] === '<' && source[pos + 1] === '/') {
-			depth--;
-			const gt = source.indexOf('>', pos + 2);
-			pos = gt !== -1 ? gt + 1 : pos + 2;
-		} else if (source[pos] === '<' && source[pos + 1] !== '/' && source[pos + 1] !== '!') {
-			depth++;
-			pos++;
-		} else if (source[pos] === '>' && depth === 1) {
-			pos++;
-		} else if (source[pos] === '{') {
-			const close = findMatchingBrace(source, pos);
-			if (close === -1) return -1;
-			pos = close + 1;
-		} else if (source[pos] === "'" || source[pos] === '"' || source[pos] === '`') {
-			pos = skipString(source, pos);
-		} else {
-			pos++;
-		}
-	}
-	return depth === 0 ? pos : -1;
-}
-
 // ── For-clause handling ────────────────────────────────────────────
 
 interface ForClauseInfo {
@@ -945,7 +1066,7 @@ interface ForClauseInfo {
  */
 function stripForClauses(ms: MagicString, source: string, forStart: number, end: number): ForClauseInfo | null {
 	let pos = forStart + 3;
-	while (pos < end && /\s/.test(source[pos])) pos++;
+	pos = skipWs(source, pos, end);
 	if (source[pos] !== '(') return null;
 	const openParen = pos;
 	const closeParen = findMatchingParen(source, openParen);
@@ -1043,12 +1164,8 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 		return true;
 	}
 
-	function skipWs(): void {
-		while (pos < end && /\s/.test(source[pos])) pos++;
-	}
-
 	function handleBody(prefix = '{ return '): boolean {
-		skipWs();
+		pos = skipWs(source, pos, end);
 		if (pos >= end) return false;
 		if (source[pos] === '(') return wrapParenBody(prefix);
 		if (source[pos] === '{') {
@@ -1059,7 +1176,7 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 	}
 
 	while (pos < end) {
-		skipWs();
+		pos = skipWs(source, pos, end);
 		if (pos >= end) break;
 
 		const slice = source.slice(pos, pos + 10);
@@ -1071,7 +1188,7 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 			pos = kwEnd;
 			if (!skipParens()) break;
 			if (isFor && forClauses) {
-				skipWs();
+				pos = skipWs(source, pos, end);
 				if (pos >= end) break;
 				if (source[pos] === '(') {
 					const closeBody = findMatchingParen(source, pos);
@@ -1090,7 +1207,7 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 			}
 		} else if (/^else/.test(slice)) {
 			pos += 4;
-			skipWs();
+			pos = skipWs(source, pos, end);
 			if (pos >= end) break;
 			if (/^if\s*\(/.test(source.slice(pos, pos + 10))) continue;
 			if (!handleBody()) break;
@@ -1100,7 +1217,7 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 			if (kwEnd === -1 || kwEnd >= end) break;
 			pos = kwEnd;
 			if (!skipParens()) break;
-			skipWs();
+			pos = skipWs(source, pos, end);
 			if (pos >= end || source[pos] !== '{') break;
 			const switchClose = findMatchingBrace(source, pos);
 			if (switchClose === -1 || switchClose > end) break;
@@ -1112,7 +1229,7 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 			if (!handleBody()) break;
 		} else if (/^catch/.test(slice)) {
 			pos += 5;
-			skipWs();
+			pos = skipWs(source, pos, end);
 			skipParens();
 			if (!handleBody()) break;
 		} else if (/^pending/.test(slice)) {
@@ -1143,7 +1260,7 @@ function rewriteCaseBodies(ms: MagicString, source: string, start: number, end: 
 			if (colon === -1) { pos++; continue; }
 			pos = colon + 1;
 			// Skip whitespace after colon
-			while (pos < end && /\s/.test(source[pos])) pos++;
+			pos = skipWs(source, pos, end);
 			if (pos < end && (source[pos] === '(' || source[pos] === '<')) {
 				ms.appendLeft(pos, 'return ');
 				// Remove break after the expression
@@ -1153,7 +1270,7 @@ function rewriteCaseBodies(ms: MagicString, source: string, start: number, end: 
 			const colon = source.indexOf(':', pos + 7);
 			if (colon === -1 || colon >= end) { pos++; continue; }
 			pos = colon + 1;
-			while (pos < end && /\s/.test(source[pos])) pos++;
+			pos = skipWs(source, pos, end);
 			if (pos < end && (source[pos] === '(' || source[pos] === '<')) {
 				ms.appendLeft(pos, 'return ');
 				removeCaseBreak(ms, source, pos, end);
@@ -1178,7 +1295,7 @@ function removeCaseBreak(ms: MagicString, source: string, exprStart: number, end
 		pos = jsxEnd;
 	}
 	// Skip whitespace
-	while (pos < end && /\s/.test(source[pos])) pos++;
+	pos = skipWs(source, pos, end);
 	// Remove break;
 	if (source.slice(pos, pos + 6) === 'break;') {
 		ms.overwrite(pos, pos + 6, '      ');
@@ -1213,39 +1330,64 @@ function findCaseColon(source: string, start: number, end: number): number {
 // ── Style blocks ───────────────────────────────────────────────────
 
 function transformStyleBlocks(
-	ms: MagicString, source: string, commentRanges: SkipRange[],
+	ms: MagicString, source: string, lexed: LexResult,
 	styleBlocks: ExtractedStyleBlock[], mode: 'compiler' | 'typecheck',
 ): void {
-	const styleRe = /<style(\s+global)?\s*>/g;
-	let match;
-	while ((match = styleRe.exec(source)) !== null) {
-		if (isInComment(commentRanges, match.index)) continue;
-		const isGlobal = !!match[1];
-		const openTagEnd = match.index + match[0].length;
-		const closeIdx = source.indexOf('</style>', openTagEnd);
-		if (closeIdx === -1) continue;
+	const { tokens, matchIndex } = lexed;
+	const styleTagRe = /^<style(\s+global)?\s*>$/;
 
-		const css = source.slice(openTagEnd, closeIdx);
-		const fullEnd = closeIdx + '</style>'.length;
+	for (let i = 0; i < tokens.length; i++) {
+		const openTok = tokens[i];
+		if (openTok.kind !== 'jsx') continue;
+		const tagMatch = styleTagRe.exec(openTok.text);
+		if (!tagMatch) continue;
+
+		// The matching </style> closes the block
+		let closeIdx = -1;
+		for (let k = i + 1; k < tokens.length; k++) {
+			if (tokens[k].kind === 'jsx' && tokens[k].text === '</style>') { closeIdx = k; break; }
+		}
+		if (closeIdx === -1) continue;
+		const closeTok = tokens[closeIdx];
+
+		const isGlobal = !!tagMatch[1];
+		const css = source.slice(openTok.end, closeTok.start);
 		const markerName = `${STYLE_MARKER_PREFIX}${styleBlocks.length}`;
 		styleBlocks.push({ css, isGlobal, markerName });
 
 		if (mode === 'compiler') {
 			// Replace entire style block with marker element
-			ms.overwrite(match.index, fullEnd, `<${markerName} />`);
+			ms.overwrite(openTok.start, closeTok.end, `<${markerName} />`);
 		} else {
-			// typecheck: blank CSS but preserve {expr} interpolations for type-checking
-			const interpRe = /\{[a-zA-Z_$][a-zA-Z0-9_$.]*\}/g;
-			interpRe.lastIndex = openTagEnd;
-			let pos = openTagEnd;
-			let m;
-			while ((m = interpRe.exec(source)) !== null && m.index < closeIdx) {
-				if (pos < m.index) blankRange(ms, source, pos, m.index);
-				pos = m.index + m[0].length;
+			// typecheck: blank CSS but preserve {expr} interpolations for type-checking.
+			// Interpolation holes are the `{…}` token pairs inside the block
+			// whose contents are a bare identifier chain (no whitespace).
+			let pos = openTok.end;
+			for (let k = i + 1; k < closeIdx; k++) {
+				const t = tokens[k];
+				if (t.kind !== 'punct' || t.text !== '{') continue;
+				const end = matchIndex.get(k);
+				if (end === undefined || end >= closeIdx) continue;
+				if (!isIdentifierChainHole(source, tokens, k, end)) continue;
+				if (pos < t.start) blankRange(ms, source, pos, t.start);
+				pos = tokens[end].start + 1;
 			}
-			if (pos < closeIdx) blankRange(ms, source, pos, closeIdx);
+			if (pos < closeTok.start) blankRange(ms, source, pos, closeTok.start);
 		}
 	}
+}
+
+/** Whether `{` … `}` tokens hold a bare identifier chain like `{a.b.c}` (a CSS interpolation). */
+function isIdentifierChainHole(source: string, tokens: readonly Token[], openIdx: number, closeIdx: number): boolean {
+	if (openIdx + 1 >= closeIdx) return false;
+	const inner = source.slice(tokens[openIdx].end, tokens[closeIdx].start);
+	if (/\s/.test(inner)) return false;
+	for (let k = openIdx + 1; k < closeIdx; k++) {
+		const t = tokens[k];
+		const ok = t.kind === 'word' || (t.kind === 'punct' && t.text === '.');
+		if (!ok) return false;
+	}
+	return true;
 }
 
 function blankRange(ms: MagicString, source: string, start: number, end: number): void {
@@ -1258,13 +1400,15 @@ function blankRange(ms: MagicString, source: string, start: number, end: number)
 
 // ── JSX attribute transforms ───────────────────────────────────────
 
-function transformJsxAttributes(ms: MagicString, source: string): void {
-	const tagRe = /<([A-Za-z_][\w.]*)(?=[\s/>])/g;
-	let tagMatch;
-	while ((tagMatch = tagRe.exec(source)) !== null) {
-		const attrStart = tagMatch.index + tagMatch[0].length;
-		const tagClose = findJsxTagClose(source, attrStart);
-		if (tagClose === -1) continue;
+function transformJsxAttributes(ms: MagicString, source: string, lexed: LexResult): void {
+	for (const tag of lexed.tokens) {
+		if (tag.kind !== 'jsx') continue;
+		// Opening and self-closing tags only: `<name attrs…>` / `<name … />`
+		const nameMatch = /^<([A-Za-z_][\w.]*)/.exec(tag.text);
+		if (!nameMatch) continue;
+		const attrStart = tag.start + 1 + nameMatch[1].length;
+		// bound is the offset of the tag's closing `>` (or the `/` of `/>`)
+		const tagClose = tag.text.endsWith('/>') ? tag.end - 2 : tag.end - 1;
 
 		// bind:{x} → bind:x={x} (shorthand expansion)
 		const bindShortRe = /bind:\{(\w+)\}/g;
@@ -1305,27 +1449,6 @@ function transformJsxAttributes(ms: MagicString, source: string): void {
 	}
 }
 
-function findJsxTagClose(source: string, start: number): number {
-	let i = start;
-	while (i < source.length) {
-		const ch = source[i];
-		if (ch === '>' || (ch === '/' && source[i + 1] === '>')) return i;
-		if (ch === '{') {
-			const close = findMatchingBrace(source, i);
-			if (close === -1) return -1;
-			i = close + 1;
-			continue;
-		}
-		if (ch === '"' || ch === "'") {
-			i = skipString(source, i);
-			continue;
-		}
-		if (ch === '<') return -1;
-		i++;
-	}
-	return -1;
-}
-
 function needsWrapping(expr: string): boolean {
 	if (/^(\(.*\)\s*=>|[a-zA-Z_$]\w*\s*=>|function[\s(])/.test(expr)) return false;
 	const stripped = expr.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
@@ -1357,18 +1480,23 @@ function hasTopLevelComma(expr: string): boolean {
 
 // ── @html directive ────────────────────────────────────────────────
 
-function transformHtmlDirective(ms: MagicString, source: string): void {
+function transformHtmlDirective(ms: MagicString, source: string, lexed: LexResult): void {
 	// {@html expr} → {__html(expr)} — handled inside wrapControlFlowBlocks for render context.
 	// This handles any remaining occurrences outside render blocks.
-	const re = /\{@html\s+/g;
-	let match;
-	while ((match = re.exec(source)) !== null) {
-		const openBrace = match.index;
-		const closeBrace = findMatchingBrace(source, openBrace);
-		if (closeBrace === -1) continue;
-		const exprStart = openBrace + match[0].length;
-		const expr = source.slice(exprStart, closeBrace).trim();
-		ms.overwrite(openBrace, closeBrace + 1, `{__html(${expr})}`);
+	const { tokens, matchIndex } = lexed;
+	for (let i = 0; i < tokens.length; i++) {
+		const t = tokens[i];
+		// `{` `@` `html` followed by whitespace begins the directive
+		if (t.kind !== 'operator' || t.text !== '@') continue;
+		const at = tokens[i - 1];
+		const name = tokens[i + 1];
+		if (!at || at.kind !== 'punct' || at.text !== '{') continue;
+		if (!name || name.kind !== 'word' || name.text !== 'html') continue;
+		if (!/\s/.test(source[name.end] ?? '')) continue;
+		const closeIdx = matchIndex.get(i - 1);
+		if (closeIdx === undefined) continue;
+		const expr = source.slice(name.end, tokens[closeIdx].start).trim();
+		ms.overwrite(at.start, tokens[closeIdx].start + 1, `{__html(${expr})}`);
 	}
 }
 
@@ -1385,31 +1513,40 @@ export interface SuppressZone {
  */
 export function findSuppressZones(source: string): SuppressZone[] {
 	const zones: SuppressZone[] = [];
+	const { tokens, matchIndex, keywords } = lex(source);
 
-	const renderRe = /\brender\s*\(/g;
-	let match;
-	while ((match = renderRe.exec(source)) !== null) {
-		const openParen = match.index + match[0].length - 1;
-		const closeParen = findMatchingParen(source, openParen);
-		if (closeParen === -1) continue;
-		collectControlFlowZones(source, openParen + 1, closeParen, zones);
+	// Every render(…) call form, however classified, may contain control flow
+	for (const { index, token } of keywords) {
+		if (token.text !== 'render') continue;
+		const next = tokens[index + 1];
+		if (!next || next.kind !== 'punct' || next.text !== '(') continue;
+		if (!gapIsWhitespace(source, token.end, next.start)) continue;
+		const closeIdx = matchIndex.get(index + 1);
+		if (closeIdx === undefined) continue;
+		collectControlFlowZones(source, next.start + 1, tokens[closeIdx].start, zones);
 	}
 
+	// bind: attributes only appear inside JSX tags
 	const bindRe = /\bbind:/g;
-	while ((match = bindRe.exec(source)) !== null) {
-		const attrStart = match.index;
-		let end = attrStart + match[0].length;
-		if (end < source.length && source[end] === '{') {
-			const closeBrace = findMatchingBrace(source, end);
-			end = closeBrace !== -1 ? closeBrace + 1 : end + 1;
-		} else {
-			while (end < source.length && /[\w-]/.test(source[end])) end++;
-			if (end < source.length && source[end] === '=' && end + 1 < source.length && source[end + 1] === '{') {
-				const closeBrace = findMatchingBrace(source, end + 1);
+	for (const tag of tokens) {
+		if (tag.kind !== 'jsx') continue;
+		bindRe.lastIndex = tag.start;
+		let match;
+		while ((match = bindRe.exec(source)) !== null && match.index < tag.end) {
+			const attrStart = match.index;
+			let end = attrStart + match[0].length;
+			if (end < source.length && source[end] === '{') {
+				const closeBrace = findMatchingBrace(source, end);
 				end = closeBrace !== -1 ? closeBrace + 1 : end + 1;
+			} else {
+				while (end < source.length && /[\w-]/.test(source[end])) end++;
+				if (end < source.length && source[end] === '=' && end + 1 < source.length && source[end + 1] === '{') {
+					const closeBrace = findMatchingBrace(source, end + 1);
+					end = closeBrace !== -1 ? closeBrace + 1 : end + 1;
+				}
 			}
+			zones.push({ start: attrStart, end });
 		}
-		zones.push({ start: attrStart, end });
 	}
 
 	return zones;
@@ -1430,7 +1567,7 @@ function collectControlFlowZones(
 			if (closeBrace === -1 || closeBrace > end) { i++; continue; }
 
 			let j = i + 1;
-			while (j < closeBrace && /\s/.test(source[j])) j++;
+			j = skipWs(source, j, closeBrace);
 			const kw = source.slice(j, j + 10);
 
 			if (/^if\s*[\s(]/.test(kw) || /^for\s*[\s(]/.test(kw) ||
@@ -1447,34 +1584,6 @@ function collectControlFlowZones(
 
 // ── Utility functions ──────────────────────────────────────────────
 
-function skipTypeAnnotation(code: string, start: number): number {
-	let i = start;
-	while (i < code.length && (code[i] === ' ' || code[i] === '\t')) i++;
-	if (i >= code.length || code[i] !== ':') return start;
-	i++;
-
-	let depth = 0;
-	while (i < code.length) {
-		const ch = code[i];
-		if (ch === '{' || ch === '(' || ch === '[') {
-			depth++;
-		} else if (ch === '}' || ch === ')' || ch === ']') {
-			if (depth === 0) break;
-			depth--;
-		} else if (ch === '<') {
-			depth++;
-		} else if (ch === '>') {
-			if (depth === 0) break;
-			depth--;
-		} else if (depth === 0) {
-			if (ch === '=' && i + 1 < code.length && code[i + 1] !== '>') break;
-			if (ch === ';' || ch === '\n') break;
-		}
-		i++;
-	}
-	return i;
-}
-
 function findMatching(code: string, openPos: number, open: string, close: string): number {
 	let depth = 1;
 	let i = openPos + 1;
@@ -1490,7 +1599,6 @@ function findMatching(code: string, openPos: number, open: string, close: string
 
 const findMatchingParen = (code: string, pos: number) => findMatching(code, pos, '(', ')');
 const findMatchingBrace = (code: string, pos: number) => findMatching(code, pos, '{', '}');
-const findMatchingBracket = (code: string, pos: number) => findMatching(code, pos, '[', ']');
 
 function isSingleJSXRoot(code: string): boolean {
 	const trimmed = code.trim();

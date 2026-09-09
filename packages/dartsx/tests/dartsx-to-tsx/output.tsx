@@ -163,6 +163,20 @@ function GenericComponent<T extends Record<string, unknown>>({data, label}: {dat
   )
 }
 
+function ThemedButton({color}: {color: string}) {
+  let $$s13 = 0, size = 16
+
+  return (<>
+    <button>Click</button>
+    <style>
+              
+               {color} 
+                   {size}   
+       
+    </style>
+  </>)
+}
+
 // Non-DarTsx code should pass through unchanged
 function RegularComponent() { return <div>hello</div> }
 

@@ -7,6 +7,11 @@ function Dashboard<T extends Record<string, unknown>>({user, items, status}: {us
   const $$d1 = 0, double: number = count * 2
   const $$d2 = 0, entries: [string, number][] = Array.from(map)
 
+  if (status === 'loading') return <p class="status">Loading…</p>
+  if (status === 'broken') return (
+    <p class="status">{status}</p>
+  ) else return <p class="status">Ready</p>
+
   return (
     <main>
       {(() => { if (loading) { return (
@@ -109,4 +114,35 @@ function BindRenamed({'display-name': displayName, 'status-text': statusText = "
   return (
     <p>{displayName} - {statusText}</p>
   )
+}
+
+// render as the contextual keyword: every render below sits in statement
+// position (where a return would be legal) and must be rewritten to return —
+// block start, after ; and }, brace-less control bodies, else, and ASI
+// newlines after statement-complete tokens (including JSX, ++, regexes).
+function RenderKeywordMatrix({cond, xs, i}: {cond: any, xs: any, i: any}) {
+  return <p>block start</p>
+  const a = 1; return (<p/>)
+  function helper() { work() }
+  return (<p/>)
+  if (cond) return (<p/>)
+  if (cond)
+  return (<p/>)
+  for (const x of xs) return (<p/>)
+  while (cond) return (<p/>)
+  if (a) {
+  } else return <p>no</p>
+  const done = true
+  return (<p>{done}</p>)
+  if (a) return <p>no</p>
+  return (<p>yes</p>)
+  i++
+  return (<p/>)
+  const re = /[(]/g
+  return (<p/>)
+  const re2 = /["']/g
+  return (<p/>)
+  const q = f(a) / 2
+  return (<p/>)
+  return (<DataTable row={(r) => <tr>{r}</tr>} />)
 }

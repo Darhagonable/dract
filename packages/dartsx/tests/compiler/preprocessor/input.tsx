@@ -7,6 +7,11 @@ component Dashboard<T extends Record<string, unknown>>(user: { name: string, rol
   derived double: number = count * 2
   derived entries: [string, number][] = Array.from(map)
 
+  if (status === 'loading') render <p class="status">Loading…</p>
+  if (status === 'broken') render (
+    <p class="status">{status}</p>
+  ) else render <p class="status">Ready</p>
+
   render (
     <main>
       {if (loading) (
@@ -111,4 +116,35 @@ component BindRenamed(bind 'display-name' as displayName: string, 'status-text' 
   render (
     <p>{displayName} - {statusText}</p>
   )
+}
+
+// render as the contextual keyword: every render below sits in statement
+// position (where a return would be legal) and must be rewritten to return —
+// block start, after ; and }, brace-less control bodies, else, and ASI
+// newlines after statement-complete tokens (including JSX, ++, regexes).
+component RenderKeywordMatrix(cond, xs, i) {
+  render <p>block start</p>
+  const a = 1; render (<p/>)
+  function helper() { work() }
+  render (<p/>)
+  if (cond) render (<p/>)
+  if (cond)
+  render (<p/>)
+  for (const x of xs) render (<p/>)
+  while (cond) render (<p/>)
+  if (a) {
+  } else render <p>no</p>
+  const done = true
+  render (<p>{done}</p>)
+  if (a) render <p>no</p>
+  render (<p>yes</p>)
+  i++
+  render (<p/>)
+  const re = /[(]/g
+  render (<p/>)
+  const re2 = /["']/g
+  render (<p/>)
+  const q = f(a) / 2
+  render (<p/>)
+  render (<DataTable row={(r) => <tr>{r}</tr>} />)
 }
