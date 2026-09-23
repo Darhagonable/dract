@@ -1,0 +1,39 @@
+{
+	"name": "@dartsx/repl",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"check": "dartsx check"
+	},
+	"dependencies": {
+		"@dartsx/language-service": "workspace:*",
+		"@jridgewell/remapping": "^2.3.5",
+		"@oxc-parser/binding-wasm32-wasi": "^0.149.0",
+		"@oxc-transform/binding-wasm32-wasi": "^0.149.0",
+		"@shikijs/monaco": "^4.0.2",
+		"dartsx": "workspace:*",
+		"es-module-lexer": "^3.0.2",
+		"monaco-editor-core": "^0.52.2",
+		"postcss": "^8.5.15",
+		"postcss-selector-parser": "^7.1.4",
+		"shiki": "^4.0.2",
+		"source-map-js": "^1.2.1"
+	},
+	"devDependencies": {
+		"@dartsx/cli": "workspace:*",
+		"@dartsx/vite-plugin": "workspace:*",
+		"@types/node": "^25.9.3",
+		"@volar/language-service": "~2.4.28",
+		"@volar/monaco": "~2.4.28",
+		"@volar/typescript": "~2.4.28",
+		"esbuild": "^0.28.2",
+		"monaco-languageserver-types": "^0.4.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16",
+		"volar-service-typescript": "0.0.71",
+		"vscode-uri": "^3.1.0"
+	}
+}
