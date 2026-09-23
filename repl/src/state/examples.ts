@@ -3,7 +3,7 @@
 // examples tsconfig.json as an editable virtual file.
 
 import type { PlaygroundFile } from '../editor/models';
-import { TSCONFIG_FILE } from '../editor/models';
+import { TSCONFIG_FILE } from '../constants';
 import meta from '../../examples/meta.json';
 import tsconfigSource from '../../examples/tsconfig.json?raw';
 
@@ -15,17 +15,20 @@ const modules = import.meta.glob('../../examples/**/*.{tsx,ts}', {
 
 const ENTRY_FILE = 'App.tsx';
 
-interface ExampleMeta {
+export interface ExampleMeta {
 	path: string;
 	label: string;
 }
 
-interface ExampleGroup {
+export interface ExampleGroup {
 	label: string;
 	examples: ExampleMeta[];
 }
 
 const groups = meta.groups as ExampleGroup[];
+
+/** Grouped example list for the toolbar dropdown. */
+export const EXAMPLE_GROUPS: ExampleGroup[] = groups;
 
 /** Flat example list (labels are unique). */
 export const EXAMPLES: ExampleMeta[] = groups.flatMap((group) => group.examples);

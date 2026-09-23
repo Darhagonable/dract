@@ -9,9 +9,10 @@
 
 import * as monaco from 'monaco-editor-core';
 import './highlight';
+import { TSCONFIG_FILE } from '../constants';
 
 const PROJECT_PREFIX = '/project/';
-export const TSCONFIG_FILE = 'tsconfig.json';
+export { TSCONFIG_FILE };
 const OUTPUT_URI = monaco.Uri.parse('dartsx-output:/compiled.js');
 
 export interface PlaygroundFile {
