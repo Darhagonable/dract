@@ -36,6 +36,8 @@
  *   - `render (...)` → `return (<>...</>)` with IIFE-wrapped control flow
  *   - `{if/for/switch/try}` in JSX → IIFE wrappers `{(() => { ... })()}`
  *   - `bind:{x}` → `bind:x={x}` (shorthand expansion)
+ *   - `bind:prop={get, set}` → `bind:prop={[get, set]}` (comma pairs, detected structurally)
+ *   - `attr={count++}` / `attr={x = 1}` → `attr={() => ...}` (assignment/update attrs, detected structurally)
  *   - `{@html expr}` → `{__html(expr)}`
  *   - `<style>` blocks → `<$$styleN />` (compiler) or blanked with interpolations (typecheck)
  */
@@ -1425,8 +1427,7 @@ function transformJsxAttributes(ms: MagicString, source: string, lexed: LexResul
 			const openBrace = m.index + m[0].length - 1;
 			const closeBrace = findMatchingBrace(source, openBrace);
 			if (closeBrace === -1) continue;
-			const inner = source.slice(openBrace + 1, closeBrace);
-			if (hasTopLevelComma(inner)) {
+			if (attrExprShape(lexed, openBrace + 1, closeBrace).sequence) {
 				ms.appendLeft(openBrace + 1, '[');
 				ms.prependRight(closeBrace, ']');
 			}
@@ -1442,40 +1443,69 @@ function transformJsxAttributes(ms: MagicString, source: string, lexed: LexResul
 			if (braceStart === -1 || braceStart >= tagClose) continue;
 			const braceEnd = findMatchingBrace(source, braceStart);
 			if (braceEnd === -1) continue;
-			const inner = source.slice(braceStart + 1, braceEnd).trim();
-			if (!needsWrapping(inner)) continue;
+			if (!attrExprShape(lexed, braceStart + 1, braceEnd).assignmentLike) continue;
 			ms.appendLeft(braceStart + 1, '() => ');
 		}
 	}
 }
 
-function needsWrapping(expr: string): boolean {
-	if (/^(\(.*\)\s*=>|[a-zA-Z_$]\w*\s*=>|function[\s(])/.test(expr)) return false;
-	const stripped = expr.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
-	let depth = 0;
-	for (let i = 0; i < stripped.length; i++) {
-		const ch = stripped[i];
-		if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
-		if (ch === ')' || ch === ']' || ch === '}') { depth--; continue; }
-		if (depth !== 0) continue;
-		if ((ch === '+' || ch === '-') && stripped[i + 1] === ch) return true;
-		if (ch === '=' && stripped[i + 1] === '>') break;
-		if (ch === '=' && stripped[i + 1] !== '=' && i > 0 && !'<>!='.includes(stripped[i - 1])) return true;
-	}
-	return false;
-}
+/**
+ * What sits at the top level of a JSX attribute expression, answered from
+ * the lexer's token stream — never from raw text and never by parsing
+ * (attribute values may contain DarTsx-only syntax no TSX parser accepts,
+ * and this phase runs before such syntax is rewritten). The token model
+ * makes the answer structural by construction:
+ *
+ *   - a JSX opening tag is ONE token: its attributes' `=` are consumed
+ *     during tag scanning and never surface (`header={<th class="x">}` —
+ *     `class=` is not an assignment)
+ *   - JSX child text is inert and never tokenized (`<div>a, b</div>` —
+ *     the comma is not a sequence)
+ *   - comments, strings, templates and regexes are single inert tokens
+ *   - multi-char operators are atomic: `=>` `==` `<=` are never `=`
+ *
+ * The earlier raw-text scans false-positived on exactly those shapes,
+ * silently rewriting element-valued props into arrow thunks that rendered
+ * as function source text instead of mounting. Token positions also make
+ * the brace-finding regexes harmless: a misfired range inside a string
+ * attribute (`title="a={b = c}"`) contains no tokens, so nothing rewrites.
+ */
+/** Assignment and update operators (atomic lexer tokens) whose attribute
+ *  expressions rewrite into arrows. Comparison operators (`==` `<=` …) and
+ *  `=>` are distinct tokens and never match. */
+const ASSIGNMENT_OPS = new Set([
+	'=', '+=', '-=', '*=', '/=', '%=', '**=',
+	'&&=', '||=', '??=', '&=', '|=', '^=',
+	'<<=', '>>=', '>>>=',
+]);
 
-function hasTopLevelComma(expr: string): boolean {
+function attrExprShape(lexed: LexResult, from: number, to: number): { sequence: boolean; assignmentLike: boolean } {
 	let depth = 0;
-	for (let i = 0; i < expr.length; i++) {
-		const ch = expr[i];
-		if (ch === '(' || ch === '[' || ch === '{') depth++;
-		else if (ch === ')' || ch === ']' || ch === '}') depth--;
-		else if (ch === ',' && depth === 0) return true;
-		else if (ch === '\'' || ch === '"') i = skipString(expr, i) - 1;
-		else if (ch === '`') i = skipString(expr, i) - 1;
+	let sequence = false;
+	let assignmentLike = false;
+	// After a top-level `=>` the rest of the expression is a function body
+	// (`onclick={() => count++}` is a handler, not a top-level update), so
+	// assignments past it never count. Sequences still can (`a => b, c`).
+	let pastArrow = false;
+	for (const token of lexed.tokens) {
+		// Tokens are not strictly position-sorted (a tag token is pushed
+		// after any `{expr}` holes lexed inside it), so filter the whole
+		// stream rather than breaking early.
+		if (token.start < from) continue;
+		if (token.start >= to) continue;
+		if (token.kind === 'jsx') continue; // opening/closing tag: atomic
+		if (token.kind === 'punct') {
+			if (token.text === '(' || token.text === '[' || token.text === '{') depth++;
+			else if (token.text === ')' || token.text === ']' || token.text === '}') depth--;
+			else if (token.text === ',' && depth === 0) sequence = true;
+		} else if (token.kind === 'operator' && depth === 0) {
+			if (token.text === '=>') pastArrow = true;
+			else if (!pastArrow && (ASSIGNMENT_OPS.has(token.text) || token.text === '++' || token.text === '--')) {
+				assignmentLike = true;
+			}
+		}
 	}
-	return false;
+	return { sequence, assignmentLike };
 }
 
 // ── @html directive ────────────────────────────────────────────────

@@ -148,3 +148,32 @@ component RenderKeywordMatrix(cond, xs, i) {
   render (<p/>)
   render (<DataTable row={(r) => <tr>{r}</tr>} />)
 }
+
+// Attribute-expression classification: the arrow wrap (assignment/update)
+// and the bind-pair array rewrite (top-level comma) must be decided
+// structurally from the token stream — a nested JSX attribute's `=`, JSX
+// child-text commas, and comment characters are NOT top-level operators,
+// while genuine assignments/updates/commas still rewrite. The string
+// attribute containing `={` pins the brace-finder misfire: its range holds
+// no tokens, so nothing rewrites.
+component AttrExprMatrix(on, count, get, set) {
+  render (
+    <Layout
+      header={<th class="col">Name</th>}
+      cell={on ? <td class="a">x</td> : <td class="b">y</td>}
+      rows={[<tr class="r">1</tr>, <tr class="r">2</tr>]}
+      note={<>*see <a href="/docs">docs</a>, appendix*</>}
+      labeled={<div aria-label="a, b">text, with commas</div>}
+      holed={<Tool class={on} label={`cfg=a`}>live, text</Tool>}
+      commented={/* = not an assignment */ on}
+      templated={`cfg=a ${count}`}
+      arrowed={() => count}
+      plain={count}
+      inc={count++}
+      dec={--count}
+      reset={count = 0}
+      pair={get, set}
+      tooltip="a={b = c}"
+    />
+  )
+}

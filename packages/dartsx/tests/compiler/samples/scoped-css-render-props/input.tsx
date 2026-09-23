@@ -1,7 +1,7 @@
 component Dashboard() {
   render (
     <DataTable
-      header={<th>Name</th>}
+      header={<th class="col">Name</th>}
       renderRow={(row) => <tr><td>{row.name}</td></tr>}
     />
     <style>
