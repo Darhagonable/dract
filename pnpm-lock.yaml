@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+packageExtensionsChecksum: sha256-jSioEydXLCZJ87HLhXreHzFHp98dFPhHId2shRrk2gA=
+
+patchedDependencies:
+  '@gitbybit/vscode-extension-test-vitest-runner@0.0.8': 8e007a79cc5546f72709df9c4c75429eecd69541a20c2936bd880480c76c7c73
+
 importers:
 
   .:
@@ -151,6 +156,9 @@ importers:
         specifier: ^10.0.0
         version: 10.0.0
     devDependencies:
+      '@gitbybit/vscode-extension-test-vitest-runner':
+        specifier: ^0.0.8
+        version: 0.0.8(patch_hash=8e007a79cc5546f72709df9c4c75429eecd69541a20c2936bd880480c76c7c73)(vitest@5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0)))
       '@types/vscode':
         specifier: ^1.120.0
         version: 1.120.0
@@ -166,9 +174,6 @@ importers:
       vitest:
         specifier: 5.0.0
         version: 5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0))
-      vitest-environment-vscode:
-        specifier: ^0.1.3
-        version: 0.1.3(vitest@5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0)))
 
   playground:
     dependencies:
@@ -431,6 +436,11 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@gitbybit/vscode-extension-test-vitest-runner@0.0.8':
+    resolution: {integrity: sha512-HAHgSG+OunLNi0wXFWFZxNA8MIgp7zMp+CiF7sXWzAOMa0+ZfEmOiDyA5jPCmH2UtF5hojxP2j+JAlZ3632SNg==}
+    peerDependencies:
+      vitest: ^4.1.7
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1191,9 +1201,9 @@ packages:
   '@vscode/l10n@0.0.18':
     resolution: {integrity: sha512-KYSIHVmslkaCDyw013pphY+d7x1qV8IZupYfeIfzNA+nsaWHbn5uPuQRvdRFsa9zFzGeudPuoGoZ1Op4jrJXIQ==}
 
-  '@vscode/test-electron@3.1.0':
-    resolution: {integrity: sha512-CRqv5u+YYoseuNVJ6Tyo4k0sF0mx4qnKMihRB0PjsUF8Dc0WKtCXo6CNL6nWWm5esfFQsQA/pejMj4ZbpJVLTw==}
-    engines: {node: '>=22'}
+  '@vscode/test-electron@2.5.2':
+    resolution: {integrity: sha512-8ukpxv4wYe0iWMRQU18jhzJOHkeGKbnw7xWRX3Zw1WJA4cEKbHcmmLPdPrPtL6rhDcrlCZN+xKRpv09n4gRHYg==}
+    engines: {node: '>=16'}
 
   '@vscode/vsce-sign-alpine-arm64@2.0.6':
     resolution: {integrity: sha512-wKkJBsvKF+f0GfsUuGT0tSW0kZL87QggEiqNqK6/8hvqsXvpx8OsTEc3mnE1kejkh5r+qUyQ7PtF8jZYN0mo8Q==}
@@ -1424,9 +1434,6 @@ packages:
     resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
     engines: {node: '>=18'}
 
-  core-js@3.49.0:
-    resolution: {integrity: sha512-es1U2+YTtzpwkxVLwAFdSpaIMyQaq0PBgm3YD1W3Qpsn1NAmO3KSgZfu+oGSWVu6NvLHoHCV/aYcsE5wiB7ALg==}
-
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
 
@@ -1497,8 +1504,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  devalue@5.8.1:
-    resolution: {integrity: sha512-4CXDYRBGqN+57wVJkuXBYmpAVUSg3L6JAQa/DFqm238G73E1wuyc/JhGQJzN7vUf/CMphYau2zXbfWzDR5aTEw==}
+  devalue@5.9.4:
+    resolution: {integrity: sha512-sPAT4pztbu6586/hrhOnMKS17IJrvg12mXiSPSS3W5qDeN2RGgvZ0diZCm31dBbnevfVmujNO3IM2wrS4Y2Rhg==}
 
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
@@ -1769,15 +1776,6 @@ packages:
   index-to-position@1.2.0:
     resolution: {integrity: sha512-Yg7+ztRkqslMAS2iFaU+Oa4KTSidr63OsFGlOrJoW981kIYO3CGCS3wA95P1mUi/IVSJkn0D479KTJpVpvFNuw==}
     engines: {node: '>=18'}
-
-  indisposed@0.2.0:
-    resolution: {integrity: sha512-KpQa1y5Tc8So2XsTxLGjX9iW1h+/0QyYMpjF/BHbYwQiLNyxFztJAeC/iwFwN63UtbtojHnT6+m1ScM5R9hI+A==}
-    engines: {node: '>=22.20.0'}
-    peerDependencies:
-      core-js: ^3.46.0
-    peerDependenciesMeta:
-      core-js:
-        optional: true
 
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
@@ -2757,11 +2755,6 @@ packages:
       yaml:
         optional: true
 
-  vitest-environment-vscode@0.1.3:
-    resolution: {integrity: sha512-60uOSnovlSOatZfG82BgUC+LvuVx10WjllhmvLi6uFuNRUeaf4m6u9qQd7haolDLrDVqRkQez8251n7DTJQfjA==}
-    peerDependencies:
-      vitest: '>=3.2.4'
-
   vitest@5.0.0:
     resolution: {integrity: sha512-gpsMNoRhMjMktVxPtstOH4/PJuPyovVaMDr4oDilXaGH1EcqM2OE96SoHT2VIQ6fTGtTjqmHDrEu2X9RQiXf8Q==}
     engines: {node: ^22.12.0 || ^24.0.0 || >=26.0.0}
@@ -2895,18 +2888,6 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   wsl-utils@0.1.0:
     resolution: {integrity: sha512-h3Fbisa2nKGPxCpm89Hk33lBLsnaGBvctQopaBSOW/uIs6FTe1ATyAnKFJrzVs9vpGdsTe73WF3V4lIsk4Gacw==}
     engines: {node: '>=18'}
@@ -2938,9 +2919,6 @@ packages:
 
   zimmerframe@1.1.4:
     resolution: {integrity: sha512-B58NGBEoc8Y9MWWCQGl/gq9xBCe4IiKM0a2x7GZdQKOW5Exr8S1W24J6OgM1njK8xCRGvAJIL/MxXHf6SkmQKQ==}
-
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -3151,6 +3129,14 @@ snapshots:
     optional: true
 
   '@exodus/bytes@1.15.1': {}
+
+  '@gitbybit/vscode-extension-test-vitest-runner@0.0.8(patch_hash=8e007a79cc5546f72709df9c4c75429eecd69541a20c2936bd880480c76c7c73)(vitest@5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0)))':
+    dependencies:
+      '@vscode/test-electron': 2.5.2
+      devalue: 5.9.4
+      vitest: 5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0))
+    transitivePeerDependencies:
+      - supports-color
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -3734,7 +3720,7 @@ snapshots:
 
   '@vscode/l10n@0.0.18': {}
 
-  '@vscode/test-electron@3.1.0':
+  '@vscode/test-electron@2.5.2':
     dependencies:
       http-proxy-agent: 7.0.2
       https-proxy-agent: 7.0.6
@@ -3990,8 +3976,6 @@ snapshots:
 
   commander@12.1.0: {}
 
-  core-js@3.49.0: {}
-
   core-util-is@1.0.3: {}
 
   css-select@5.2.2:
@@ -4049,7 +4033,7 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  devalue@5.8.1: {}
+  devalue@5.9.4: {}
 
   devlop@1.1.0:
     dependencies:
@@ -4329,10 +4313,6 @@ snapshots:
   import-without-cache@0.4.0: {}
 
   index-to-position@1.2.0: {}
-
-  indisposed@0.2.0(core-js@3.49.0):
-    optionalDependencies:
-      core-js: 3.49.0
 
   inherits@2.0.4: {}
 
@@ -5358,20 +5338,6 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vitest-environment-vscode@0.1.3(vitest@5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0))):
-    dependencies:
-      '@vscode/test-electron': 3.1.0
-      core-js: 3.49.0
-      devalue: 5.8.1
-      indisposed: 0.2.0(core-js@3.49.0)
-      vitest: 5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0))
-      ws: 8.21.0
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - bufferutil
-      - supports-color
-      - utf-8-validate
-
   vitest@5.0.0(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(jiti@2.7.0)):
     dependencies:
       '@types/chai': 5.2.3
@@ -5489,8 +5455,6 @@ snapshots:
   wrappy@1.0.2:
     optional: true
 
-  ws@8.21.0: {}
-
   wsl-utils@0.1.0:
     dependencies:
       is-wsl: 3.1.1
@@ -5517,7 +5481,5 @@ snapshots:
       buffer-crc32: 0.2.13
 
   zimmerframe@1.1.4: {}
-
-  zod@4.4.3: {}
 
   zwitch@2.0.4: {}

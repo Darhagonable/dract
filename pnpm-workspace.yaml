@@ -11,3 +11,11 @@ allowBuilds:
   keytar: true
 
 minimumReleaseAge: 0
+
+packageExtensions:
+  '@gitbybit/vscode-extension-test-vitest-runner@0.0.8':
+    dependencies:
+      devalue: ^5.8.1
+
+patchedDependencies:
+  '@gitbybit/vscode-extension-test-vitest-runner@0.0.8': patches/@gitbybit__vscode-extension-test-vitest-runner@0.0.8.patch

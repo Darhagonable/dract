@@ -1,19 +1,15 @@
 import { defineProject } from 'vitest/config';
-import { vsCodeWorker } from 'vitest-environment-vscode';
+import { vscodeExtensionHost } from '@gitbybit/vscode-extension-test-vitest-runner';
 
 export default defineProject({
-	test: {
-		include: ['tests/*.test.ts'],
-		fileParallelism: false,
-		pool: vsCodeWorker({
-			version: 'stable',
-			reuseWorker: true,
+	plugins: [
+		vscodeExtensionHost({
+			extensionDevelopmentPath: '.',
 			launchArgs: ['--log', 'error', '--disable-gpu'],
 		}),
-		server: {
-			deps: {
-				external: [/^vscode$/],
-			},
-		},
+	],
+	test: {
+		include: ['tests/*.test.ts'],
+		isolate: true,
 	},
 });

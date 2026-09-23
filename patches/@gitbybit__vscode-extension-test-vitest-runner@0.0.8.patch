@@ -1,0 +1,43 @@
+diff --git a/dist/framed-ipc.js b/dist/framed-ipc.js
+index 9652ed344a75b564e90fe1c22df8613ecd386162..bc1d502123f1dbd953878ed6ad8100ea66605a8b 100644
+--- a/dist/framed-ipc.js
++++ b/dist/framed-ipc.js
+@@ -1,5 +1,5 @@
+ import { EventEmitter } from 'node:events';
+-import { deserialize, serialize } from 'node:v8';
++import { parse, stringify } from 'devalue';
+ export class FramedIpc extends EventEmitter {
+     socket;
+     buffer = Buffer.alloc(0);
+@@ -11,7 +11,7 @@ export class FramedIpc extends EventEmitter {
+         socket.on('close', () => this.emit('close'));
+     }
+     send(message) {
+-        const body = serialize(message);
++        const body = Buffer.from(stringify(message), 'utf8');
+         const header = Buffer.allocUnsafe(4);
+         header.writeUInt32BE(body.byteLength, 0);
+         this.socket.write(Buffer.concat([header, body]));
+@@ -31,7 +31,7 @@ export class FramedIpc extends EventEmitter {
+             }
+             const body = this.buffer.subarray(4, length + 4);
+             this.buffer = this.buffer.subarray(length + 4);
+-            this.emit('message', deserialize(body));
++            this.emit('message', parse(body.toString('utf8')));
+         }
+     }
+ }
+diff --git a/package.json b/package.json
+index 1276d7aa326203d66d640a8e3844c4f49362bf40..969368511fe0f764cfe1fe3534ccbb13dc5d5554 100644
+--- a/package.json
++++ b/package.json
+@@ -24,7 +24,8 @@
+     "test:extension-host-debugger": "pnpm run build && node test/extension-host-debugger-smoke.mjs"
+   },
+   "dependencies": {
+-    "@vscode/test-electron": "^2.5.2"
++    "@vscode/test-electron": "^2.5.2",
++    "devalue": "^5.8.1"
+   },
+   "peerDependencies": {
+     "vitest": "^4.1.7"
