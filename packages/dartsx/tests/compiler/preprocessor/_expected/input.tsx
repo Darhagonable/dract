@@ -70,14 +70,14 @@ function Dashboard<T extends Record<string, unknown>>({user, items, status}: {us
             return <p>{text}</p>
           })}
 
-          {(() => { for (const item of items) { item.id; (() => { 
+          {(() => { for (const item of items) { item.id; 
             if (item.ok) { return (
               <span>{item.label}</span>
             )} else { return (<>
               <span>—</span>
 							<span>2</span>
             </>)}
-          })()}})()}
+          }})()}
 
           <footer>
             <p>{count} items</p>

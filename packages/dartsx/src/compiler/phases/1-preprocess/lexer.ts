@@ -65,6 +65,14 @@ export interface LexResult {
 	matchIndex: Map<number, number>;
 	/** Every `render`/`state`/`derived`/`component` word token with statement context. */
 	keywords: KeywordCandidate[];
+	/**
+	 * Source offsets of `{` tokens that open a JSX expression hole
+	 * (`{…}` in children or attribute position). Control-flow IIFE wrapping
+	 * is only legal for these braces — everywhere else an `if`/`for`/
+	 * `switch` opener is ordinary JavaScript (e.g. an event-handler arrow
+	 * body) and must pass through untouched.
+	 */
+	holeStarts: Set<number>;
 }
 
 // ── Character classes ──────────────────────────────────────────────
@@ -265,6 +273,7 @@ export function lex(source: string): LexResult {
 	const tokens: Token[] = [];
 	const keywords: KeywordCandidate[] = [];
 	const matchIndex = new Map<number, number>();
+	const holeStarts = new Set<number>();
 	const stack: { text: string; tokenIndex: number; returnTo?: 'tag' | 'text'; tagStart?: number; tagOrigin?: Mode }[] = [];
 	let mode: Mode = 'code';
 	// For each element whose children are being scanned ('text' mode):
@@ -300,6 +309,7 @@ export function lex(source: string): LexResult {
 	 * scanning resumes when it closes, and lex the contents as code. */
 	const enterHole = (returnTo: 'tag' | 'text'): void => {
 		push('punct', i, i + 1, '{');
+		holeStarts.add(i);
 		stack.push({ text: '{', tokenIndex: tokens.length - 1, returnTo, tagStart, tagOrigin });
 		mode = 'code';
 		i++;
@@ -489,5 +499,5 @@ export function lex(source: string): LexResult {
 		i++;
 	}
 
-	return { tokens, matchIndex, keywords };
+	return { tokens, matchIndex, keywords, holeStarts };
 }

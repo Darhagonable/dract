@@ -1140,6 +1140,8 @@ function isBlockIIFE(node: AstNode): boolean {
  * Transform an IIFE control flow expression into runtime calls.
  * Caller must have verified this is an IIFE via isControlFlowIIFE/extractIIFE.
  */
+let cfNodeCounter = 0;
+
 function transformIIFE(node: AstNode, state: TransformState): AstNode {
 	const parts = extractIIFE(node)!;
 	const { callee, body } = parts;
@@ -1149,14 +1151,34 @@ function transformIIFE(node: AstNode, state: TransformState): AstNode {
 	const iifeScope = state.analysis.scopes.get(callee) || state.scope;
 	const iifeState = iifeScope !== state.scope ? { ...state, scope: iifeScope } : state;
 
-	if (first.type === 'IfStatement') {
-		return transformIfStatementToRuntime(first, iifeState);
-	}
-	if (first.type === 'ForOfStatement' || first.type === 'ForInStatement' || first.type === 'ForStatement') {
-		return transformForStatementToRuntime(first, iifeState);
-	}
-	if (first.type === 'SwitchStatement') {
-		return transformSwitchStatementToRuntime(first, iifeState);
+	if (
+		first.type === 'IfStatement' || first.type === 'ForOfStatement' ||
+		first.type === 'ForInStatement' || first.type === 'ForStatement' ||
+		first.type === 'SwitchStatement'
+	) {
+		let cfResult: AstNode;
+		if (first.type === 'IfStatement') {
+			cfResult = transformIfStatementToRuntime(first, iifeState);
+		} else if (first.type === 'SwitchStatement') {
+			cfResult = transformSwitchStatementToRuntime(first, iifeState);
+		} else {
+			cfResult = transformForStatementToRuntime(first, iifeState);
+		}
+
+		// Sole statement: the runtime call replaces the whole IIFE.
+		if (body.length === 1) return cfResult;
+
+		// Leading control flow + trailing statements: run the trailing
+		// statements, then return the reactive node — statements after the
+		// control flow must never be silently dropped. Mirrors
+		// transformBlockIIFE's handling of statements around control flow.
+		const holder = `$$cf${cfNodeCounter++}`;
+		const stmts: AstNode[] = [b.constDecl(holder, cfResult)];
+		for (let i = 1; i < body.length; i++) {
+			stmts.push(walkNode(body[i], iifeState));
+		}
+		stmts.push(b.returnStmt(b.id(holder)));
+		return b.call(b.arrowBlock([], stmts), []);
 	}
 
 	// Block IIFE (starts with variable declaration): produce a thunk

@@ -718,7 +718,7 @@ function transformDerivedDeclarations(
  * produce false positives.
  */
 function transformRenderBlocks(ms: MagicString, source: string, lexed: LexResult): void {
-	const { tokens, matchIndex, keywords } = lexed;
+	const { tokens, matchIndex, keywords, holeStarts } = lexed;
 	// Track ranges overwritten by rewriteTryToCall (no further edits allowed inside)
 	const overwrittenRanges: { start: number; end: number }[] = [];
 	// Track render-block paren ranges already wrapped in control-flow IIFEs
@@ -770,7 +770,7 @@ function transformRenderBlocks(ms: MagicString, source: string, lexed: LexResult
 		// Wrap control flow blocks in IIFEs (skip nested render blocks)
 		if (!processed.some(r => renderStart > r.start && renderStart < r.end)) {
 			processed.push({ start: openParen, end: closeParen });
-			wrapControlFlowBlocks(ms, source, openParen + 1, closeParen, overwrittenRanges);
+			wrapControlFlowBlocks(ms, source, openParen + 1, closeParen, holeStarts, overwrittenRanges);
 		}
 	}
 
@@ -860,7 +860,28 @@ function skipWs(source: string, pos: number, end: number): number {
 	return pos;
 }
 
-function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, end: number, overwrittenRanges?: { start: number; end: number }[], topLevel = true): void {
+/**
+ * Whether a `{` at `bracePos` sits directly inside a `render (…)` opening —
+ * i.e. it is a (possibly nested) render-root brace. Like JSX holes, these
+ * hold DarTsx control flow (`render ({if …})`), at any nesting depth inside
+ * a wrapped container; the check looks at the source text immediately
+ * before the brace so a `render (\n\t{switch …}` nested in a for body
+ * stays eligible even though the lexer never saw it as a hole.
+ */
+function isRenderRootBrace(source: string, bracePos: number): boolean {
+	const before = source.slice(Math.max(0, bracePos - 50), bracePos);
+	return /(^|[^\w.$])render\s*\(\s*$/.test(before);
+}
+
+function wrapControlFlowBlocks(
+	ms: MagicString,
+	source: string,
+	start: number,
+	end: number,
+	holeStarts: Set<number>,
+	overwrittenRanges?: { start: number; end: number }[],
+	topLevel = true,
+): void {
 	let i = start;
 	while (i < end) {
 		const ch = source[i];
@@ -872,12 +893,21 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 			const closeBrace = findMatchingBrace(source, i);
 			if (closeBrace === -1 || closeBrace > end) { i++; continue; }
 
+			// DarTsx control flow lives ONLY in JSX expression holes (`{if …}`
+			// containers), in a `render (…)` root brace (at any nesting depth
+			// inside a wrapped container), and at the top level of the render
+			// range. Every other block — an event-handler arrow body, a
+			// function body, a plain if/for consequence — is ordinary
+			// JavaScript whose statements must not be turned into reactive
+			// `$.if` calls.
+			const eligible = holeStarts.has(i) || topLevel || isRenderRootBrace(source, i);
+
 			// Check if this brace contains a control flow keyword
 			let j = i + 1;
 			j = skipWs(source, j, closeBrace);
 			const inner = source.slice(j, j + 10);
 
-			if (/^if\s*\(/.test(inner) || /^for\s*[\s(]/.test(inner) || /^switch\s*\(/.test(inner)) {
+			if (eligible && (/^if\s*\(/.test(inner) || /^for\s*[\s(]/.test(inner) || /^switch\s*\(/.test(inner))) {
 				ms.prependRight(i + 1, '(() => { ');
 				ms.appendLeft(closeBrace, '})()');
 				// For for-loops, strip `; index <var>` and `; key <expr>` clauses
@@ -888,22 +918,27 @@ function wrapControlFlowBlocks(ms: MagicString, source: string, start: number, e
 				// Rewrite paren-body control flow to block-body with return
 				rewriteParenBodies(ms, source, j, closeBrace, forClauses);
 				// Recurse to find nested control flow (not top-level)
-				wrapControlFlowBlocks(ms, source, i + 1, closeBrace, overwrittenRanges, false);
-			} else if (/^try[\s({<]/.test(inner)) {
+				wrapControlFlowBlocks(ms, source, i + 1, closeBrace, holeStarts, overwrittenRanges, false);
+			} else if (eligible && /^try[\s({<]/.test(inner)) {
 				// try/catch/pending → __try(() => { ... }, (e) => { ... }, () => { ... })
 				// No recursion: the entire range is overwritten
 				rewriteTryToCall(ms, source, i, j, closeBrace);
 				overwrittenRanges?.push({ start: j, end: closeBrace });
-			} else if (topLevel && /^(const|let|var)\s/.test(inner)) {
+			} else if (eligible && /^(const|let|var)\s/.test(inner)) {
 				// Anonymous block: { const x = ...; render <expr> }
 				// Wrap as IIFE: {(() => { ... })()}
 				ms.appendLeft(i + 1, '(() => {');
 				ms.appendLeft(closeBrace, '})()');
 				// Handle control flow inside the block (rewrite paren bodies, add returns)
 				rewriteParenBodies(ms, source, j, closeBrace, null);
+				// Nested holes (JSX with control flow inside the block's render)
+				// still need their IIFE wraps.
+				wrapControlFlowBlocks(ms, source, i + 1, closeBrace, holeStarts, overwrittenRanges, false);
 			} else {
-				// Not a control flow block, still recurse for nested braces
-				wrapControlFlowBlocks(ms, source, i + 1, closeBrace, overwrittenRanges, topLevel);
+				// Not DarTsx control flow — plain JavaScript (e.g. a handler
+				// arrow body). Recurse so nested holes are still wrapped, but
+				// deeper code braces are never wrap-eligible themselves.
+				wrapControlFlowBlocks(ms, source, i + 1, closeBrace, holeStarts, overwrittenRanges, false);
 			}
 
 			i = closeBrace + 1;
@@ -1172,7 +1207,16 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 		if (source[pos] === '(') return wrapParenBody(prefix);
 		if (source[pos] === '{') {
 			const closeBlock = findMatchingBrace(source, pos);
-			if (closeBlock !== -1) { pos = closeBlock + 1; return true; }
+			if (closeBlock !== -1) {
+				// A block body may itself open with a nested control-flow chain
+				// (`{if (a) { if (b) (<x/>) else (<y/>) }}`) — its paren bodies
+				// need the same return-injection. The nested scan works on the
+				// ORIGINAL source, so a chain still leads the block even when
+				// clause moves/other edits inject text ahead of it.
+				rewriteParenBodies(ms, source, pos + 1, closeBlock, null);
+				pos = closeBlock + 1;
+				return true;
+			}
 		}
 		return false;
 	}
@@ -1202,7 +1246,13 @@ function rewriteParenBodies(ms: MagicString, source: string, start: number, end:
 				} else if (source[pos] === '{') {
 					injectForClausesAtBody(ms, forClauses, pos + 1, false, true);
 					const closeBlock = findMatchingBrace(source, pos);
-					if (closeBlock !== -1) { pos = closeBlock + 1; } else break;
+					if (closeBlock !== -1) {
+						// The for body may open with a nested chain (key-clause
+						// vars live in injected text, so the original source
+						// still starts at the chain).
+						rewriteParenBodies(ms, source, pos + 1, closeBlock, null);
+						pos = closeBlock + 1;
+					} else break;
 				} else break;
 			} else {
 				if (!handleBody()) break;
