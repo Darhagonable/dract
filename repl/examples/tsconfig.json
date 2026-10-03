@@ -1,0 +1,11 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"jsx": "preserve",
+		"jsxImportSource": "dartsx",
+		"strict": true,
+		"skipLibCheck": true
+	}
+}
