@@ -8,7 +8,9 @@
  * - Transform records on bindings (read/assign/update)
  * - Style block association
  * - Cross-file reactive import tracking
- * - Call-site analysis for reactive params
+ * - Call-site analysis: reactive arg positions, signal-return consumption
+ *   (`derived x = fn()`), and declaration-site upgrades (raw bindings,
+ *   bind-prop destructuring)
  *
  * Does NOT build any JSX IR. The transform walks the OXC AST directly
  * with zimmerframe visitors.
@@ -19,6 +21,10 @@ import {
 	Scope,
 	ScopeRoot,
 	create_scopes,
+	type Binding,
+	type SignalReturnKind,
+	type SignalReturnClassification,
+	type ReactiveImportInfo,
 } from '../../scope';
 import type { AstNode } from '../../builders';
 import type {
@@ -49,6 +55,8 @@ function isAstNode(value: unknown): value is AstNode {
 	);
 }
 
+export type { SignalReturnKind } from '../../scope';
+
 export interface StyleBlockIR {
 	css: string;
 	isGlobal: boolean;
@@ -56,6 +64,14 @@ export interface StyleBlockIR {
 	index: number;
 }
 
+/**
+ * Shape of what a signal-returning function hands back:
+ * - `'signal'` — the raw signal itself (`return name` where name is
+ *   state/derived); signalKind records which, since deriveds are read-only.
+ * - `'bag'` — an object literal of reactive shorthands; properties maps each
+ *   key to its binding kind ('state' = propagating setter, 'derived' =
+ *   getter + inert setter, 'plain' = ordinary value).
+ */
 export interface ComponentInfo {
 	meta: ComponentMeta;
 	/** The FunctionDeclaration (or ExportNamedDeclaration wrapping it) AST node */
@@ -101,6 +117,16 @@ export interface AnalysisResult {
 	 * Used to suppress $.get() unwrapping on call arguments.
 	 */
 	reactiveCallTargets: Map<string, Set<number>>;
+	/** Function nodes classified as signal-returning (return-position raw pass-through) */
+	signalReturnFns: Set<AstNode>;
+	/** Object-literal nodes classified as signal bags */
+	signalBagNodes: Set<AstNode>;
+	/** Exported signal-returning callables (for cross-file tracking) */
+	reactiveReturnsMeta: Record<string, SignalReturnKind>;
+	/** Call expressions bound by `derived x = fn()` — left raw by the transform */
+	rawSignalCalls: Set<AstNode>;
+	/** Imported signal-returning callables by local name */
+	signalReturnShapes: Map<string, SignalReturnKind>;
 	/** Import specifiers found in this module */
 	importSpecifiers: string[];
 	/** Preprocessor result (for downstream use) */
@@ -113,8 +139,8 @@ export function analyze(
 	ast: Program,
 	source: string,
 	meta: PreprocessResult,
-	reactiveImports?: Record<string, string[]>,
-	reactiveCallImports?: Record<string, number[]>,
+	reactiveImports?: Record<string, ReactiveImportInfo>,
+	reactiveCalls?: Record<string, number[]>,
 ): AnalysisResult {
 	const componentNames = new Set(meta.components.map((c) => c.name));
 	const stateSet = new Set(meta.stateVars);
@@ -270,14 +296,23 @@ export function analyze(
 		}
 	}
 
-	// 5. Call-site analysis for reactive params
+	// 5. Signal-return classification — runs BEFORE the call-site walk so
+	//    bindings already carry their classification while usage is detected.
+	const classified = classifySignalReturns(ast, moduleScope, scopes, componentNames);
+
+	// 6. Unified call-site analysis: one walk collecting reactive ARG
+	//    positions, signal-return consumption (`derived x = fn()` sites),
+	//    and the declaration sites whose bindings get upgraded afterwards.
 	const implicitReactiveParams = new Map<string, Set<string>>();
 	const importedReactiveCalls: Record<string, Record<string, Set<number>>> = {};
+	const signalCallSites: SignalCallSite[] = [];
+	const bagAliasSites: BagAliasSite[] = [];
 
 	walkCallSites(
 		ast, source, moduleScope, scopes, stateSet, derivedSet,
 		componentNames, functionParamMap, implicitReactiveParams,
 		importSourceMap, importedReactiveCalls,
+		signalCallSites, bagAliasSites,
 	);
 
 	// Second-pass: re-scan function bodies where params became reactive
@@ -286,7 +321,7 @@ export function analyze(
 		if (!fn || componentNames.has(fn.name)) continue;
 
 		const sameFileReactive = implicitReactiveParams.get(fn.name);
-		const crossFileIndices = reactiveCallImports?.[fn.name];
+		const crossFileIndices = reactiveCalls?.[fn.name];
 		if (!sameFileReactive && !crossFileIndices) continue;
 
 		const paramNames = functionParamMap.get(fn.name) || [];
@@ -312,12 +347,14 @@ export function analyze(
 			}
 		}
 
-		// Re-walk for forwarded calls
+		// Re-walk for forwarded calls (signal-return collection is idempotent:
+		// Sets dedupe, site upgrades are stable)
 		const secondPassImportedCalls: Record<string, Record<string, Set<number>>> = {};
 		walkCallSites(
 			node, source, fnScope, scopes, stateSet, derivedSet,
 			componentNames, functionParamMap, new Map(),
 			importSourceMap, secondPassImportedCalls,
+			signalCallSites, bagAliasSites,
 		);
 		for (const [specifier, fns] of Object.entries(secondPassImportedCalls)) {
 			if (!importedReactiveCalls[specifier]) importedReactiveCalls[specifier] = {};
@@ -329,11 +366,11 @@ export function analyze(
 	}
 
 	// Convert Set<number> to number[] for result
-	const reactiveCalls: Record<string, Record<string, number[]>> = {};
+	const reactiveCallsResult: Record<string, Record<string, number[]>> = {};
 	for (const [specifier, fns] of Object.entries(importedReactiveCalls)) {
-		reactiveCalls[specifier] = {};
+		reactiveCallsResult[specifier] = {};
 		for (const [fnName, indices] of Object.entries(fns)) {
-			reactiveCalls[specifier][fnName] = [...indices];
+			reactiveCallsResult[specifier][fnName] = [...indices];
 		}
 	}
 
@@ -352,7 +389,7 @@ export function analyze(
 	}
 
 	// Imported functions with detected reactive call positions
-	for (const [_specifier, fns] of Object.entries(reactiveCalls)) {
+	for (const [_specifier, fns] of Object.entries(reactiveCallsResult)) {
 		for (const [fnName, indices] of Object.entries(fns)) {
 			for (const [localName, info] of importSourceMap) {
 				if (info.exportedName === fnName) {
@@ -364,13 +401,54 @@ export function analyze(
 		}
 	}
 
-	// Cross-file reactive param info from Vite plugin
-	if (reactiveCallImports) {
-		for (const [fnName, indices] of Object.entries(reactiveCallImports)) {
+	// Cross-file reactive param info from the project registry
+	if (reactiveCalls) {
+		for (const [fnName, indices] of Object.entries(reactiveCalls)) {
 			const existing = reactiveCallTargets.get(fnName) || new Set();
 			for (const idx of indices) existing.add(idx);
 			reactiveCallTargets.set(fnName, existing);
 		}
+	}
+
+	// 7. Signal-return upgrades. Classified functions hand their signals
+	// (or signal bags) to consumers raw, like reactive imports — but only
+	// when raw consumption is REACHABLE: the callable is exported, or a
+	// same-file `derived x = fn()` consumer exists (each site activates its
+	// own callee). Module-local unconsumed callables keep value semantics
+	// (`return $.get(x)`), so ordinary helper functions compile exactly as
+	// they would without signal returns. Active callables' callers pick the
+	// semantics per site: `derived x = fn()` binds the signal raw, any other
+	// position snapshots the value with $.get (the transform's CallExpression
+	// wrap).
+	const consumedFnNodes = new Set<AstNode>();
+	for (const site of signalCallSites) {
+		if (site.calleeBinding?.signalReturn) consumedFnNodes.add(site.calleeBinding.signalReturn.fnNode);
+	}
+
+	const signalReturnFns = new Set<AstNode>();
+	const signalBagNodes = new Set<AstNode>();
+	const reactiveReturnsMeta: Record<string, SignalReturnKind> = {};
+	for (const { name, binding, entry, exported } of classified.entries) {
+		if (!exported && !consumedFnNodes.has(entry.fnNode)) continue;
+		binding.signalReturnActive = true;
+		signalReturnFns.add(entry.fnNode);
+		for (const bag of entry.bags) signalBagNodes.add(bag);
+		if (exported) reactiveReturnsMeta[name] = entry.info;
+	}
+	// Imported signal-returning callables (cross-file registry), by local name
+	const importedShapes = new Map<string, SignalReturnKind>();
+	if (reactiveImports) {
+		for (const [localName, info] of importSourceMap.entries()) {
+			const imported = reactiveImports[info.specifier]?.returns?.[info.exportedName];
+			if (imported) importedShapes.set(localName, imported);
+		}
+	}
+	upgradeSignalCallSites(signalCallSites, bagAliasSites, importedShapes);
+	// Call expressions bound by `derived` — the transform leaves these raw
+	const rawSignalCalls = new Set<AstNode>();
+	for (const site of signalCallSites) {
+		const init = (site.decl as { init?: AstNode }).init;
+		if (init?.type === 'CallExpression') rawSignalCalls.add(init);
 	}
 
 	return {
@@ -383,8 +461,15 @@ export function analyze(
 		componentNames,
 		styles,
 		reactiveExports,
-		reactiveCalls,
+		reactiveCalls: reactiveCallsResult,
 		reactiveCallTargets,
+		signalReturnFns,
+		signalBagNodes,
+		reactiveReturnsMeta,
+		/** Call expressions bound by `derived x = fn()` — left raw by the transform */
+		rawSignalCalls,
+		/** Imported signal-returning callables by local name */
+		signalReturnShapes: importedShapes,
 		importSpecifiers,
 		preprocessed: meta,
 	};
@@ -473,6 +558,13 @@ function upgradeBindingKinds(
 
 	function visitStmts(stmts: ReadonlyArray<Directive | Statement>, scope: Scope): void {
 		for (const stmt of stmts) {
+			// Unwrap exports — `export const Ctx = createContext(() => { state x = 0 })`
+			// must upgrade the factory's markers like the unexported form does.
+			if (stmt.type === 'ExportNamedDeclaration' && stmt.declaration) {
+				visitStmts([stmt.declaration], scope);
+				continue;
+			}
+
 			if (stmt.type === 'VariableDeclaration') {
 				upgradeMarkedDeclarations(stmt, scope);
 			}
@@ -503,6 +595,12 @@ function upgradeBindingKinds(
 						visitExpression(init, scope);
 					}
 				}
+			}
+
+			// Recurse into statement-level call arguments (e.g. test wrappers:
+			// `it('...', () => { const Ctx = createContext(() => { state x = 0 }) })`)
+			if (stmt.type === 'ExpressionStatement') {
+				visitExpression(stmt.expression, scope);
 			}
 
 			// Recurse into blocks, loops, etc.
@@ -616,13 +714,13 @@ function upgradeBindingKinds(
 function markCrossFileReactiveImports(
 	ast: Program,
 	moduleScope: Scope,
-	reactiveImports: Record<string, string[]>,
+	reactiveImports: Record<string, ReactiveImportInfo>,
 ): void {
 	for (const node of ast.body) {
 		if (node.type !== 'ImportDeclaration') continue;
 		const specifier = node.source.value;
 		if (!specifier) continue;
-		const reactiveNames = reactiveImports[specifier];
+		const reactiveNames = reactiveImports[specifier]?.bindings;
 		if (!reactiveNames) continue;
 		const reactiveSet = new Set(reactiveNames);
 		for (const spec of node.specifiers) {
@@ -685,9 +783,35 @@ function upgradeComponentParams(
 
 // ── Call-site Analysis ─────────────────────────────────────────────
 
+/** A `derived … = fn()` declaration site recorded by the call-site walk */
+interface SignalCallSite {
+	/** The VariableDeclarator being initialized */
+	decl: AstNode;
+	/** The scope the declaration lives in */
+	scope: Scope;
+	/** The callee's local name */
+	calleeName: string;
+	/** The callee's binding (null for imports) */
+	calleeBinding: Binding | null;
+}
+
+/** A `derived alias = bagHolder` declaration site recorded by the call-site walk */
+interface BagAliasSite {
+	/** The alias binding's name */
+	idName: string;
+	/** The scope the declaration lives in */
+	scope: Scope;
+	/** The bag-holding source binding */
+	source: Binding;
+}
+
 /**
  * Walk AST looking for call expressions to detect which function params
- * receive reactive variables as arguments.
+ * receive reactive variables as arguments — and, in the same pass, which
+ * functions are consumed as signal returns (`derived x = fn()`): local
+ * candidates mark their callable binding consumed, imported ones are
+ * reported per specifier, and the declaration sites are recorded for the
+ * upgrade pass (see upgradeSignalCallSites).
  */
 function walkCallSites(
 	ast: AstNode,
@@ -701,6 +825,8 @@ function walkCallSites(
 	localResult: Map<string, Set<string>>,
 	importSourceMap: Map<string, { specifier: string; exportedName: string }>,
 	importedResult: Record<string, Record<string, Set<number>>>,
+	signalCallSites: SignalCallSite[],
+	bagAliasSites: BagAliasSite[],
 ): void {
 	let activeScope: Scope = moduleScope;
 
@@ -738,6 +864,39 @@ function walkCallSites(
 			}
 		}
 
+		// `derived x = fn()` declarations: the call binds the returned
+		// signal raw (upgraded after the walk — imported shapes may only be
+		// known then). Bag alias candidates (`derived c3 = ctx`) likewise.
+		// Only `derived` declarations opt in — plain `const x = fn()` gets a
+		// $.get value snapshot (the transform's CallExpression wrap).
+		if (node.type === 'VariableDeclaration') {
+			let afterDerivedMarker = false;
+			for (const decl of node.declarations) {
+				const id = decl.id as AstNode;
+				if (id.type === 'Identifier' && (id as { name: string }).name.startsWith(DERIVED_MARKER)) {
+					afterDerivedMarker = true;
+					continue;
+				}
+				if (afterDerivedMarker && decl.init) {
+					const init = decl.init;
+					if (init.type === 'Identifier') {
+						const source = activeScope.get(init.name);
+						if (source && id.type === 'Identifier') {
+							bagAliasSites.push({ idName: id.name, scope: activeScope, source });
+						}
+					} else if (init.type === 'CallExpression' && init.callee.type === 'Identifier') {
+						signalCallSites.push({
+							decl,
+							scope: activeScope,
+							calleeName: init.callee.name,
+							calleeBinding: activeScope.get(init.callee.name) ?? null,
+						});
+					}
+				}
+				afterDerivedMarker = false;
+			}
+		}
+
 		if (node.type === 'CallExpression' && node.callee.type === 'Identifier') {
 			const fnName = node.callee.name;
 			const args = node.arguments;
@@ -772,6 +931,64 @@ function walkCallSites(
 	}
 
 	visit(ast);
+}
+
+/**
+ * Upgrade the recorded `derived x = fn()` sites: bind the signal (or bag)
+ * raw — like a reactive import — marking state-kind signals writable and
+ * destructured state-kind bag properties as bind-props (setter-delegated).
+ * Local callables resolve through their binding; imported ones arrive with
+ * their return shape from the project registry.
+ */
+function upgradeSignalCallSites(
+	sites: SignalCallSite[],
+	aliasSites: BagAliasSite[],
+	importedShapes: Map<string, SignalReturnKind>,
+): void {
+	for (const site of sites) {
+		let info: SignalReturnKind | null;
+		if (site.calleeBinding?.signalReturn) {
+			info = site.calleeBinding.signalReturn.info;
+		} else {
+			info = importedShapes.get(site.calleeName) ?? null;
+		}
+		if (!info) continue;
+
+		const decl = site.decl as { id?: AstNode };
+		const id = decl.id;
+		if (!id) continue;
+
+		if (id.type === 'Identifier') {
+			const binding = site.scope.get(id.name);
+			if (!binding) continue;
+			binding.signalCall = true;
+			if (info.type === 'bag') binding.signalBagHolder = true; // aliases must not $.derived-wrap
+			if (info.type === 'signal' && info.signalKind === 'state') {
+				binding.kind = 'state'; // writable: `x = v` propagates
+			}
+		} else if (id.type === 'ObjectPattern' && info.type === 'bag') {
+			for (const prop of id.properties) {
+				if (prop.type !== 'Property' || prop.key.type !== 'Identifier' || prop.computed) continue;
+				if (prop.value.type !== 'Identifier') continue;
+				if (info.properties[prop.key.name] === 'state') {
+					const binding = site.scope.get(prop.value.name);
+					if (binding) {
+						binding.kind = 'bind-prop'; // writable, setter-delegated
+						binding.signalCall = true;
+					}
+				}
+			}
+		}
+	}
+
+	// Bag aliases run after the call-site upgrades: their source's holder
+	// flag (set directly or by a call-site upgrade above) propagates so the
+	// alias binds raw too — $.derived-wrapping would flatten the accessors.
+	for (const site of aliasSites) {
+		if (!site.source.signalBagHolder) continue;
+		const binding = site.scope.get(site.idName);
+		if (binding) binding.signalBagHolder = true;
+	}
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -914,6 +1131,191 @@ const AST_CHILD_FIELDS = [
 const AST_CHILD_FIELD_SET = new Set(AST_CHILD_FIELDS);
 
 /** Visit all AST child nodes of a given node */
+// ── Signal-return classification ───────────────────────────────────
+
+/** Collect ReturnStatements within a function, not descending into nested functions */
+function collectReturns(node: AstNode, out: AstNode[]): void {
+	forEachChild(node, (child) => {
+		if (child.type === 'FunctionDeclaration' || child.type === 'FunctionExpression' || child.type === 'ArrowFunctionExpression') return;
+		if (child.type === 'ReturnStatement') out.push(child);
+		collectReturns(child, out);
+	});
+}
+
+/** Classify an object literal as a signal bag; null when it holds no reactive shorthands */
+function classifyBag(obj: AstNode, scope: Scope, bags: AstNode[]): SignalReturnKind | null {
+	const properties: Record<string, 'state' | 'derived' | 'plain'> = {};
+	let hasReactive = false;
+	for (const prop of (obj as { properties: AstNode[] }).properties ?? []) {
+		if (prop.type === 'SpreadElement') return null;
+		if (prop.type !== 'Property') continue;
+		const key = prop.key;
+		if (key.type !== 'Identifier' || prop.computed) continue;
+		let kind: 'state' | 'derived' | 'plain' = 'plain';
+		if (prop.shorthand && (prop.value as AstNode).type === 'Identifier') {
+			const binding = scope.get((prop.value as { name: string }).name);
+			if (binding?.kind === 'state') kind = 'state';
+			else if (binding?.kind === 'derived') kind = 'derived';
+		}
+		properties[key.name] = kind;
+		if (kind !== 'plain') hasReactive = true;
+	}
+	if (!hasReactive) return null;
+	bags.push(obj);
+	return { type: 'bag', properties };
+}
+
+/** Classify a return expression: bare reactive binding, or a bag via its binding's initializer */
+function classifyReturnExpr(arg: AstNode | null | undefined, scope: Scope, bags: AstNode[]): SignalReturnKind | null {
+	if (!arg) return null;
+	if (arg.type === 'ObjectExpression') return classifyBag(arg, scope, bags);
+	if (arg.type === 'Identifier') {
+		const binding = scope.get(arg.name);
+		if (!binding) return null;
+		// Bag check FIRST — `derived ctx = {name, length}; return ctx` holds a
+		// derived-kind binding but returns a bag, not a bare signal.
+		if (binding.initial && binding.initial.type === 'ObjectExpression') {
+			const bag = classifyBag(binding.initial, scope, bags);
+			if (bag) {
+				// Returning a derived-held bag must pass the bag VALUE out
+				// ($.get at return position), not the signal — mark it.
+				if (binding.kind === 'derived') binding.signalBagHolder = true;
+				return bag;
+			}
+			// Non-reactive object initializers fall through to the kind check
+			// below only for state/derived bindings; plain bindings bail.
+		}
+		if (binding.kind === 'state' || binding.kind === 'derived') {
+			return { type: 'signal', signalKind: binding.kind };
+		}
+	}
+	return null;
+}
+
+function mergeSignalReturn(a: SignalReturnKind | null, b: SignalReturnKind | null): SignalReturnKind | null {
+	if (!a) return b;
+	if (!b) return null; // some return path is not signal-shaped → disqualified
+	if (a.type !== b.type) return null;
+	if (a.type === 'signal' && b.type === 'signal' && a.signalKind !== b.signalKind) return null;
+	if (a.type === 'bag' && b.type === 'bag') {
+		for (const [key, kind] of Object.entries(b.properties)) {
+			const existing = a.properties[key];
+			if (existing === undefined) a.properties[key] = kind;
+			else if (existing !== kind) a.properties[key] = 'derived';
+		}
+	}
+	return a;
+}
+
+/** Classify one function node; null when not signal-returning */
+function classifyFnNode(fnNode: AstNode, scope: Scope, bags: AstNode[]): SignalReturnKind | null {
+	const body = (fnNode as { body?: AstNode }).body;
+	if (!body || body.type !== 'BlockStatement') return null;
+	const returns: AstNode[] = [];
+	collectReturns(body, returns);
+	if (returns.length === 0) return null;
+	let result: SignalReturnKind | null = null;
+	for (const ret of returns) {
+		const info = classifyReturnExpr((ret as { argument?: AstNode }).argument, scope, bags);
+		result = mergeSignalReturn(result, info);
+		if (result === null) return null;
+	}
+	return result;
+}
+
+/**
+ * Walk the module and collect signal-return candidates, attaching the
+ * classification to the callable's BINDING (scope-aware, so same-named
+ * bindings in sibling scopes classify independently):
+ * - function declarations / const-bound function expressions whose every
+ *   return is a bare reactive binding or a reactive-shorthand object
+ * - `createContext(<candidate factory>)` — the const receiving it becomes
+ *   a signal-returning callable (its accessor hands the signals back)
+ *
+ * Candidates are NOT yet signal-returning — a consumer must opt in with
+ * `derived x = fn()` first (see walkCallSites / upgradeSignalCallSites).
+ */
+function classifySignalReturns(
+	ast: Program,
+	moduleScope: Scope,
+	scopes: Map<AstNode, Scope>,
+	componentNames: Set<string>,
+): {
+	entries: Array<{ name: string; binding: Binding; entry: SignalReturnClassification; exported: boolean }>;
+} {
+	const entries: Array<{ name: string; binding: Binding; entry: SignalReturnClassification; exported: boolean }> = [];
+	let activeScope: Scope = moduleScope;
+
+	function isComponentFn(node: AstNode): boolean {
+		return node.type === 'FunctionDeclaration' &&
+			(node as { id?: { name?: string } }).id != null &&
+			componentNames.has((node as { id: { name: string } }).id.name);
+	}
+
+	function declare(name: string, fnNode: AstNode, isExported: boolean): void {
+		// Resolve the callable's binding where it is DECLARED (activeScope),
+		// but classify returns against the function's own scope — its state
+		// and derived bindings live there.
+		const binding = activeScope.get(name);
+		if (!binding || binding.signalReturn) return;
+		const fnScope = scopes.get(fnNode) || activeScope;
+		const bags: AstNode[] = [];
+		const info = classifyFnNode(fnNode, fnScope, bags);
+		if (!info) return;
+		const entry: SignalReturnClassification = { info, fnNode, bags };
+		binding.signalReturn = entry;
+		entries.push({ name, binding, entry, exported: isExported });
+	}
+
+	function visit(node: AstNode, isExported: boolean): void {
+		// Unwrap exports so the wrapped declaration is processed directly
+		if (node.type === 'ExportNamedDeclaration' && node.declaration) {
+			visit(node.declaration, true);
+			return;
+		}
+
+		// Enter function scopes for correct binding resolution — but declare
+		// first: the function's OWN name binding lives in the enclosing scope.
+		if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
+			if (node.type === 'FunctionDeclaration' && !isComponentFn(node)) {
+				const fname = (node as { id?: { name?: string } }).id?.name;
+				if (fname) declare(fname, node, isExported);
+			}
+			const fnScope = scopes.get(node);
+			if (fnScope && fnScope !== activeScope) {
+				const prev = activeScope;
+				activeScope = fnScope;
+				forEachChild(node, (child) => visit(child, false));
+				activeScope = prev;
+				return;
+			}
+		}
+
+		// const X = <fn expr>  |  const X = createContext(<fn>)
+		if (node.type === 'VariableDeclaration') {
+			for (const decl of node.declarations) {
+				if (decl.id.type !== 'Identifier' || !decl.init) continue;
+				const name = decl.id.name;
+				const init = decl.init;
+				if (init.type === 'FunctionExpression' || init.type === 'ArrowFunctionExpression') {
+					if (!isComponentFn(init)) declare(name, init, isExported);
+				} else if (init.type === 'CallExpression' && init.callee.type === 'Identifier' && init.callee.name === 'createContext') {
+					const factory = init.arguments[0];
+					if (factory && (factory.type === 'FunctionExpression' || factory.type === 'ArrowFunctionExpression')) {
+						declare(name, factory, isExported);
+					}
+				}
+			}
+		}
+
+		forEachChild(node, (child) => visit(child, false));
+	}
+
+	visit(ast as unknown as AstNode, false);
+	return { entries };
+}
+
+
 function forEachChild(node: AstNode, fn: (child: AstNode) => void): void {
 	for (const [key, value] of Object.entries(node)) {
 		if (!AST_CHILD_FIELD_SET.has(key)) continue;

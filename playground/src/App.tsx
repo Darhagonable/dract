@@ -4,6 +4,7 @@ import { Dashboard } from "./Dashboard";
 import { RenamedPropsDemo } from "./RenamedPropsDemo";
 import { ContextDemo } from "./ContextDemo";
 import { ReactiveContextDemo } from "./ReactiveContextDemo";
+import { ContextBindingDemo } from "./ContextBindingDemo";
 import { StyleShowcase } from "./styling/StyleShowcase";
 import { RouterDemo } from "./RouterDemo";
 import { EffectDemo } from "./EffectDemo";
@@ -42,6 +43,8 @@ export default component App() {
       <ContextDemo />
       <hr />
       <ReactiveContextDemo />
+      <hr />
+      <ContextBindingDemo />
       <hr />
       <StyleShowcase />
       <hr />

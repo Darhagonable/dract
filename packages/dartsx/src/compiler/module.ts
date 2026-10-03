@@ -6,6 +6,7 @@
 import { preprocess } from './phases/1-preprocess';
 import { parse } from './phases/2-parse';
 import { analyze } from './phases/3-analyze';
+import type { SignalReturnKind, ReactiveImportInfo } from './scope';
 import { transform } from './phases/4-transform';
 import { transformSync as oxcTransformSync } from 'oxc-transform';
 import remapping, { type SourceMap } from '@jridgewell/remapping';
@@ -27,12 +28,15 @@ export interface ModuleOutput {
 	};
 	/** Metadata about the compiled module. */
 	metadata: {
-		/** Names of exported state/derived variables (for cross-file reactivity) */
+		/** Names of exported state/derived variables (for cross-file reactivity).
+		 *  `export state count = 0` → ["count"] */
 		reactiveExports: string[];
-		/**
-		 * Cross-file reactive function calls detected at call sites.
-		 * Maps import specifier → { exportedName → reactive param indices }.
-		 */
+		/** Exported signal-returning callables (for cross-file tracking).
+		 *  `export function useThing() { state x; return x }` → { useThing: signal } */
+		reactiveReturns: Record<string, SignalReturnKind>;
+		/** Cross-file reactive function calls detected at call sites.
+		 *  Maps import specifier → { exportedName → reactive param indices }.
+		 *  `import { inc } from './util'; inc(count)` → { './util': { inc: [0] } } */
 		reactiveCalls: Record<string, Record<string, number[]>>;
 		/** Import specifiers found in this module (for Vite plugin resolution, avoids regex) */
 		importSpecifiers: string[];
@@ -53,14 +57,20 @@ export interface CompileModuleOptions {
 	css?: 'injected' | 'external';
 	/**
 	 * Cross-file reactive imports.
-	 * Maps import specifiers (e.g., './store') to arrays of reactive variable names.
+	 * Maps import specifier → { bindings, returns } — what each dependency
+	 * exports that is reactive.
+	 * `import { count } from './store'` (store: `export state count = 0`)
+	 * → { './store': { bindings: ['count'] } }
 	 */
-	reactiveImports?: Record<string, string[]>;
+	reactiveImports?: Record<string, ReactiveImportInfo>;
 	/**
-	 * Cross-file reactive function param info.
-	 * Maps exported function names to arrays of reactive param indices.
+	 * Cross-file reactive function param info — the incoming counterpart of
+	 * metadata.reactiveCalls, routed back from other modules' calls into
+	 * this module's exported functions. Keyed by function name (the
+	 * specifier is always this module, so it is dropped).
+	 * `export function helper(a)` + another module's `helper(myState)` → { helper: [0] }
 	 */
-	reactiveCallImports?: Record<string, number[]>;
+	reactiveCalls?: Record<string, number[]>;
 }
 
 /**
@@ -99,7 +109,7 @@ export function compileModule(source: string, options: CompileModuleOptions = {}
 		stripped.code,
 		preprocessed,
 		options.reactiveImports,
-		options.reactiveCallImports,
+		options.reactiveCalls,
 	);
 
 	// Phase 4: Transform — walk AST with zimmerframe, print with esrap
@@ -116,6 +126,7 @@ export function compileModule(source: string, options: CompileModuleOptions = {}
 		},
 		metadata: {
 			reactiveExports: analysis.reactiveExports,
+			reactiveReturns: analysis.reactiveReturnsMeta,
 			reactiveCalls: analysis.reactiveCalls,
 			importSpecifiers: analysis.importSpecifiers,
 		},

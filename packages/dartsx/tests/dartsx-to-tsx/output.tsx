@@ -38,10 +38,10 @@ export function UserBadge({'display-name': displayName, status = 'offline'}: {'d
 }
 
 function DerivedPatterns() {
-  const $$d1 = 0, { count, increment } = CounterCtx()
-  const $$d2 = 0, { user: { name }, items: [first, { label: itemLabel }] } = loadData()
-  const $$d3 = 0, { user: { name: userName = 'anon' }, ...rest } = loadMore()
-  const $$d4 = 0, [head = 1, ...tail] = getList()
+  let $$d1 = 0, { count, increment } = CounterCtx()
+  let $$d2 = 0, { user: { name }, items: [first, { label: itemLabel }] } = loadData()
+  let $$d3 = 0, { user: { name: userName = 'anon' }, ...rest } = loadMore()
+  let $$d4 = 0, [head = 1, ...tail] = getList()
 }
 
 function Form() {

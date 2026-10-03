@@ -17,6 +17,8 @@
  */
 import { compileModule, type ModuleOutput } from './module';
 import { isDarTsxFile } from './phases/1-preprocess';
+import type { SignalReturnKind } from './phases/3-analyze';
+import type { ReactiveImportInfo } from './scope';
 
 /** Bundler-agnostic environment supplied by the tool. */
 export interface ProjectHost {
@@ -69,18 +71,21 @@ function sameStrings(a: string[], b: string[]): boolean {
 export class Project {
 	/** Maps resolved module IDs to their reactive export names */
 	private reactiveRegistry = new Map<string, string[]>();
+	/** Maps resolved module IDs to their exported signal-returning callables */
+	private reactiveReturnRegistry = new Map<string, Record<string, SignalReturnKind>>();
 	/**
-	 * Per-caller reactive call contributions.
-	 * Maps callerId → targetId → { fnName → indices }.
+	 * Per-caller function-usage contributions.
+	 * Maps callerId → targetId → { fnName → reactive param indices }.
 	 * Replaces a caller's contributions on recompile instead of only merging.
 	 */
-	private reactiveCallContributions = new Map<string, Map<string, Record<string, number[]>>>();
+	private fnUsageContributions = new Map<string, Map<string, Record<string, number[]>>>();
 	/**
-	 * Aggregated reactive call info per target module (derived from contributions).
-	 * Maps resolved module IDs to reactive function param info.
-	 * E.g. '/path/helper.ts' → { test: [0] } means test()'s param 0 receives a signal.
+	 * Aggregated function usage per target module (derived from
+	 * contributions), fed back as `reactiveCallImports` at compile time.
+	 * E.g. '/path/helper.ts' → { test: [0] } means test()'s param 0
+	 * receives a signal.
 	 */
-	private reactiveCallRegistry = new Map<string, Record<string, number[]>>();
+	private fnUsageRegistry = new Map<string, Record<string, number[]>>();
 	/** Guards against invalidating the same module twice while one update is
 	 * still being processed (mutually-importing files). Not a work queue —
 	 * `init()` and the tool own recompilation scheduling. */
@@ -107,12 +112,13 @@ export class Project {
 	}
 
 	/**
-	 * Rebuild the aggregated reactiveCallRegistry for a target by merging
-	 * all caller contributions. Returns whether the result changed.
+	 * Rebuild the aggregated fnUsageRegistry for a target by merging all
+	 * caller contributions (arg positions union, signal-return consumption
+	 * OR-ed). Returns whether the result changed.
 	 */
-	private rebuildRegistryForTarget(targetId: string): boolean {
+	private rebuildFnUsageForTarget(targetId: string): boolean {
 		const merged: Record<string, Set<number>> = {};
-		for (const [, targets] of this.reactiveCallContributions) {
+		for (const [, targets] of this.fnUsageContributions) {
 			const contrib = targets.get(targetId);
 			if (!contrib) continue;
 			for (const [fnName, indices] of Object.entries(contrib)) {
@@ -127,16 +133,16 @@ export class Project {
 			result[fnName] = [...indices].sort();
 		}
 
-		const prev = this.reactiveCallRegistry.get(targetId);
+		const prev = this.fnUsageRegistry.get(targetId);
 		const prevJson = prev ? JSON.stringify(prev) : '';
 		const newJson = JSON.stringify(result);
 
 		if (prevJson === newJson) return false;
 
 		if (Object.keys(result).length > 0) {
-			this.reactiveCallRegistry.set(targetId, result);
+			this.fnUsageRegistry.set(targetId, result);
 		} else {
-			this.reactiveCallRegistry.delete(targetId);
+			this.fnUsageRegistry.delete(targetId);
 		}
 		return true;
 	}
@@ -164,18 +170,18 @@ export class Project {
 	}
 
 	/**
-	 * Drop a caller's reactive-call contributions and rebuild the aggregated
-	 * registry for every target that received them. Returns the ids whose
-	 * registry changed (their outputs are stale until re-transformed).
+	 * Drop a caller's function-usage contributions and rebuild the
+	 * aggregated registry for every target that received them. Returns the
+	 * ids whose registry changed (their outputs are stale until re-transformed).
 	 */
 	private dropContributions(callerId: string): string[] {
-		const contribs = this.reactiveCallContributions.get(callerId);
-		this.reactiveCallContributions.delete(callerId);
+		const contribs = this.fnUsageContributions.get(callerId);
+		this.fnUsageContributions.delete(callerId);
 		if (!contribs) return [];
 		const changed: string[] = [];
 		for (const targetId of contribs.keys()) {
 			if (this.invalidationGuard.has(targetId)) continue;
-			if (this.rebuildRegistryForTarget(targetId)) {
+			if (this.rebuildFnUsageForTarget(targetId)) {
 				this.invalidationGuard.add(targetId);
 				changed.push(targetId);
 			}
@@ -237,7 +243,7 @@ export class Project {
 		// propagation. A module that stops qualifying drops its stale output.
 		const isTsx = filename.endsWith('.tsx');
 		const isJsx = filename.endsWith('.jsx');
-		if (!isTsx && !isJsx && !this.reactiveCallRegistry.has(filename) && !isDarTsxFile(source)) {
+		if (!isTsx && !isJsx && !this.fnUsageRegistry.has(filename) && !isDarTsxFile(source)) {
 			this.outputs.delete(filename);
 			this.replaceEdges(filename, []);
 			return { invalidated: [] };
@@ -249,11 +255,12 @@ export class Project {
 		const cachedSpecifiers = this.importSpecifierCache.get(filename);
 		const { deps, reactiveImports } = await this.resolveDeps(filename, cachedSpecifiers ?? []);
 
+		const fnUsage = this.fnUsageRegistry.get(filename);
 		let result = compileModule(source, {
 			filename,
 			css: this.css,
 			reactiveImports,
-			reactiveCallImports: this.reactiveCallRegistry.get(filename),
+			reactiveCalls: fnUsage,
 		});
 
 		// Cache the authoritative specifier list from OXC metadata.
@@ -275,12 +282,13 @@ export class Project {
 		if (!sameStrings(specifiers, cachedSpecifiers ?? [])) {
 			for (const specifier of specifiers) {
 				const resolved = await this.host.resolve(specifier, filename);
-				if (!resolved || this.reactiveRegistry.has(resolved)) continue;
+				if (!resolved || this.reactiveRegistry.has(resolved) || this.reactiveReturnRegistry.has(resolved)) continue;
 				const importedSource = await this.host.readFile(resolved);
 				if (!importedSource) continue;
 				try {
-					const exports = compileModule(importedSource, { filename: resolved }).metadata.reactiveExports;
-					if (exports.length > 0) this.reactiveRegistry.set(resolved, exports);
+					const meta = compileModule(importedSource, { filename: resolved }).metadata;
+					if (meta.reactiveExports.length > 0) this.reactiveRegistry.set(resolved, meta.reactiveExports);
+					if (Object.keys(meta.reactiveReturns).length > 0) this.reactiveReturnRegistry.set(resolved, meta.reactiveReturns);
 				} catch {
 					// Inspect what we can; the dependency's own compile surfaces its errors.
 				}
@@ -292,7 +300,7 @@ export class Project {
 					filename,
 					css: this.css,
 					reactiveImports: fresh.reactiveImports,
-					reactiveCallImports: this.reactiveCallRegistry.get(filename),
+					reactiveCalls: fnUsage,
 				});
 			}
 		}
@@ -306,8 +314,20 @@ export class Project {
 			this.reactiveRegistry.delete(filename);
 		}
 
-		// Update reactive call contributions for this caller and rebuild affected targets.
-		// First, collect this caller's new contributions
+		// Store signal-return info; importers compiled against a different
+		// return surface must recompile (their `derived x = fn()` bindings
+		// were emitted without — or with stale — raw-signal treatment).
+		const prevReturnsJson = JSON.stringify(this.reactiveReturnRegistry.get(filename) ?? {});
+		const nextReturns = result.metadata.reactiveReturns;
+		if (Object.keys(nextReturns).length > 0) {
+			this.reactiveReturnRegistry.set(filename, nextReturns);
+		} else {
+			this.reactiveReturnRegistry.delete(filename);
+		}
+		const returnsChanged = prevReturnsJson !== JSON.stringify(nextReturns);
+
+		// Update this caller's function-usage contributions and rebuild the
+		// affected targets' aggregated registries.
 		const newContribs = new Map<string, Record<string, number[]>>();
 		for (const [specifier, fns] of Object.entries(result.metadata.reactiveCalls)) {
 			const resolved = await this.host.resolve(specifier, filename);
@@ -320,7 +340,7 @@ export class Project {
 		}
 
 		// Get the previous contributions from this caller
-		const prevContribs = this.reactiveCallContributions.get(filename);
+		const prevContribs = this.fnUsageContributions.get(filename);
 		// Collect all target IDs that need rebuilding (union of old + new targets)
 		const affectedTargets = new Set<string>();
 		if (prevContribs) {
@@ -330,9 +350,9 @@ export class Project {
 
 		// Replace this caller's contributions
 		if (newContribs.size > 0) {
-			this.reactiveCallContributions.set(filename, newContribs);
+			this.fnUsageContributions.set(filename, newContribs);
 		} else {
-			this.reactiveCallContributions.delete(filename);
+			this.fnUsageContributions.delete(filename);
 		}
 
 		// Rebuild the aggregated registry for each affected target and collect
@@ -342,7 +362,7 @@ export class Project {
 			// Skip if this target is already pending invalidation (prevent loops)
 			if (this.invalidationGuard.has(targetId)) continue;
 
-			const changed = this.rebuildRegistryForTarget(targetId);
+			const changed = this.rebuildFnUsageForTarget(targetId);
 			if (changed) {
 				this.invalidationGuard.add(targetId);
 				stale.push(targetId);
@@ -350,8 +370,9 @@ export class Project {
 		}
 
 		// If this module's reactive export surface changed, its importers must
-		// recompile — they were compiled against the old surface.
-		if (!sameStrings(prevExports, result.metadata.reactiveExports)) {
+		// recompile — they were compiled against the old surface. The same
+		// holds when its signal-return surface changed.
+		if (!sameStrings(prevExports, result.metadata.reactiveExports) || returnsChanged) {
 			const importers = this.importers.get(filename);
 			if (importers) {
 				for (const importer of importers) {
@@ -375,15 +396,21 @@ export class Project {
 	private async resolveDeps(
 		filename: string,
 		specifiers: string[],
-	): Promise<{ deps: string[]; reactiveImports: Record<string, string[]> }> {
+	): Promise<{ deps: string[]; reactiveImports: Record<string, ReactiveImportInfo> }> {
 		const deps: string[] = [];
-		const reactiveImports: Record<string, string[]> = {};
+		const reactiveImports: Record<string, ReactiveImportInfo> = {};
 		for (const specifier of specifiers) {
 			const resolved = await this.host.resolve(specifier, filename);
 			if (!resolved) continue;
 			deps.push(resolved);
-			const exports = this.reactiveRegistry.get(resolved);
-			if (exports?.length) reactiveImports[specifier] = exports;
+			const bindings = this.reactiveRegistry.get(resolved);
+			const returns = this.reactiveReturnRegistry.get(resolved);
+			if (bindings?.length || (returns && Object.keys(returns).length > 0)) {
+				reactiveImports[specifier] = {
+					bindings: bindings?.length ? bindings : undefined,
+					returns: returns && Object.keys(returns).length > 0 ? returns : undefined,
+				};
+			}
 		}
 		return { deps, reactiveImports };
 	}
@@ -398,7 +425,8 @@ export class Project {
 		const importers = [...(this.importers.get(filename) ?? [])];
 		this.outputs.delete(filename);
 		this.reactiveRegistry.delete(filename);
-		this.reactiveCallRegistry.delete(filename);
+		this.reactiveReturnRegistry.delete(filename);
+		this.fnUsageRegistry.delete(filename);
 		this.importSpecifierCache.delete(filename);
 		this.invalidationGuard.delete(filename);
 		this.modulesSet.delete(filename);

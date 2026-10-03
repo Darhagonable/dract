@@ -38,6 +38,7 @@ import type {
 	CallExpression,
 	ArrowFunctionExpression,
 	BlockStatement,
+	ObjectExpression,
 	IfStatement,
 	ForOfStatement,
 	ForInStatement,
@@ -98,6 +99,14 @@ interface TransformState {
 	emitStyleCalls: boolean;
 	/** Whether we're inside a derived/effect callback body */
 	insideDerived: boolean;
+	/** Object-literal nodes classified as signal bags */
+	signalBagNodes: Set<AstNode>;
+	/** Function nodes classified as signal-returning (raw return pass-through) */
+	signalReturnFns: Set<AstNode>;
+	/** Call expressions bound by `derived x = fn()` — bound raw, never wrapped */
+	rawSignalCalls: Set<AstNode>;
+	/** Imported signal-returning callables by local name */
+	signalReturnShapes: Map<string, import('../3-analyze').SignalReturnKind>;
 }
 
 // ── Main entry ─────────────────────────────────────────────────────
@@ -125,6 +134,10 @@ export function transform(
 		cssFragments,
 		emitStyleCalls,
 		insideDerived: false,
+		signalBagNodes: analysis.signalBagNodes,
+		signalReturnFns: analysis.signalReturnFns,
+		rawSignalCalls: analysis.rawSignalCalls,
+		signalReturnShapes: analysis.signalReturnShapes,
 	};
 
 	derivedDestructureCounter = 0;
@@ -403,6 +416,47 @@ const visitors = {
 		if (node.type !== 'Property') return next();
 		return transformShorthandProperty(node, s, next);
 	},
+	ObjectExpression(node: ObjectExpression, { state: s, next }: { state: TransformState; next: WalkContext['next'] }) {
+		// Signal bags — object literals returned from signal-returning
+		// functions. Reactive shorthands become accessor pairs so the bag
+		// behaves like a const object: state-kind writes propagate through
+		// the setter, derived-kind writes are legal-but-inert.
+		if (!s.signalBagNodes.has(node as unknown as AstNode)) return next();
+
+		const props: AstNode[] = [];
+		for (const prop of node.properties) {
+			if (prop.type === 'SpreadElement') {
+				props.push(walkNode(prop, s));
+				continue;
+			}
+			if (prop.type === 'Property' && prop.key.type === 'Identifier' && !prop.computed &&
+				prop.shorthand && (prop.value as AstNode).type === 'Identifier') {
+				const name = (prop.value as { name: string }).name;
+				const binding = s.scope.get(name);
+				if (binding?.kind === 'state') {
+					props.push(
+						b.getter(prop.key.name, [b.returnStmt(b.call('$.get', [b.id(name)]))]),
+						b.setter(prop.key.name, b.id('v'), [
+							b.exprStmt(b.call('$.set', [b.id(name), b.id('v')])),
+						]),
+					);
+					continue;
+				}
+				if (binding?.kind === 'derived') {
+					// Derived-kind properties are legal-but-inert to write:
+					// the setter accepts the assignment and does nothing —
+					// the getter always recomputes from dependencies.
+					props.push(
+						b.getter(prop.key.name, [b.returnStmt(b.call('$.get', [b.id(name)]))]),
+						b.setter(prop.key.name, b.id('v'), []),
+					);
+					continue;
+				}
+			}
+			props.push(walkNode(prop, s));
+		}
+		return { ...node, properties: props as unknown as ObjectExpression['properties'] };
+	},
 	AssignmentExpression(node: AssignmentExpression, { state: s, visit }: { state: TransformState; visit: WalkContext['visit'] }) {
 		return transformAssignment(node, s, visit);
 	},
@@ -429,6 +483,22 @@ const visitors = {
 		const fn = node.callee.name;
 		if (fn === '__try') return transformTryCall(node, s);
 		if (fn === '__html') return transformHtmlCall(node, s);
+		// Calls to ACTIVE signal-returning functions outside a `derived`
+		// binding snapshot the value: `const x = fn()` / `render fn()` /
+		// `${fn()}`. (Derived-bound calls are in rawSignalCalls and stay raw;
+		// bags flow raw everywhere — accessors keep reads/writes reactive.
+		// Inactive locals return $.get values and are never wrapped.)
+		if (!s.rawSignalCalls.has(node) && signalWrapGuard !== node) {
+			const binding = s.scope.get(fn);
+			const shape = (binding?.signalReturnActive ? binding.signalReturn?.info : undefined)
+				?? s.signalReturnShapes.get(fn);
+			if (shape?.type === 'signal') {
+				signalWrapGuard = node;
+				const walked = walkNode(node, s);
+				signalWrapGuard = null;
+				return b.call('$.get', [walked]);
+			}
+		}
 		return transformReactiveCallOrNext(node, s, next);
 	},
 	JSXExpressionContainer(node: JSXExpressionContainer, { state: s, visit }: { state: TransformState; visit: WalkContext['visit'] }) {
@@ -439,6 +509,9 @@ const visitors = {
 function walkNode(node: AstNode, state: TransformState): AstNode {
 	return walk<AstNode, TransformState>(node, state, visitors);
 }
+
+/** Re-entrancy guard for the signal-return $.get wrap (see CallExpression) */
+let signalWrapGuard: AstNode | null = null;
 
 // ── Shared transform functions ─────────────────────────────────────
 
@@ -475,6 +548,17 @@ function transformVariableDeclaration(node: VariableDeclaration, state: Transfor
 		const binding = state.scope.get(name);
 		if (!binding) {
 			newDeclarators.push(decl);
+			continue;
+		}
+
+		// Signal-returning call (`derived x = useThing()` / `state`-upgraded):
+		// bind the signal (or bag) RAW — like a reactive import, no wrapper.
+		// Bag holders (`derived ctx = {name, length}` in a signal-returning
+		// function) bind raw too — wrapping in $.derived would deep-proxy the
+		// accessor bag and flatten its reactive getters/setters.
+		if ((binding.signalCall || binding.signalBagHolder) && decl.init) {
+			changed = true;
+			newDeclarators.push(b.declarator(b.id(name), walkNode(decl.init, state)));
 			continue;
 		}
 
@@ -528,7 +612,7 @@ function lowerDerivedDestructuring(pattern: AstNode, initExpr: AstNode, out: Ast
 	out.push(b.declarator(b.id(tempName), initExpr));
 
 	// Walk the pattern and create individual $.derived() bindings
-	emitDerivedBindings(pattern, b.id(tempName), out);
+	emitDerivedBindings(pattern, b.id(tempName), out, state);
 }
 
 function memberComputed(obj: AstNode, index: number): AstNode {
@@ -543,7 +627,7 @@ function sliceCall(obj: AstNode, from: number): AstNode {
 	return b.call(memberDot(obj, 'slice'), [b.literal(from)]);
 }
 
-function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]): void {
+function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[], state: TransformState): void {
 	if (pattern.type === 'ObjectPattern') {
 		for (const prop of pattern.properties) {
 			if (prop.type === 'RestElement') {
@@ -568,7 +652,15 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 			const accessExpr = memberDot(baseExpr, key);
 			const value = prop.value;
 			if (value.type === 'Identifier') {
-				out.push(b.declarator(b.id(value.name), b.call('$.derived', [b.arrow([], accessExpr)])));
+				// State-kind signal-bag property: two-way — $.prop.bind attaches
+				// the property's setter so $.set() writes propagate; everything
+				// else (derived/plain) stays a read-only derived.
+				const binding = state.scope.get(value.name);
+				if (binding?.signalCall && binding.kind === 'bind-prop') {
+					out.push(b.declarator(b.id(value.name), b.call('$.prop.bind', [baseExpr, b.literal(key)])));
+				} else {
+					out.push(b.declarator(b.id(value.name), b.call('$.derived', [b.arrow([], accessExpr)])));
+				}
 			} else if (value.type === 'AssignmentPattern' && value.left.type === 'Identifier') {
 				// { a = defaultVal }
 				const name = value.left.name;
@@ -576,7 +668,7 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 				const ternary = b.conditional(cond, accessExpr, value.right);
 				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
 			} else if (value.type === 'ObjectPattern' || value.type === 'ArrayPattern') {
-				emitDerivedBindings(value, accessExpr, out);
+				emitDerivedBindings(value, accessExpr, out, state);
 			}
 		}
 	} else if (pattern.type === 'ArrayPattern') {
@@ -596,7 +688,7 @@ function emitDerivedBindings(pattern: AstNode, baseExpr: AstNode, out: AstNode[]
 				const ternary = b.conditional(cond, accessExpr, elem.right);
 				out.push(b.declarator(b.id(name), b.call('$.derived', [b.arrow([], ternary)])));
 			} else if (elem.type === 'ObjectPattern' || elem.type === 'ArrayPattern') {
-				emitDerivedBindings(elem, accessExpr, out);
+				emitDerivedBindings(elem, accessExpr, out, state);
 			}
 		}
 	}
@@ -665,6 +757,13 @@ function transformIdentifier(node: AstNode, state: TransformState, path: AstNode
 	// Derived signals returned from non-component functions stay as signals
 	if (parent.type === 'ReturnStatement' && parent.argument === node &&
 		binding.kind === 'derived' && !state.component) return;
+
+	// State signals returned from signal-returning functions stay as signals
+	// too — `return name` hands the signal itself to the consumer
+	// (`derived name = useThing()`), mirroring reactive exports.
+	if (parent.type === 'ReturnStatement' && parent.argument === node &&
+		binding.kind === 'state' &&
+		path.some((n) => state.signalReturnFns.has(n))) return;
 
 	return b.call('$.get', [node]);
 }
@@ -756,6 +855,25 @@ function memberRootIsCallbackParam(expr: Expression, state: TransformState): boo
 	if (!binding) return false;
 	// If declared in a scope that's a child of the component scope, it's a callback param
 	return binding.scope !== state.component?.scope && binding.kind === 'normal';
+}
+
+/**
+ * Whether a member expression's root could be reactive. Plain local
+ * non-reactive bindings (`const c2 = ctx`) are definitively static —
+ * reactivity requires a `derived`/`state` binding at the root. Unknown
+ * roots (imports, chained calls, globals) stay conservative (reactive).
+ */
+function memberRootMayBeReactive(expr: Expression, state: TransformState): boolean {
+	let node: Expression = expr;
+	while (node.type === 'MemberExpression') node = node.object;
+	if (node.type !== 'Identifier') return true; // unknown → conservative
+	const binding = state.scope.get(node.name);
+	if (!binding) return true; // global/unknown → conservative
+	if (binding.reactive) return true;
+	// Locally declared, non-reactive, module-or-component scope → static.
+	// Bindings from nested callback scopes are handled by the callback-param
+	// exclusion above; anything else local is a plain snapshot.
+	return binding.declaration_kind === 'import';
 }
 
 /** Check if a member expression's root object is a reactive binding */
@@ -1077,7 +1195,7 @@ function transformJSXChildren(children: ReadonlyArray<JSXChild>, state: Transfor
 			// Regular expression child
 			const transformed = walkNode(expr, state);
 			const shouldThunk = expressionIsReactive(expr, state)
-				|| (expr.type === 'MemberExpression' && !memberRootIsCallbackParam(expr, state));
+				|| (expr.type === 'MemberExpression' && !memberRootIsCallbackParam(expr, state) && memberRootMayBeReactive(expr, state));
 			if (shouldThunk) {
 				result.push(b.arrow([], transformed));
 			} else {

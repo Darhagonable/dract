@@ -692,15 +692,47 @@ function transformDerivedDeclarations(
 			if (!afterPattern || afterPattern.kind !== 'operator' || afterPattern.text !== '=') continue;
 
 			collectPatternIdentifiers(source.slice(next.start, tokens[closeIdx].end), derivedVars);
-			ms.overwrite(token.start, token.end, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
+			// `derived { … } = fn()` may destructure a signal bag — state-kind
+			// members are writable, so lower as `let` (assignments type-check).
+			ms.overwrite(token.start, token.end, `${initIsCall(tokens, closeIdx + 1) ? 'let' : 'const'} ${DERIVED_MARKER}${derivedCounter++} = 0,`);
 		} else if (next.kind === 'word') {
 			// Simple: derived name = expr — optional `: Type`, then terminator
 			if (!declarationTerminator(tokens, index + 1)) continue;
 
 			derivedVars.push(next.text);
-			ms.overwrite(token.start, token.end, `const ${DERIVED_MARKER}${derivedCounter++} = 0,`);
+			// `derived x = fn()` may bind a signal-returning call raw — those
+			// bindings are writable, so lower as `let` (assignments type-check).
+			const eqIdx = findDeclarationEquals(tokens, index + 1);
+			ms.overwrite(
+				token.start,
+				token.end,
+				`${eqIdx !== -1 && initIsCall(tokens, eqIdx) ? 'let' : 'const'} ${DERIVED_MARKER}${derivedCounter++} = 0,`,
+			);
 		}
 	}
+}
+
+/** Token index of the `=` after a declaration's (optionally typed) binding, or -1 */
+function findDeclarationEquals(tokens: Token[], after: number): number {
+	let i = after;
+	while (i < tokens.length) {
+		const t = tokens[i];
+		if (t.kind === 'operator' && t.text === '=') return i;
+		// `: Type` annotation — skip until the `=` (stop at line-terminating punctuation)
+		if (t.kind === 'punct' && (t.text === ';' || t.text === ',')) return -1;
+		i++;
+	}
+	return -1;
+}
+
+/** Whether the initializer after the `=` at `eqIdx` is a call expression */
+function initIsCall(tokens: Token[], eqIdx: number): boolean {
+	// `= word (` — a call like `useThing()` or `Ctx()`. Member chains
+	// (`a.b()`) also start with a word; widening those to `let` is harmless.
+	const callee = tokens[eqIdx + 1];
+	if (!callee || callee.kind !== 'word') return false;
+	const paren = tokens[eqIdx + 2];
+	return !!paren && paren.kind === 'punct' && paren.text === '(';
 }
 
 // ── Render blocks ──────────────────────────────────────────────────

@@ -8,7 +8,7 @@ export function createLogger(label) {
 }
 
 export function combineSignals(a, b, fn) {
-	const result = $.derived(() => fn($.get(a), $.get(b)));
+	let result = $.derived(() => fn($.get(a), $.get(b)));
 
 	return result;
 }

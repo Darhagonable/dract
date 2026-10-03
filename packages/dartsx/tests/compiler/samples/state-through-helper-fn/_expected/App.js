@@ -8,7 +8,7 @@ export function Dashboard() {
 
 	logWidth($.get(width));
 
-	const area = $.derived(() => combineSignals(width, height, (w, h) => w * h));
+	let area = combineSignals(width, height, (w, h) => w * h);
 
 	return $.jsx("div", {
 		children: [

@@ -1,7 +1,7 @@
 import $ from "dartsx/internal/client";
 
 function Child() {
-	const __destructured_0 = getContext(),
+	let __destructured_0 = getContext(),
 		count = $.derived(() => __destructured_0.data.counter.count),
 		increment = $.derived(() => __destructured_0.data.counter.increment),
 		label = $.derived(() => __destructured_0.data.values[0]),

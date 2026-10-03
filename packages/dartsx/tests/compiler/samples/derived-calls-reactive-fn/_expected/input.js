@@ -8,7 +8,7 @@ function search(query) {
 
 function SearchBox() {
 	let query = $.state("");
-	const results = $.derived(() => search(query));
+	let results = $.derived(() => search(query));
 
 	return $.jsx("ul", {
 		children: [

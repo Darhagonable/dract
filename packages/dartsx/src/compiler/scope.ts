@@ -61,6 +61,35 @@ export class ScopeRoot {
 // ── Binding ────────────────────────────────────────────────────────
 
 /**
+ * Shape of what a signal-returning function hands back:
+ * - `'signal'` — the raw signal itself (`return name` where name is
+ *   state/derived); signalKind records which, since deriveds are read-only.
+ * - `'bag'` — an object literal of reactive shorthands; properties maps each
+ *   key to its binding kind ('state' = propagating setter, 'derived' =
+ *   getter + inert setter, 'plain' = ordinary value).
+ */
+export type SignalReturnKind =
+	| { type: 'signal'; signalKind: 'state' | 'derived' }
+	| { type: 'bag'; properties: Record<string, 'state' | 'derived' | 'plain'> };
+
+/** Per-imported-module reactive info delivered from callees to importers. */
+export interface ReactiveImportInfo {
+	/** Exported state/derived value names (marked reactive on import). */
+	bindings?: string[];
+	/** Exported signal-returning callables: name → return shape. */
+	returns?: Record<string, SignalReturnKind>;
+}
+
+/** Full classification carried on a callable binding. */
+export interface SignalReturnClassification {
+	info: SignalReturnKind;
+	/** The function AST node (for return-position raw pass-through). */
+	fnNode: AstNode;
+	/** Object-literal nodes that are signal bags of this function. */
+	bags: AstNode[];
+}
+
+/**
  * A single variable declaration in a scope.
  *
  * Knows its kind (state, derived, param, etc.) and optionally carries
@@ -88,6 +117,35 @@ export class Binding {
 	mutated = false;
 	/** Whether this binding is called as a function */
 	is_called = false;
+	/**
+	 * True for bindings initialized by a call to a signal-returning function
+	 * (`derived name = useThing()`): the initializer is bound RAW (no
+	 * $.state/$.derived wrapper) — like a reactive import, the call hands
+	 * over the signal itself (or a signal bag).
+	 */
+	signalCall = false;
+	/**
+	 * Signal-return classification for callable bindings (functions and
+	 * context accessors): set when every return of the underlying function
+	 * is a bare reactive binding or a reactive-shorthand object. Attached
+	 * to the BINDING (not a name map) so same-named bindings in sibling
+	 * scopes classify independently.
+	 */
+	signalReturn: SignalReturnClassification | null = null;
+	/**
+	 * True when this callable's signals cross boundaries raw: it is
+	 * exported, or a same-file `derived x = fn()` consumer exists. Gates
+	 * raw-return emission, bag accessors, and the call-site $.get wrap.
+	 * Inactive callables keep value semantics (`return $.get(x)`).
+	 */
+	signalReturnActive = false;
+	/**
+	 * True for derived bindings whose initializer is a classified signal bag
+	 * (`derived ctx = {name, length}`) that the enclosing signal-returning
+	 * function returns: the return position must $.get-unwrap so consumers
+	 * receive the bag object, not the derived signal.
+	 */
+	signalBagHolder = false;
 
 	constructor(scope: Scope, name: string, kind: BindingKind, declaration_kind: DeclarationKind = 'let') {
 		this.scope = scope;
@@ -287,12 +345,18 @@ export function create_scopes(
 				collectBindingNames(decl.id, moduleScope, varDeclKind(stmt.kind));
 			}
 		}
+		if (stmt.type === 'FunctionDeclaration') {
+			if (stmt.id?.name) moduleScope.declare(stmt.id.name, 'normal', 'function');
+		}
 		if (stmt.type === 'ExportNamedDeclaration') {
 			const declaration = stmt.declaration;
 			if (declaration?.type === 'VariableDeclaration') {
 				for (const decl of declaration.declarations) {
 					collectBindingNames(decl.id, moduleScope, varDeclKind(declaration.kind));
 				}
+			}
+			if (declaration?.type === 'FunctionDeclaration' && declaration.id?.name) {
+				moduleScope.declare(declaration.id.name, 'normal', 'function');
 			}
 		}
 	}

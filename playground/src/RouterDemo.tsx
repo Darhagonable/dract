@@ -22,7 +22,7 @@ component Home() {
 }
 
 component About() {
-	const route = RouterContext();
+	derived route = RouterContext();
 
 	render (
 		<h2>About</h2>
@@ -43,7 +43,7 @@ component UserProfile(id: string) {
 
 // Params via context — component reads them itself
 component UserSettings() {
-	const route = RouterContext('/users/:id/settings');
+	derived route = RouterContext('/users/:id/settings');
 
 	render (
 		<h2>Settings for user: {route.params.id} (via context)</h2>
