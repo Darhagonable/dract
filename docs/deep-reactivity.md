@@ -317,6 +317,18 @@ test(plain, signal)   // → position 1 is reactive
 
 The compiler takes the **union** of all reactive positions. Both parameters are treated as reactive — reads become `$.get()`, writes become `$.set()`. This is safe because `$.get(nonSignal)` and `$.set(nonSignal, val)` are no-ops.
 
+### Signal returns
+
+State also flows _out_ of functions. A function whose every return is a `state`/`derived` variable — or an object of reactive shorthands — is classified as **signal-returning**. When raw consumption is reachable (the function is exported, or a same-file `derived x = fn()` consumer exists), the compiler:
+
+- Returns the signal itself instead of a `$.get()`-evaluated value: `return count` stays `return count`.
+- Converts a returned reactive-shorthand object into accessor pairs: `{ get name() {...}, set name(v) { $.set(...) } }` — `state`-kind properties get propagating setters, `derived`-kind properties get inert ones (writes are accepted and ignored).
+- At the consumer, `derived x = fn()` binds the raw signal (writable for `state`-kind, and destructured `state`-kind bag properties become two-way `$.prop.bind` bindings). Any other position — `const x = fn()`, `render fn()` — is wrapped as `$.get(fn())`, a value snapshot.
+
+Unreachable functions — module-local helpers with no `derived` consumer — keep value semantics and compile exactly as they would without this feature.
+
+Cross-file, exported return shapes ride the same registry pattern as parameters: the callee's `reactiveReturns` metadata flows to importers as part of `reactiveImports`, and `derived` bindings there receive the signal — a single invalidation round-trip.
+
 ## The user-facing effect
 
 The `effect()` function accepts signals, derived signals, or proxies as dependencies:

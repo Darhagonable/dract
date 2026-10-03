@@ -80,7 +80,7 @@ const { user } = UserContext();
 
 ## Reactive context
 
-Because the factory can use `state` and `derived`, context values are reactive. Consumers automatically see updates:
+Because the factory can use `state` and `derived`, context values are reactive. Consumers automatically see updates — the returned object of reactive shorthands becomes a bag of accessor pairs, so reads through the context are live:
 
 ```tsx
 const CounterContext = createContext(() => {
@@ -89,6 +89,11 @@ const CounterContext = createContext(() => {
 
   return { count, doubled, increment: () => count++ };
 });
+
+component Counter() {
+  derived { count, increment } = CounterContext();
+  render <button onclick={increment}>{count}</button>;
+}
 ```
 
-Any component that reads `count` or `doubled` from the context will update when those values change.
+Use `derived` when consuming for two-way access — destructured `state`-kind properties are live, and writes through the whole bag (`ctx.count = 5`) propagate to every consumer. A plain `const` of the bag is a snapshot. See [Returning state from functions](/docs/reactivity) for the full semantics.

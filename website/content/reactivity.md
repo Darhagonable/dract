@@ -124,6 +124,53 @@ derived d = double(count); // d updates when count changes
 
 This works across module boundaries too — the Vite plugin coordinates recompilation of imported functions when they receive reactive arguments.
 
+## Returning state from functions
+
+State also flows out of functions. One returning a `state` or `derived` variable hands the signal to a consumer that opts in with `derived`:
+
+```tsx
+function useCounter() {
+  state count = 0;
+  return count;
+}
+
+component Counter() {
+  derived count = useCounter();
+  render <button onclick={() => count++}>clicks: {count}</button>;
+}
+```
+
+- `derived x = useCounter()` — live signal, writable when the returned binding is a `state`.
+- `const x = useCounter()` — value snapshot (any non-`derived` position compiles to `$.get(useCounter())`).
+
+An object of reactive shorthands returns a bag of signals:
+
+```tsx
+function useProfile() {
+  state name = "Alice";
+  derived length = name.length;
+  return { name, length };
+}
+
+component Profile() {
+  derived { name, length } = useProfile();
+  render (
+    <input bind:value={name} />
+    <span>{name} ({length})</span>
+  );
+}
+```
+
+| Destructured | Behavior |
+|---|---|
+| `state`-kind (`name`) | two-way — binds through the bag's setter |
+| `derived`-kind (`length`) | read-only — assignment is a compile error |
+
+Whole-bag `derived profile = useProfile()`: member reads are reactive, writes to `state`-kind members propagate, writes to `derived`-kind members are legal-but-inert. `const` of a bag is a snapshot — alias with `derived` to stay live.
+
+> [!NOTE]
+> Functions hand signals out only when raw consumption is reachable: the function is exported, or a same-file `derived` binding consumes it. Ordinary local helpers keep value semantics. Cross-module, the Vite plugin tracks exported return shapes the same way it tracks reactive parameters.
+
 ## Cross-module state
 
 Export state from any module. The compiler and Vite plugin track reactive exports automatically:

@@ -31,7 +31,8 @@ The AST is walked to build an intermediate representation:
 
 - **Reactive vars** — all `state`, `derived`, and bindable prop names are collected
 - **Call-site analysis** — function calls like `fn(reactiveVar)` are detected. The parameter position is recorded as reactive
-- **Cross-file tracking** — reactive imports and exports are recorded for the Vite plugin
+- **Return-shape analysis** — functions whose returns are `state`/`derived` variables (or reactive-shorthand objects) are classified as signal-returning, so `derived x = fn()` consumers can bind the returned signal
+- **Cross-file tracking** — reactive imports, exports, and return shapes are recorded for the Vite plugin
 
 ### Phase 4 — Transform
 
@@ -97,5 +98,7 @@ The Vite plugin coordinates reactivity across files:
 2. Plugin stores the contribution and aggregates all callers
 3. If the registry changed, the target module is invalidated and recompiled
 4. Target recompiles with the reactive parameter info → wraps reads/writes in signal accessors
+
+Exported functions returning state follow the same pattern in the other direction: the callee's return shape is registered, and importers recompile so `derived x = fn()` binds the live signal (other call positions snapshot with `$.get()`).
 
 This is fully automatic — no annotations needed.

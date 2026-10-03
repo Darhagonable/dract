@@ -254,6 +254,80 @@ The compiler sees that `double(count)` and `reset(count)` pass a signal at posit
 
 > [!NOTE] This analysis is positional. If a function is called from multiple sites, the union of all reactive positions is used. For example, if `test(signal, plain)` is called in one place and `test(plain, signal)` in another, both parameters are treated as reactive.
 
+## Returning state from functions
+
+State also flows _out_ of functions. A function that returns a `state` or `derived` variable hands the signal itself to a consumer that opts in with `derived`:
+
+```tsx
+function useCounter() {
+  state count = 0;
+  return count;
+}
+
+export component Counter() {
+  derived count = useCounter();
+
+  render (
+    <button onclick={() => count++}>
+      clicks: {count}
+    </button>
+  );
+}
+```
+
+The consumer picks the semantics at the call site:
+
+- `derived count = useCounter()` — binds the signal itself. `count` is live, and because the returned binding is a `state`, it is writable too (`count++` above).
+- `const count = useCounter()` — any position other than `derived` snapshots the value at call time. Reads compile to `$.get(useCounter())`, so the binding holds a plain number.
+
+The same works for an object of reactive shorthands — a "bag" of signals:
+
+```tsx
+function useProfile() {
+  state name = "Alice";
+  derived length = name.length;
+  return { name, length };
+}
+
+export component Profile() {
+  derived { name, length } = useProfile();
+
+  render (
+    <input bind:value={name} />
+    <span>{name} ({length})</span>
+  );
+}
+```
+
+- Destructured `state`-kind properties (`name`) are two-way — `bind:value={name}` writes back through the bag's setter.
+- Destructured `derived`-kind properties (`length`) are read-only — assigning to them is a compile error.
+- Without destructuring, `derived profile = useProfile()` gives you the whole bag: reads like `profile.name` are reactive, `profile.name = "Bob"` propagates, and writes to `profile.length` are legal-but-inert (the setter accepts them and does nothing — the getter always recomputes).
+- A plain `const` of the bag is a snapshot: `const c2 = profile` never updates. Use `derived c3 = profile` for a reactive alias.
+
+> [!NOTE] Functions only hand signals out when raw consumption is _reachable_: the function is exported, or something in the same file binds its result with `derived`. An ordinary module-local helper that happens to return a state variable keeps value semantics — it compiles exactly as it would without this feature.
+
+Cross-module, the same registry that tracks reactive parameters tracks return shapes: the Vite plugin records what an exported function returns and recompiles importers so their `derived` bindings receive the signal — no round-trip through call-site reports, just the exported shape.
+
+```tsx
+// @filename: store.ts
+export function useCounter() {
+  state count = 0;
+  return count;
+}
+```
+
+```tsx
+// @filename: App.tsx
+import { useCounter } from './store';
+
+export default component App() {
+  derived count = useCounter();
+  render <button onclick={() => count++}>{count}</button>;
+}
+```
+
+This is also the mechanism behind reactive [contexts](context.md) — a context factory returning `state` or a bag of shorthands makes every `derived` consumer live.
+
 ## derived
 
 Derived state is declared with the `derived` keyword:
@@ -294,7 +368,7 @@ derived selected = items[index];
 
 ## Destructuring
 
-If you use destructuring with a `derived` keyword, the resulting variables will all be reactive — this...
+If you use destructuring with a `derived` keyword, the resulting variables will all be reactive — this...
 
 ```js
 function stuff() { return { a: 1, b: 2, c: 3 } }
@@ -312,6 +386,8 @@ derived a = _stuff.a;
 derived b = _stuff.b;
 derived c = _stuff.c;
 ```
+
+When the function returns a [signal bag](#returning-state-from-functions), destructuring goes further: `state`-kind properties become two-way bindings rather than read-only deriveds.
 
 ## effect
 

@@ -13,7 +13,7 @@ const ThemeContext = createContext(() => {
 })
 ```
 
-The factory function runs once when the context is first provided. It can use `state`, `derived`, and any other reactive primitives — the returned value is what consumers receive.
+The factory function runs once when the context is first provided. It can use `state`, `derived`, and any other reactive primitives — the returned value is what consumers receive. When the factory returns a `state` variable directly, as above, consumers that call the context with `derived` receive the live signal itself (see [Returning state from functions](reactivity.md#returning-state-from-functions)).
 
 When the factory takes no arguments, the type is `Context<T>` where `T` is the return type:
 
@@ -162,7 +162,7 @@ component Outside() {
 
 ## Reactive Context
 
-Since the factory can use `state` and `derived`, context values are reactive:
+Since the factory can use `state` and `derived`, context values are reactive. The mechanism is [signal returns](reactivity.md#returning-state-from-functions): the returned object of reactive shorthands becomes a bag of accessor pairs, so every consumer reading through the context sees updates:
 
 ```tsx
 const CounterContext = createContext(() => {
@@ -177,10 +177,12 @@ component Parent() {
 }
 
 component Child() {
-  const { count, increment } = CounterContext()
+  derived { count, increment } = CounterContext()
 
   render (
     <button onclick={increment}>Count: {count}</button>
   )
 }
 ```
+
+Bind `derived` at the consumer for two-way access — a plain `const` of the bag is a snapshot. Destructured `state`-kind properties (`count`) are live; writes through the whole bag (`ctx.count = 5`) also propagate to every consumer.

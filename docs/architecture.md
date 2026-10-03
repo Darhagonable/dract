@@ -54,6 +54,8 @@ A key design goal is that **the signal (proxy object) is always passed** — nev
 
 3. **Cross-file exports**: When a module exports `state` or `derived` variables, the project tracks them. When another module imports those variables, the compiler knows to treat them as signals and wraps reads/writes in `$.get()`/`$.set()`.
 
+4. **Signal returns**: When an exported function (or a context factory) returns a `state`/`derived` variable — or an object of reactive shorthands — the project records its return shape. Importers are recompiled so `derived x = fn()` binds the returned signal raw (non-`derived` positions snapshot with `$.get()` at the call site). Emission is gated on reachability: the callable is exported, or a same-file `derived` consumer exists — ordinary local helpers keep value semantics.
+
 This means:
 - **No special syntax needed** — just use `state`, `derived`, and normal function calls
 - The compiler and the `Project` layer cooperate to propagate reactivity across module boundaries
